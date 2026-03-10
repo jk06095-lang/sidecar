@@ -189,17 +189,17 @@ export default function Home({
               <div className="flex items-center justify-between px-5 pt-4 pb-2">
                 <div className="flex items-center gap-2">
                   <Activity size={14} className="text-cyan-400" />
-                  <h3 className="text-sm font-semibold text-slate-200">Market Vulnerability Index — 운임 변동성 시계열</h3>
+                  <h3 className="text-sm font-semibold text-slate-200">Business Environment Volatility Index — 경영환경 변동성 지수</h3>
                 </div>
                 <div className="flex items-center gap-3 text-[10px]">
                   <span className="flex items-center gap-1 text-cyan-400">
-                    <div className="w-2.5 h-0.5 bg-cyan-400 rounded" /> Base WS
+                    <div className="w-2.5 h-0.5 bg-cyan-400 rounded" /> Base Index
                   </span>
                   <span className="flex items-center gap-1 text-rose-400">
                     <div className="w-2.5 h-2.5 bg-rose-500/20 border border-rose-500/50 rounded-sm" /> Spread 범위
                   </span>
                   <span className="flex items-center gap-1 text-amber-400">
-                    <div className="w-2.5 h-0.5 bg-amber-400 rounded" /> 뉴스 불안
+                    <div className="w-2.5 h-0.5 bg-amber-400 rounded" /> 복합 리스크
                   </span>
                 </div>
               </div>
@@ -438,6 +438,55 @@ export default function Home({
                 )}
               </div>
             </div>
+
+            {/* User Custom Widgets from Data Analysis */}
+            {(() => {
+              try {
+                const customWidgets = JSON.parse(localStorage.getItem('sidecar_custom_widgets') || '[]');
+                if (customWidgets.length === 0) return null;
+                return (
+                  <div className="mt-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Sparkles size={14} className="text-amber-400" />
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">사용자 정의 위젯 ({customWidgets.length})</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {customWidgets.map((w: any) => (
+                        <div key={w.id} className="bg-slate-900/50 border border-amber-900/30 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-semibold text-slate-200">{w.title}</span>
+                            <button
+                              onClick={() => {
+                                const updated = customWidgets.filter((cw: any) => cw.id !== w.id);
+                                localStorage.setItem('sidecar_custom_widgets', JSON.stringify(updated));
+                                window.dispatchEvent(new Event('storage'));
+                              }}
+                              className="p-1 text-slate-600 hover:text-rose-400 transition-colors"
+                            ><X size={12} /></button>
+                          </div>
+                          <div className="text-2xl font-black text-amber-400">
+                            {w.type === 'kpi' ? (
+                              w.dataSource === 'compositeVolatility'
+                                ? `${(simulationParams.newsSentimentScore * 0.2 + ((simulationParams.supplyChainStress as number) || 10) * 0.15 + ((simulationParams.energyCrisisLevel as number) || 10) * 0.15).toFixed(1)}`
+                                : w.dataSource === 'avgSpread' && dynamicChartData.length > 0
+                                  ? `${(dynamicChartData.reduce((s, d) => s + d.Spread, 0) / dynamicChartData.length).toFixed(1)} WS`
+                                  : `${dynamicFleetData.length} 척`
+                            ) : w.type === 'line' ? (
+                              <span className="text-sm text-slate-400">시계열: {w.dataSource}</span>
+                            ) : w.type === 'bar' ? (
+                              <span className="text-sm text-slate-400">분포: {w.dataSource}</span>
+                            ) : (
+                              <span className="text-sm text-slate-400">Table: {w.dataSource}</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-600 mt-1">데이터 분석에서 생성됨</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              } catch { return null; }
+            })()}
 
             {/* Loading bar for briefing generation */}
             {isGenerating && (

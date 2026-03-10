@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
     Activity, Save, Sparkles, Fuel, AlertTriangle,
-    Shield, TrendingUp, Box, Database, Network, Copy, Trash2, Edit2, Check, X
+    Shield, TrendingUp, Box, Database, Network, Copy, Trash2, Edit2, Check, X,
+    Flame, CloudLightning, Wifi, Globe2, Package, Zap
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario, SimulationParams, AppSettings } from '../types';
@@ -306,6 +307,77 @@ export default function ScenarioBuilder({
                                 onChange={(e) => handleSliderChange('interestRate', Number(e.target.value))}
                                 className="w-full accent-blue-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer"
                             />
+                        </div>
+
+                        {/* Tail-Risk Enterprise Factors */}
+                        <div className="xl:col-span-2 border-t border-dashed border-slate-700/50 pt-6 mt-2">
+                            <h4 className="text-xs font-bold text-rose-400 uppercase tracking-widest mb-4 flex items-center gap-2"><AlertTriangle size={12} /> 테일리스크 경영환경 변수 (Tail-Risk Factors)</h4>
+                        </div>
+
+                        <div className="bg-rose-950/15 border border-rose-900/30 rounded-2xl p-6 hover:border-rose-500/50 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-slate-200 font-semibold flex items-center gap-2"><Package size={16} className="text-rose-400" /> 공급망 스트레스</h3>
+                                    <p className="text-xs text-slate-500 mt-1">항만 체선, 물류 지연, 원자재 부족</p>
+                                </div>
+                                <div className="text-2xl font-mono font-bold text-rose-400">{simulationParams.supplyChainStress ?? 10}</div>
+                            </div>
+                            <input type="range" min={0} max={100} step={1} value={simulationParams.supplyChainStress ?? 10} onChange={(e) => handleSliderChange('supplyChainStress', Number(e.target.value))} className="w-full accent-rose-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                        </div>
+
+                        <div className="bg-violet-950/15 border border-violet-900/30 rounded-2xl p-6 hover:border-violet-500/50 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-slate-200 font-semibold flex items-center gap-2"><Wifi size={16} className="text-violet-400" /> 사이버 위협 수준</h3>
+                                    <p className="text-xs text-slate-500 mt-1">GPS/AIS/항만 IT 인프라 마비 위험도</p>
+                                </div>
+                                <div className="text-2xl font-mono font-bold text-violet-400">{simulationParams.cyberThreatLevel ?? 5}</div>
+                            </div>
+                            <input type="range" min={0} max={100} step={1} value={simulationParams.cyberThreatLevel ?? 5} onChange={(e) => handleSliderChange('cyberThreatLevel', Number(e.target.value))} className="w-full accent-violet-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                        </div>
+
+                        <div className="bg-orange-950/15 border border-orange-900/30 rounded-2xl p-6 hover:border-orange-500/50 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-slate-200 font-semibold flex items-center gap-2"><CloudLightning size={16} className="text-orange-400" /> 천재지변 지수</h3>
+                                    <p className="text-xs text-slate-500 mt-1">태풍/지진/쓰나미/홍수 물리적 위험</p>
+                                </div>
+                                <div className="text-2xl font-mono font-bold text-orange-400">{simulationParams.naturalDisasterIndex ?? 0}</div>
+                            </div>
+                            <input type="range" min={0} max={100} step={1} value={simulationParams.naturalDisasterIndex ?? 0} onChange={(e) => handleSliderChange('naturalDisasterIndex', Number(e.target.value))} className="w-full accent-orange-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                        </div>
+
+                        <div className="bg-pink-950/15 border border-pink-900/30 rounded-2xl p-6 hover:border-pink-500/50 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-slate-200 font-semibold flex items-center gap-2"><Zap size={16} className="text-pink-400" /> 팬데믹 리스크</h3>
+                                    <p className="text-xs text-slate-500 mt-1">바이러스 변이/봉쇄/선원교대 불가</p>
+                                </div>
+                                <div className="text-2xl font-mono font-bold text-pink-400">{simulationParams.pandemicRisk ?? 0}</div>
+                            </div>
+                            <input type="range" min={0} max={100} step={1} value={simulationParams.pandemicRisk ?? 0} onChange={(e) => handleSliderChange('pandemicRisk', Number(e.target.value))} className="w-full accent-pink-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                        </div>
+
+                        <div className="bg-sky-950/15 border border-sky-900/30 rounded-2xl p-6 hover:border-sky-500/50 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-slate-200 font-semibold flex items-center gap-2"><Globe2 size={16} className="text-sky-400" /> 무역전쟁 강도</h3>
+                                    <p className="text-xs text-slate-500 mt-1">관세/제재/수출입 규제 수준</p>
+                                </div>
+                                <div className="text-2xl font-mono font-bold text-sky-400">{simulationParams.tradeWarIntensity ?? 5}</div>
+                            </div>
+                            <input type="range" min={0} max={100} step={1} value={simulationParams.tradeWarIntensity ?? 5} onChange={(e) => handleSliderChange('tradeWarIntensity', Number(e.target.value))} className="w-full accent-sky-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                        </div>
+
+                        <div className="bg-red-950/15 border border-red-900/30 rounded-2xl p-6 hover:border-red-500/50 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-slate-200 font-semibold flex items-center gap-2"><Flame size={16} className="text-red-400" /> 에너지 위기 수준</h3>
+                                    <p className="text-xs text-slate-500 mt-1">OPEC 감산, 원유 가격 급등, 에너지 안보</p>
+                                </div>
+                                <div className="text-2xl font-mono font-bold text-red-400">{simulationParams.energyCrisisLevel ?? 10}</div>
+                            </div>
+                            <input type="range" min={0} max={100} step={1} value={simulationParams.energyCrisisLevel ?? 10} onChange={(e) => handleSliderChange('energyCrisisLevel', Number(e.target.value))} className="w-full accent-red-500 h-2 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                         </div>
 
                         {/* Custom Ontology Factors */}

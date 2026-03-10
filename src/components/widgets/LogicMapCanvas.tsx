@@ -200,7 +200,7 @@ export default function LogicMapCanvas({ activeScenario }: LogicMapCanvasProps) 
                 }}
             >
                 {/* Connection Lines (SVG) */}
-                <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
                     <defs>
                         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                             <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
@@ -213,17 +213,20 @@ export default function LogicMapCanvas({ activeScenario }: LogicMapCanvasProps) 
                         const t = nodes.find(n => n.id === edge.target);
                         if (!s || !t) return null;
 
-                        // Center points roughly
-                        const sx = s.x + 80; const sy = s.y + 25;
-                        const tx = t.x + 80; const ty = t.y + 25;
+                        // Center points roughly (assuming 160px width, 40px height per node)
+                        const sx = s.x + 160; const sy = s.y + 20;
+                        const tx = t.x; const ty = t.y + 20;
 
-                        // Simple curved line
+                        // Curved line with flowing dash animation
                         return (
                             <path
                                 key={edge.id}
                                 d={`M ${sx} ${sy} C ${sx + 50} ${sy}, ${tx - 50} ${ty}, ${tx} ${ty}`}
-                                stroke="#475569" strokeWidth="2" fill="none"
+                                stroke="#0ea5e9" strokeWidth="2" fill="none"
                                 markerEnd="url(#arrowhead)"
+                                className="opacity-60"
+                                strokeDasharray="5"
+                                style={{ strokeDashoffset: 0, animation: 'dash 20s linear infinite' }}
                             />
                         );
                     })}
@@ -231,11 +234,18 @@ export default function LogicMapCanvas({ activeScenario }: LogicMapCanvasProps) 
                     {/* Render active connecting line */}
                     {mode === 'connect' && connectingSourceNode && (
                         <path
-                            d={`M ${connectingSourceNode.x + 80} ${connectingSourceNode.y + 25} C ${connectingSourceNode.x + 130} ${connectingSourceNode.y + 25}, ${mousePos.x - 50} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`}
-                            stroke="#06b6d4" strokeWidth="2" strokeDasharray="4 4" fill="none"
+                            d={`M ${connectingSourceNode.x + 160} ${connectingSourceNode.y + 20} C ${connectingSourceNode.x + 210} ${connectingSourceNode.y + 20}, ${mousePos.x - 50} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`}
+                            stroke="#0ea5e9" strokeWidth="2" strokeDasharray="4 4" fill="none"
                         />
                     )}
                 </svg>
+                {/* Add a global style for the dash animation directly in the component for simplicity */}
+                <style dangerouslySetInnerHTML={{
+                    __html: `
+                    @keyframes dash {
+                        to { stroke-dashoffset: -1000; }
+                    }
+                `}} />
 
                 {/* Nodes (HTML) */}
                 {nodes.map(node => (

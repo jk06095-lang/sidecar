@@ -89,6 +89,10 @@ export default function Sidebar({
           <Database size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && <span>온톨로지</span>}
         </div>
+        <div title="데이터 분석" className={cn(navItemClass, activeTab === 'data-analysis' && activeClass)} onClick={() => setActiveTab('data-analysis')}>
+          <TrendingUp size={isMinimized ? 20 : 16} className="shrink-0" />
+          {!isMinimized && <span>데이터 분석</span>}
+        </div>
         <div title="외부 API" className={cn(navItemClass, activeTab === 'api-manager' && activeClass)} onClick={() => setActiveTab('api-manager')}>
           <Server size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && <span>외부 API</span>}

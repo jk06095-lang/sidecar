@@ -49,8 +49,36 @@ export interface SimulationParams {
   newsSentimentScore: number;
   awrpRate: number;
   interestRate: number;
-  [key: string]: number;
+  supplyChainStress?: number;
+  cyberThreatLevel?: number;
+  naturalDisasterIndex?: number;
+  pandemicRisk?: number;
+  tradeWarIntensity?: number;
+  energyCrisisLevel?: number;
+  [key: string]: number | undefined;
 }
+
+export interface ObjectProperty {
+  id: string; // API Name (camelCase)
+  displayName: string;
+  baseType: 'string' | 'number' | 'boolean' | 'date';
+  isPrimaryKey: boolean;
+  isTitleKey: boolean;
+  mappedColumn?: string;
+}
+
+export interface ObjectTypeDefinition {
+  id: string; // API Name (PascalCase)
+  displayName: string;
+  pluralDisplayName: string;
+  description: string;
+  icon: string;
+  color: string;
+  groups: string[];
+  backingDatasource: string;
+  properties: ObjectProperty[];
+}
+
 
 export interface Scenario {
   id: string;
@@ -58,6 +86,7 @@ export interface Scenario {
   description: string;
   params: SimulationParams;
   isCustom?: boolean;
+  isRealtime?: boolean;
 }
 
 export interface VulnerabilityDataPoint {

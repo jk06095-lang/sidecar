@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Plus, Search, Trash2, Edit2, Save, X, FileText, CheckCircle2, RotateCcw, Box } from 'lucide-react';
+import { Database, Plus, Search, Trash2, Edit2, Save, X, FileText, CheckCircle2, RotateCcw, Box, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import OntologyGraph from './widgets/OntologyGraph';
+import ObjectTypeWizard from './widgets/ObjectTypeWizard';
+import type { ObjectTypeDefinition } from '../types';
 
 interface OntologyItem {
     id: string;
@@ -10,7 +12,7 @@ interface OntologyItem {
     content: string;
     lastUpdated: string;
     isActive: boolean;
-    type?: 'document' | 'factor';
+    type?: 'document' | 'factor' | 'object_instance';
     subCategory?: string; // e.g. '자산', '인사', '재고'
     defaultValue?: number; // Starting value for the scenario slider
     vesselData?: {
@@ -18,10 +20,79 @@ interface OntologyItem {
         location: string;
         riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
     };
+    objectTypeId?: string; // ID linking to the original ObjectTypeDefinition
+    properties?: Record<string, any>; // Store instance values
 }
 
 export default function Ontology() {
+    // Pre-seeded Object Type Definitions
+    const DEFAULT_OBJECT_TYPES: ObjectTypeDefinition[] = [
+        {
+            id: 'FleetVessel',
+            displayName: 'Vessel (선박)',
+            pluralDisplayName: 'Vessels (선박들)',
+            description: '운영 선대에 속하는 개별 선박 자산을 나타내는 객체 타입입니다.',
+            icon: 'Ship',
+            color: '#06b6d4',
+            groups: ['운영 자산'],
+            backingDatasource: 'ds_fleet_raw',
+            properties: [
+                { id: 'vesselId', displayName: 'Vessel ID', baseType: 'string', isPrimaryKey: true, isTitleKey: false, mappedColumn: 'vessel_id' },
+                { id: 'name', displayName: 'Name (선명)', baseType: 'string', isPrimaryKey: false, isTitleKey: true, mappedColumn: 'name' },
+                { id: 'type', displayName: 'Type (선종)', baseType: 'string', isPrimaryKey: false, isTitleKey: false, mappedColumn: 'type' },
+                { id: 'location', displayName: 'Location (위치)', baseType: 'string', isPrimaryKey: false, isTitleKey: false, mappedColumn: 'location' },
+                { id: 'riskScore', displayName: 'Risk Score', baseType: 'number', isPrimaryKey: false, isTitleKey: false, mappedColumn: 'risk_score' },
+            ]
+        }
+    ];
+
     const defaultOntology: OntologyItem[] = [
+        // Pre-seeded Object Instances for Fleet Status
+        {
+            id: 'obj_oceanic_titan',
+            category: '운영 자산',
+            title: 'Oceanic Titan',
+            content: 'VLCC급 원유 운반선. 현재 페르시아만 호르무즈 해협 통과 중.',
+            lastUpdated: new Date().toLocaleDateString('ko-KR'),
+            isActive: true,
+            type: 'object_instance',
+            objectTypeId: 'FleetVessel',
+            properties: { vesselId: 'V-001', name: 'Oceanic Titan', type: 'VLCC', location: 'Hormuz Strait (Persian Gulf)', riskScore: 55 }
+        },
+        {
+            id: 'obj_pacific_pioneer',
+            category: '운영 자산',
+            title: 'Pacific Pioneer',
+            content: 'Suezmax급 유조선. 서아프리카 라고스 정박 후 출항.',
+            lastUpdated: new Date().toLocaleDateString('ko-KR'),
+            isActive: true,
+            type: 'object_instance',
+            objectTypeId: 'FleetVessel',
+            properties: { vesselId: 'V-002', name: 'Pacific Pioneer', type: 'Suezmax', location: 'West Africa (Lagos Anchorage)', riskScore: 20 }
+        },
+        {
+            id: 'obj_gulf_voyager',
+            category: '운영 자산',
+            title: 'Gulf Voyager',
+            content: 'Aframax급 유조선. 중동 푸자이라 인근에서 급유 대기.',
+            lastUpdated: new Date().toLocaleDateString('ko-KR'),
+            isActive: true,
+            type: 'object_instance',
+            objectTypeId: 'FleetVessel',
+            properties: { vesselId: 'V-003', name: 'Gulf Voyager', type: 'Aframax', location: 'Middle East (Fujairah)', riskScore: 50 }
+        },
+        {
+            id: 'obj_nordic_carrier',
+            category: '운영 자산',
+            title: 'Nordic Carrier',
+            content: 'VLCC급. 북유럽 로테르담 인근 항해 중. 안정구역.',
+            lastUpdated: new Date().toLocaleDateString('ko-KR'),
+            isActive: true,
+            type: 'object_instance',
+            objectTypeId: 'FleetVessel',
+            properties: { vesselId: 'V-004', name: 'Nordic Carrier', type: 'VLCC', location: 'North Sea (Rotterdam)', riskScore: 10 }
+        },
+        // Legacy factor/document items
         {
             id: '1',
             category: '비상 대응 지침',
@@ -75,11 +146,27 @@ export default function Ontology() {
     const [searchTerm, setSearchTerm] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
     const [showAddForm, setShowAddForm] = useState(false);
+    const [showObjectWizard, setShowObjectWizard] = useState(false);
+    const [objectTypes, setObjectTypes] = useState<ObjectTypeDefinition[]>(() => {
+        try {
+            const saved = localStorage.getItem('sidecar_object_types');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.length > 0) return parsed;
+            }
+        } catch { return DEFAULT_OBJECT_TYPES; }
+        return DEFAULT_OBJECT_TYPES;
+    });
+
+    useEffect(() => {
+        localStorage.setItem('sidecar_object_types', JSON.stringify(objectTypes));
+    }, [objectTypes]);
+
     const [formData, setFormData] = useState<{
         category: string;
         title: string;
         content: string;
-        type: 'document' | 'factor';
+        type: 'document' | 'factor' | 'object_instance';
         subCategory?: string;
         defaultValue?: number;
         vesselData?: {
@@ -87,13 +174,16 @@ export default function Ontology() {
             location: string;
             riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
         };
+        objectTypeId?: string;
+        properties?: Record<string, any>;
     }>({
         category: '내부 지침',
         title: '',
         content: '',
         type: 'document',
         subCategory: '일반',
-        defaultValue: 50
+        defaultValue: 50,
+        properties: {}
     });
 
     const handleResetDefaults = () => {
@@ -187,13 +277,30 @@ export default function Ontology() {
                         </button>
                         <button
                             onClick={() => { setFormData({ category: '운영 요소', title: '', content: '', type: 'factor', subCategory: '자산 (Asset)', defaultValue: 50 }); setShowAddForm(true); }}
-                            className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-cyan-900/20"
+                            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-lg"
                         >
-                            <Box size={16} /> 팩터(변수) 등록
+                            <Box size={16} /> 기존 팩터 등록
+                        </button>
+                        <div className="w-px h-6 bg-slate-700 mx-1" />
+                        <button
+                            onClick={() => setShowObjectWizard(true)}
+                            className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-lg shadow-cyan-900/20"
+                        >
+                            <Sparkles size={16} /> Create Object Type
                         </button>
                     </div>
                 )}
             </div>
+
+            {showObjectWizard && (
+                <ObjectTypeWizard
+                    onClose={() => setShowObjectWizard(false)}
+                    onSave={(obj) => {
+                        setObjectTypes([obj, ...objectTypes]);
+                        setShowObjectWizard(false);
+                    }}
+                />
+            )}
 
             <div className="flex gap-6 flex-1 overflow-hidden">
                 {/* Left: Main List Area */}
@@ -213,6 +320,50 @@ export default function Ontology() {
 
                     {/* List */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+                        {objectTypes.map(ot => (
+                            <div key={ot.id} className="p-4 rounded-xl border bg-cyan-950/20 border-cyan-800/50 hover:border-cyan-500/50 transition-all cursor-pointer">
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-5 h-5 flex items-center justify-center rounded bg-cyan-500/20 text-cyan-400">
+                                            <Sparkles size={12} />
+                                        </div>
+                                        <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-cyan-900/50 text-cyan-400 border border-cyan-800 uppercase tracking-wider">
+                                            Object Type
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const defaultProps: Record<string, any> = {};
+                                                ot.properties.forEach(p => defaultProps[p.id] = p.baseType === 'number' ? 0 : '');
+
+                                                setFormData({
+                                                    category: ot.groups[0] || 'Object Instance',
+                                                    title: `New ${ot.displayName}`,
+                                                    content: `Instance of ${ot.displayName}`,
+                                                    type: 'object_instance',
+                                                    objectTypeId: ot.id,
+                                                    properties: defaultProps
+                                                });
+                                                setShowAddForm(true);
+                                            }}
+                                            className="px-2 py-1 bg-cyan-900/50 hover:bg-cyan-800 text-cyan-400 text-[10px] font-bold rounded flex items-center gap-1 transition-colors"
+                                        >
+                                            <Plus size={10} /> Add Instance
+                                        </button>
+                                        <button onClick={(e) => { e.stopPropagation(); setObjectTypes(objectTypes.filter(o => o.id !== ot.id)); }} className="p-1.5 text-slate-500 hover:text-rose-400 rounded-md transition-colors"><Trash2 size={14} /></button>
+                                    </div>
+                                </div>
+                                <h3 className="font-bold text-slate-200 text-sm leading-tight mb-1">{ot.displayName} <span className="text-slate-500 font-mono text-xs font-normal">({ot.id})</span></h3>
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                    Datasource: {ot.backingDatasource} • Properties: {ot.properties.length}
+                                </p>
+                            </div>
+                        ))}
+
+                        <div className="my-2 border-t border-slate-800/80" />
+
                         {filteredItems.map(item => (
                             <div key={item.id} className={cn("p-4 rounded-xl border transition-all", item.isActive ? "bg-slate-800/40 border-slate-700/50 hover:border-cyan-500/30" : "bg-slate-900/40 border-slate-800/50 opacity-60")}>
                                 <div className="flex items-start justify-between mb-2">
@@ -220,8 +371,8 @@ export default function Ontology() {
                                         <button onClick={() => toggleActive(item.id)} className="focus:outline-none shrink-0" title={item.isActive ? "비활성화" : "활성화"}>
                                             {item.isActive ? <CheckCircle2 size={18} className={item.type === 'factor' ? 'text-amber-400' : 'text-cyan-400'} /> : <div className="w-[18px] h-[18px] rounded-full border border-slate-600" />}
                                         </button>
-                                        <span className={cn("text-[10px] px-2 py-0.5 rounded font-medium shrink-0", item.type === 'factor' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : 'bg-slate-700 text-slate-300')}>
-                                            {item.type === 'factor' && item.subCategory ? `[${item.subCategory}] ` : ''}{item.category}
+                                        <span className={cn("text-[10px] px-2 py-0.5 rounded font-medium shrink-0", item.type === 'factor' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : item.type === 'object_instance' ? 'bg-cyan-900/30 text-cyan-400 border border-cyan-800' : 'bg-slate-700 text-slate-300')}>
+                                            {item.type === 'factor' && item.subCategory ? `[${item.subCategory}] ` : item.type === 'object_instance' ? `[Instance: ${item.objectTypeId}] ` : ''}{item.category}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
@@ -243,8 +394,8 @@ export default function Ontology() {
                     <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden animate-slide-up shadow-2xl">
                         <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-800/30">
                             <h3 className="font-semibold text-slate-200 flex items-center gap-2">
-                                {formData.type === 'factor' ? <Box size={16} className="text-amber-400" /> : <FileText size={16} className="text-cyan-400" />}
-                                {editingId ? '수정하기' : (formData.type === 'factor' ? '새로운 경영 요소(Factor) 등록' : '새로운 지식 문서 등록')}
+                                {formData.type === 'factor' ? <Box size={16} className="text-amber-400" /> : formData.type === 'object_instance' ? <Sparkles size={16} className="text-cyan-400" /> : <FileText size={16} className="text-cyan-400" />}
+                                {editingId ? '수정하기' : (formData.type === 'factor' ? '새로운 경영 요소(Factor) 등록' : formData.type === 'object_instance' ? '새 객체 인스턴스 등록' : '새로운 지식 문서 등록')}
                             </h3>
                             <button onClick={closeForm} className="text-slate-500 hover:text-slate-300">
                                 <X size={16} />
@@ -252,19 +403,21 @@ export default function Ontology() {
                         </div>
 
                         <div className="p-8 flex-1 overflow-y-auto custom-scrollbar space-y-6 max-w-2xl">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-1.5">구분</label>
-                                <div className="flex gap-4">
-                                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                                        <input type="radio" checked={formData.type === 'document'} onChange={() => setFormData({ ...formData, type: 'document', category: '내부 지침' })} className="accent-cyan-500" />
-                                        문서/가이드라인
-                                    </label>
-                                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                                        <input type="radio" checked={formData.type === 'factor'} onChange={() => setFormData({ ...formData, type: 'factor', category: '운영 요소' })} className="accent-amber-500" />
-                                        경영 요소(Factor)
-                                    </label>
+                            {formData.type !== 'object_instance' && (
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-400 mb-1.5">구분</label>
+                                    <div className="flex gap-4">
+                                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                            <input type="radio" checked={formData.type === 'document'} onChange={() => setFormData({ ...formData, type: 'document', category: '내부 지침' })} className="accent-cyan-500" />
+                                            문서/가이드라인
+                                        </label>
+                                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                            <input type="radio" checked={formData.type === 'factor'} onChange={() => setFormData({ ...formData, type: 'factor', category: '운영 요소' })} className="accent-amber-500" />
+                                            경영 요소(Factor)
+                                        </label>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                             <div>
                                 <label className="block text-xs font-medium text-slate-400 mb-1.5">카테고리</label>
                                 <input
@@ -357,6 +510,45 @@ export default function Ontology() {
                                             <option value="High">High</option>
                                             <option value="Critical">Critical</option>
                                         </select>
+                                    </div>
+                                </div>
+                            )}
+
+                            {formData.type === 'object_instance' && formData.objectTypeId && (
+                                <div className="border border-cyan-900/30 bg-cyan-950/10 p-5 rounded-xl space-y-4">
+                                    <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-cyan-900/50 pb-2">
+                                        <Sparkles size={12} /> Object Properties ({formData.objectTypeId})
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {objectTypes.find(ot => ot.id === formData.objectTypeId)?.properties.map(prop => (
+                                            <div key={prop.id}>
+                                                <label className="block text-xs font-medium text-slate-400 mb-1.5 flex items-center gap-1.5">
+                                                    {prop.displayName}
+                                                    {prop.isPrimaryKey && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[8px] uppercase tracking-wider">PK</span>}
+                                                    {prop.isTitleKey && <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[8px] uppercase tracking-wider">Title</span>}
+                                                </label>
+                                                <input
+                                                    type={prop.baseType === 'number' ? 'number' : 'text'}
+                                                    value={formData.properties?.[prop.id] !== undefined ? formData.properties[prop.id] : ''}
+                                                    onChange={e => {
+                                                        const val = prop.baseType === 'number' ? Number(e.target.value) : e.target.value;
+                                                        setFormData(prev => {
+                                                            const newProps = { ...prev.properties, [prop.id]: val };
+
+                                                            // Auto-sync Title Key into the outer item Title for the graph
+                                                            const isTitle = prop.isTitleKey;
+                                                            return {
+                                                                ...prev,
+                                                                properties: newProps,
+                                                                title: isTitle ? String(val) : prev.title
+                                                            };
+                                                        });
+                                                    }}
+                                                    placeholder={`Enter ${prop.displayName}`}
+                                                    className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
+                                                />
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}

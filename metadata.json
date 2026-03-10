@@ -1,0 +1,5 @@
+{
+  "name": "SIDECAR",
+  "description": "그룹의 데이터를 위한 운영 체제",
+  "requestFramePermissions": []
+}

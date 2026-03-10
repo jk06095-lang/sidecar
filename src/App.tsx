@@ -9,98 +9,42 @@ import Reports from './components/Reports';
 import ApiManager from './components/ApiManager';
 import ScenarioBuilder from './components/ScenarioBuilder';
 import DataAnalysis from './components/DataAnalysis';
-import { BASE_SCENARIOS, DEFAULT_PARAMS, FLEET_DATA, BASE_VULNERABILITY_DATA, BROKER_REPORTS, INSURANCE_CIRCULARS } from './data/mockData';
+import { useOntologyStore } from './store/ontologyStore';
 import { generateBriefingContext, fetchGeminiBriefing, LOADING_MESSAGES } from './services/geminiService';
-import type { Scenario, SimulationParams, ChartDataPoint, FleetVessel, AppSettings } from './types';
-
-function calculateDynamicChartData(params: SimulationParams): ChartDataPoint[] {
-  const { newsSentimentScore, awrpRate, vlsfoPrice, interestRate } = params;
-
-  // Composite Business Volatility Score (0-100 scale)
-  // Weighted average of ALL enterprise risk factors
-  const supplyChain = (params.supplyChainStress as number) || 10;
-  const cyber = (params.cyberThreatLevel as number) || 5;
-  const disaster = (params.naturalDisasterIndex as number) || 0;
-  const pandemic = (params.pandemicRisk as number) || 0;
-  const tradeWar = (params.tradeWarIntensity as number) || 5;
-  const energy = (params.energyCrisisLevel as number) || 10;
-
-  const compositeVolatility = (
-    newsSentimentScore * 0.20 +
-    supplyChain * 0.15 +
-    energy * 0.15 +
-    tradeWar * 0.12 +
-    cyber * 0.10 +
-    pandemic * 0.10 +
-    disaster * 0.08 +
-    Math.min(100, (vlsfoPrice / 15)) * 0.05 +
-    Math.min(100, awrpRate * 400) * 0.05
-  );
-
-  const spreadMultiplier = 1 + (compositeVolatility / 100) * 4.0;
-
-  return BASE_VULNERABILITY_DATA.map((point) => {
-    const baseSpread = (point.WS_High - point.WS_Low) / 2;
-    const adjustedHigh = point.Base_WS + baseSpread * spreadMultiplier;
-    const adjustedLow = Math.max(point.Base_WS - baseSpread * spreadMultiplier * 0.8, 0);
-
-    const adjustedSentiment = Math.min(
-      100,
-      point.News_Sentiment_Score * 0.25 + compositeVolatility * 0.75
-    );
-
-    return {
-      date: point.date,
-      Base_WS: point.Base_WS + (compositeVolatility > 50 ? (compositeVolatility - 50) * 0.5 : 0),
-      WS_High: Math.round(adjustedHigh * 10) / 10,
-      WS_Low: Math.round(adjustedLow * 10) / 10,
-      News_Sentiment_Score: Math.round(adjustedSentiment),
-      Spread: Math.round((adjustedHigh - adjustedLow) * 10) / 10,
-    };
-  });
-}
-
-function calculateDynamicFleetData(params: SimulationParams, baseFleet: FleetVessel[]): FleetVessel[] {
-  const { newsSentimentScore, awrpRate } = params;
-
-  return baseFleet.map((vessel) => {
-    const isMiddleEast =
-      vessel.location.toLowerCase().includes('hormuz') ||
-      vessel.location.toLowerCase().includes('middle east') ||
-      vessel.location.toLowerCase().includes('persian gulf') ||
-      vessel.location.toLowerCase().includes('fujairah') ||
-      vessel.location.toLowerCase().includes('oman');
-
-    let riskLevel = vessel.riskLevel;
-
-    if (isMiddleEast) {
-      if (awrpRate > 0.1 || newsSentimentScore > 80) {
-        riskLevel = 'Critical';
-      } else if (awrpRate > 0.05 || newsSentimentScore > 50) {
-        riskLevel = 'High';
-      }
-    }
-
-    // Non-Middle East vessels get elevated risk at extreme sentiment
-    if (!isMiddleEast && newsSentimentScore > 90) {
-      if (riskLevel === 'Low') riskLevel = 'Medium';
-    }
-
-    return { ...vessel, riskLevel };
-  });
-}
+import type { Scenario, SimulationParams, AppSettings } from './types';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isSidebarMinimized, setIsSidebarMinimized] = useState(false);
-
-  // Core state
-  const [scenarios, setScenarios] = useState<Scenario[]>(BASE_SCENARIOS);
-  const [activeScenarioId, setActiveScenarioId] = useState<string>('realtime');
-  const [simulationParams, setSimulationParams] = useState<SimulationParams>(BASE_SCENARIOS[0].params);
-  const [dynamicChartData, setDynamicChartData] = useState<ChartDataPoint[]>([]);
-  const [dynamicFleetData, setDynamicFleetData] = useState<FleetVessel[]>(FLEET_DATA);
   const realtimeOverrideRef = useRef(false);
+
+  // ============================================================
+  // ONTOLOGY STORE — single source of truth for all data
+  // ============================================================
+  const scenarios = useOntologyStore((s) => s.scenarios);
+  const activeScenarioId = useOntologyStore((s) => s.activeScenarioId);
+  const simulationParams = useOntologyStore((s) => s.simulationParams);
+  const dynamicChartData = useOntologyStore((s) => s.dynamicChartData);
+  const dynamicFleetData = useOntologyStore((s) => s.dynamicFleetData);
+
+  const storeSetActiveScenario = useOntologyStore((s) => s.setActiveScenario);
+  const storeSetSimulationParams = useOntologyStore((s) => s.setSimulationParams);
+  const storeAddScenario = useOntologyStore((s) => s.addScenario);
+  const storeUpdateScenario = useOntologyStore((s) => s.updateScenario);
+  const storeCopyScenario = useOntologyStore((s) => s.copyScenario);
+  const storeDeleteScenario = useOntologyStore((s) => s.deleteScenario);
+  const storeUpdateRealtimeParams = useOntologyStore((s) => s.updateRealtimeScenarioParams);
+  const storeRecalculate = useOntologyStore((s) => s.recalculate);
+
+  // Backward-compat selectors for legacy data formats
+  const selectBrokerReports = useOntologyStore((s) => s.selectBrokerReports);
+  const selectInsuranceCirculars = useOntologyStore((s) => s.selectInsuranceCirculars);
+
+  const brokerReports = selectBrokerReports();
+  const insuranceCirculars = selectInsuranceCirculars();
+
+  // Active scenario object
+  const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
   // App Settings (Theme, Language, API Key)
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -123,76 +67,14 @@ export default function App() {
   // Settings modal
   const [showSettings, setShowSettings] = useState(false);
 
-  // Active scenario object
-  const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
-
   // ============================================================
-  // EFFECT: Recalculate chart & fleet when params change
+  // EFFECT: Listen for legacy ontology_updated events → recalculate
   // ============================================================
-  const updateDynamicData = useCallback(() => {
-    let combinedFleet = [...FLEET_DATA];
-    try {
-      const stored = localStorage.getItem('sidecar_ontology');
-      if (stored) {
-        const ontologies = JSON.parse(stored);
-        // 1. Support legacy manual factor assets
-        const legacyVesselItems = ontologies.filter((o: any) => o.isActive && o.type === 'factor' && o.subCategory === '자산 (Asset)' && o.vesselData);
-        // 2. Support formal Object Instances from the new ObjectTypeWizard
-        const formalVesselInstances = ontologies.filter((o: any) => o.isActive && o.type === 'object_instance' && o.properties);
-
-        // Combine both legacy and formal instances
-        const customFleet: FleetVessel[] = [
-          ...formalVesselInstances.map((v: any) => {
-            // Heuristic extraction for properties that might exist in a FleetVessel schema
-            const props = v.properties || {};
-            const type = props.type || props.vesselType || props.VesselType || '-';
-            const loc = props.location || props.Location || props.lat || '-';
-            const risk = props.risk || props.riskLevel || props.riskScore || 'Low';
-            let formattedRisk: 'Low' | 'Medium' | 'High' | 'Critical' = 'Low';
-            if (String(risk).toLowerCase().includes('high')) formattedRisk = 'High';
-            if (String(risk).toLowerCase().includes('crit') || Number(risk) > 80) formattedRisk = 'Critical';
-            if (String(risk).toLowerCase().includes('med') || Number(risk) > 50) formattedRisk = 'Medium';
-
-            return {
-              vessel_name: v.title || props.name || 'Auto Object',
-              vessel_type: String(type),
-              location: String(loc),
-              riskLevel: formattedRisk,
-              voyage_info: { departure_port: '-', destination_port: '-', sailed_days: 0, plan_days: 0, last_report_type: 'Ontology Object', last_report_time: v.lastUpdated, timezone: 'UTC' },
-              speed_and_weather_metrics: { avg_speed: 0, speed_cp: 0, speed_diff: 0, avg_speed_good_wx: 0, still_water_avg_speed_good_wx: 0, avg_curf: 0, avg_wxf: 0 },
-              consumption_and_rob: { avg_ifo: 0, ifo_cp: 0, ifo_diff: 0, fo_rob: 0, lo_rob: 0, fw_rob: 0, total_consumed: 0 },
-              compliance: { cii_rating: '-', cii_trend: '-' }
-            };
-          }),
-          ...legacyVesselItems.map((v: any) => ({
-            vessel_name: v.title || 'Unknown Asset',
-            vessel_type: v.vesselData.vessel_type || '-',
-            location: v.vesselData.location || '-',
-            riskLevel: v.vesselData.riskLevel || 'Low',
-            voyage_info: { departure_port: '-', destination_port: '-', sailed_days: 0, plan_days: 0, last_report_type: 'Ontology Factor', last_report_time: v.lastUpdated, timezone: 'UTC' },
-            speed_and_weather_metrics: { avg_speed: 0, speed_cp: 0, speed_diff: 0, avg_speed_good_wx: 0, still_water_avg_speed_good_wx: 0, avg_curf: 0, avg_wxf: 0 },
-            consumption_and_rob: { avg_ifo: 0, ifo_cp: 0, ifo_diff: 0, fo_rob: 0, lo_rob: 0, fw_rob: 0, total_consumed: 0 },
-            compliance: { cii_rating: '-', cii_trend: '-' }
-          }))
-        ];
-
-        combinedFleet = [...customFleet, ...combinedFleet];
-      }
-    } catch (e) { console.error("Failed to parse ontology fleet data", e); }
-
-    setDynamicChartData(calculateDynamicChartData(simulationParams));
-    setDynamicFleetData(calculateDynamicFleetData(simulationParams, combinedFleet));
-  }, [simulationParams]);
-
   useEffect(() => {
-    updateDynamicData();
-  }, [updateDynamicData]);
-
-  useEffect(() => {
-    const handleOntologyUpdate = () => updateDynamicData();
+    const handleOntologyUpdate = () => storeRecalculate();
     window.addEventListener('ontology_updated', handleOntologyUpdate);
     return () => window.removeEventListener('ontology_updated', handleOntologyUpdate);
-  }, [updateDynamicData]);
+  }, [storeRecalculate]);
 
   // ============================================================
   // REALTIME AUTO-FETCH: 30-second interval when realtime scenario is active
@@ -232,25 +114,24 @@ export default function App() {
           energyCrisisLevel: Math.round(energyCrisis),
         };
 
-        setSimulationParams(newParams);
-
-        // Also update the realtime scenario's stored params
-        setScenarios(prev => prev.map(s => s.id === 'realtime' ? { ...s, params: newParams } : s));
+        storeSetSimulationParams(newParams);
+        storeUpdateRealtimeParams(newParams);
       } catch (err) {
         console.warn('Realtime fetch failed, using local simulation:', err);
         // Fallback: minor random perturbation
-        setSimulationParams(prev => ({
+        const prev = useOntologyStore.getState().simulationParams;
+        storeSetSimulationParams({
           ...prev,
           newsSentimentScore: Math.min(95, Math.max(5, (prev.newsSentimentScore || 30) + Math.round((Math.random() - 0.5) * 8))),
           vlsfoPrice: Math.max(400, Math.min(1200, prev.vlsfoPrice + Math.round((Math.random() - 0.5) * 30))),
-        }));
+        });
       }
     };
 
     fetchRealtimeData(); // initial fetch
     const interval = setInterval(fetchRealtimeData, 30000); // 30s
     return () => clearInterval(interval);
-  }, [activeScenarioId]);
+  }, [activeScenarioId, storeSetSimulationParams, storeUpdateRealtimeParams]);
 
   useEffect(() => {
     localStorage.setItem('sidecar_settings', JSON.stringify(settings));
@@ -262,24 +143,20 @@ export default function App() {
   }, [settings]);
 
   // ============================================================
-  // HANDLERS
+  // HANDLERS (delegate to Zustand store actions)
   // ============================================================
   const handleScenarioChange = useCallback((id: string) => {
-    setActiveScenarioId(id);
     realtimeOverrideRef.current = false; // Reset override on explicit scenario switch
-    const scenario = scenarios.find(s => s.id === id);
-    if (scenario) {
-      setSimulationParams({ ...scenario.params });
-    }
-  }, [scenarios]);
+    storeSetActiveScenario(id);
+  }, [storeSetActiveScenario]);
 
   const handleParamsChange = useCallback((params: SimulationParams) => {
-    setSimulationParams(params);
+    storeSetSimulationParams(params);
     // If user manually adjusts params while on realtime, mark as overridden
     if (activeScenarioId === 'realtime') {
       realtimeOverrideRef.current = true;
     }
-  }, [activeScenarioId]);
+  }, [activeScenarioId, storeSetSimulationParams]);
 
   const handleSaveScenario = useCallback((name: string) => {
     const newScenario: Scenario = {
@@ -289,39 +166,20 @@ export default function App() {
       params: { ...simulationParams },
       isCustom: true,
     };
-    setScenarios(prev => [...prev, newScenario]);
-    setActiveScenarioId(newScenario.id);
-  }, [simulationParams]);
+    storeAddScenario(newScenario);
+  }, [simulationParams, storeAddScenario]);
 
   const handleUpdateScenario = useCallback((id: string, name: string) => {
-    setScenarios(prev => prev.map(s => s.id === id ? { ...s, name } : s));
-  }, []);
+    storeUpdateScenario(id, name);
+  }, [storeUpdateScenario]);
 
   const handleCopyScenario = useCallback((id: string) => {
-    setScenarios(prev => {
-      const source = prev.find(s => s.id === id);
-      if (!source) return prev;
-      const newScenario: Scenario = {
-        ...source,
-        id: `custom-${Date.now()}`,
-        name: `${source.name} (복사본)`,
-        isCustom: true,
-      };
-      setActiveScenarioId(newScenario.id);
-      return [...prev, newScenario];
-    });
-  }, []);
+    storeCopyScenario(id);
+  }, [storeCopyScenario]);
 
   const handleDeleteScenario = useCallback((id: string) => {
-    setScenarios(prev => {
-      const filtered = prev.filter(s => s.id !== id);
-      if (activeScenarioId === id) {
-        // If the active one is deleted, fallback to the first default scenario
-        setTimeout(() => setActiveScenarioId(BASE_SCENARIOS[0].id), 0);
-      }
-      return filtered;
-    });
-  }, [activeScenarioId]);
+    storeDeleteScenario(id);
+  }, [storeDeleteScenario]);
 
   const handleGenerateBriefing = useCallback(async () => {
     if (!settings.apiKey || isGenerating) return;
@@ -340,7 +198,7 @@ export default function App() {
 
     try {
       // Get active ontology items from local storage
-      let ontologies = [];
+      let ontologies: any[] = [];
       try {
         const storedGrid = localStorage.getItem('sidecar_ontology');
         if (storedGrid) {
@@ -350,9 +208,20 @@ export default function App() {
 
       const contextJSON = generateBriefingContext(activeScenario, simulationParams, dynamicFleetData);
 
-      // We will enhance the generated JSON manually here to feed into fetchGeminiBriefing.
+      // Enhance with ontology graph data
       const parsedContext = JSON.parse(contextJSON);
       parsedContext.grounding_ontology = ontologies;
+
+      // Include ontology graph summary for AI context
+      const storeState = useOntologyStore.getState();
+      parsedContext.ontology_graph = {
+        totalObjects: storeState.objects.length,
+        totalLinks: storeState.links.length,
+        objectsByType: storeState.objects.reduce((acc: Record<string, number>, o) => {
+          acc[o.type] = (acc[o.type] || 0) + 1;
+          return acc;
+        }, {}),
+      };
 
       const enhancedContextJSON = JSON.stringify(parsedContext, null, 2);
 
@@ -408,8 +277,8 @@ export default function App() {
             simulationParams={simulationParams}
             dynamicChartData={dynamicChartData}
             dynamicFleetData={dynamicFleetData}
-            brokerReports={BROKER_REPORTS}
-            insuranceCirculars={INSURANCE_CIRCULARS}
+            brokerReports={brokerReports}
+            insuranceCirculars={insuranceCirculars}
             onScenarioChange={handleScenarioChange}
             onParamsChange={handleParamsChange}
             onSaveScenario={handleSaveScenario}

@@ -130,3 +130,86 @@ export interface AppSettings {
   theme: Theme;
   language: Language;
 }
+
+// ============================================================
+// PALANTIR FOUNDRY-STYLE ONTOLOGY LAYER
+// ============================================================
+
+/** Semantic object types in the maritime domain ontology */
+export type OntologyObjectType =
+  | 'Vessel'
+  | 'Port'
+  | 'Commodity'
+  | 'MacroEvent'
+  | 'Scenario'
+  | 'Market'
+  | 'Insurance'
+  | 'Currency'
+  | 'RiskFactor';
+
+/** Dynamic property bag for ontology objects — all quant values live here */
+export interface OntologyProperties {
+  [key: string]: string | number | boolean | undefined;
+  riskScore?: number;
+}
+
+/** A single node in the ontology graph */
+export interface OntologyObject {
+  id: string;
+  type: OntologyObjectType;
+  title: string;
+  description?: string;
+  properties: OntologyProperties;
+  metadata: {
+    createdAt: string;
+    updatedAt: string;
+    source: string;      // e.g. 'mock', 'api:frankfurter', 'user'
+    status: 'active' | 'inactive' | 'archived';
+  };
+}
+
+/** Typed relationship between two ontology objects */
+export type OntologyLinkRelation =
+  | 'ROUTES_THROUGH'
+  | 'CARRIES'
+  | 'AFFECTED_BY'
+  | 'SUPPLIES'
+  | 'INSURES'
+  | 'PRICED_IN'
+  | 'TRIGGERS'
+  | 'LOCATED_AT'
+  | 'MONITORS'
+  | 'DEPENDS_ON';
+
+/** An edge in the ontology graph */
+export interface OntologyLink {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  relationType: OntologyLinkRelation;
+  weight: number;       // Risk propagation weight 0–1
+  metadata?: {
+    label?: string;
+    createdAt?: string;
+  };
+}
+
+/** Business logic action types */
+export type OntologyActionType =
+  | 'RerouteVessel'
+  | 'UpdateRiskLevel'
+  | 'AdjustInsurance'
+  | 'ModifyScenarioParam'
+  | 'FlagPort'
+  | 'EscalateMacroEvent'
+  | 'UpdateCommodityPrice';
+
+/** An action that mutates ontology object state */
+export interface OntologyAction {
+  id: string;
+  type: OntologyActionType;
+  targetObjectId: string;
+  payload: Record<string, unknown>;
+  timestamp: string;
+  executedBy: string;   // 'system' | 'user' | 'ai'
+}

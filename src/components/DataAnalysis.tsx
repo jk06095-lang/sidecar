@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
     TrendingUp, Plus, X, BarChart3, LineChart, Hash, Table2, Filter as FilterIcon,
-    Calculator, Save, Trash2, ChevronDown, Sparkles, ArrowRight, GripVertical, Eye
+    Calculator, Save, Trash2, ChevronDown, Sparkles, ArrowRight, GripVertical, Eye,
+    GitBranch, TrendingDown, AlertTriangle, Zap
 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, computeObjectDeltas, computeBranchMetrics } from '../lib/utils';
 import type { SimulationParams, ChartDataPoint, FleetVessel } from '../types';
+import { useOntologyStore } from '../store/ontologyStore';
 
 // ============================================================
 // TYPES
@@ -91,6 +93,9 @@ const CARD_TYPE_META: Record<CardType, { icon: React.ReactNode; label: string; c
 };
 
 export default function DataAnalysis({ simulationParams, dynamicChartData, dynamicFleetData }: DataAnalysisProps) {
+    const objects = useOntologyStore((s) => s.objects);
+    const scenarioBranch = useOntologyStore((s) => s.scenarioBranch);
+    const clearScenarioBranch = useOntologyStore((s) => s.clearScenarioBranch);
     const [cards, setCards] = useState<AnalysisCard[]>(() => {
         try {
             const saved = localStorage.getItem('sidecar_analysis_cards');
@@ -403,6 +408,16 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
+                    {/* Branch indicator */}
+                    {scenarioBranch && (
+                        <div className="flex items-center gap-2 bg-purple-950/30 border border-purple-800/40 rounded-lg px-3 py-2 text-xs">
+                            <GitBranch size={14} className="text-purple-400" />
+                            <span className="text-purple-300 font-medium">{scenarioBranch.name}</span>
+                            <button onClick={clearScenarioBranch} className="text-slate-500 hover:text-rose-400 ml-1 transition-colors">
+                                <X size={12} />
+                            </button>
+                        </div>
+                    )}
                     {/* Live indicator */}
                     <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-2 text-xs">
                         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -435,6 +450,9 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
 
             {/* Canvas — Card Grid */}
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+                {/* Scenario Branch Comparison Dashboard */}
+                {scenarioBranch && <BranchComparisonDashboard baseObjects={scenarioBranch.baseObjects} branch={scenarioBranch} />}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                     {cards.map(card => {
                         const meta = CARD_TYPE_META[card.type];
@@ -511,6 +529,250 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
                                 <div className={cn("text-xl font-black", stat.color)}>{stat.value}<span className="text-xs text-slate-600 ml-0.5">{stat.unit}</span></div>
                             </div>
                         ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// BRANCH COMPARISON DASHBOARD
+// ============================================================
+
+interface BranchComparisonProps {
+    baseObjects: import('../types').OntologyObject[];
+    branch: {
+        name: string;
+        baseParams: SimulationParams;
+        branchParams: SimulationParams;
+        branchObjects: import('../types').OntologyObject[];
+    };
+}
+
+function BranchComparisonDashboard({ baseObjects, branch }: BranchComparisonProps) {
+    const deltas = useMemo(() => computeObjectDeltas(baseObjects, branch.branchObjects), [baseObjects, branch.branchObjects]);
+    const baseMetrics = useMemo(() => computeBranchMetrics(baseObjects), [baseObjects]);
+    const branchMetrics = useMemo(() => computeBranchMetrics(branch.branchObjects), [branch.branchObjects]);
+
+    const TYPE_COLORS: Record<string, string> = {
+        Vessel: '#06b6d4', Port: '#f59e0b', Commodity: '#a855f7', MacroEvent: '#ef4444',
+        Insurance: '#3b82f6', Market: '#64748b', RiskFactor: '#ec4899', Currency: '#10b981',
+    };
+    const TYPE_LABELS: Record<string, string> = {
+        Vessel: '선박', Port: '항구', Commodity: '원자재', MacroEvent: '매크로이벤트',
+        Insurance: '보험', Market: '시장', RiskFactor: '리스크팩터', Currency: '통화',
+    };
+
+    // Param changes summary
+    const paramChanges = useMemo(() => {
+        const PARAM_LABELS: Record<string, string> = {
+            vlsfoPrice: 'VLSFO 유가', newsSentimentScore: '뉴스 불안지수', awrpRate: 'AWRP 보험률',
+            interestRate: '기준금리', supplyChainStress: '공급망 스트레스', cyberThreatLevel: '사이버 위협',
+            naturalDisasterIndex: '천재지변', pandemicRisk: '팬데믹', tradeWarIntensity: '무역전쟁',
+            energyCrisisLevel: '에너지 위기',
+        };
+        const changes: { key: string; label: string; base: number; scenario: number; delta: number }[] = [];
+        Object.keys(PARAM_LABELS).forEach(key => {
+            const base = (branch.baseParams[key] as number) ?? 0;
+            const scenario = (branch.branchParams[key] as number) ?? 0;
+            const delta = scenario - base;
+            if (Math.abs(delta) > 0.001) {
+                changes.push({ key, label: PARAM_LABELS[key], base, scenario, delta });
+            }
+        });
+        return changes;
+    }, [branch.baseParams, branch.branchParams]);
+
+    const allTypes = useMemo(() => {
+        const types = new Set<string>();
+        Object.keys(baseMetrics.riskByType).forEach(t => types.add(t));
+        Object.keys(branchMetrics.riskByType).forEach(t => types.add(t));
+        return Array.from(types);
+    }, [baseMetrics, branchMetrics]);
+
+    return (
+        <div className="mb-8 space-y-5">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-950/40 to-slate-900/60 border border-purple-800/30 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-purple-600/20 border border-purple-500/30 rounded-xl flex items-center justify-center">
+                            <GitBranch size={20} className="text-purple-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-slate-100">시뮬레이션 분기 비교</h2>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                <span className="text-cyan-400 font-medium">Base (현재 상태)</span>
+                                {' vs '}
+                                <span className="text-purple-400 font-medium">{branch.name}</span>
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Zap size={12} className="text-amber-400" />
+                        Ripple Effect 적용
+                    </div>
+                </div>
+
+                {/* Param Changes Pills */}
+                {paramChanges.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                        {paramChanges.map(pc => (
+                            <div key={pc.key} className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-2.5 py-1.5 text-[10px]">
+                                <span className="text-slate-400">{pc.label}: </span>
+                                <span className="text-slate-300">{typeof pc.base === 'number' && pc.base % 1 !== 0 ? pc.base.toFixed(2) : pc.base}</span>
+                                <span className="text-slate-600 mx-1">→</span>
+                                <span className={pc.delta > 0 ? 'text-rose-400' : 'text-emerald-400'}>
+                                    {typeof pc.scenario === 'number' && pc.scenario % 1 !== 0 ? pc.scenario.toFixed(2) : pc.scenario}
+                                </span>
+                                <span className={cn("ml-1 font-bold", pc.delta > 0 ? 'text-rose-400' : 'text-emerald-400')}>
+                                    ({pc.delta > 0 ? '+' : ''}{typeof pc.delta === 'number' && pc.delta % 1 !== 0 ? pc.delta.toFixed(2) : pc.delta})
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* KPI Comparison Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                    { label: '평균 리스크', base: baseMetrics.avgRisk, branch: branchMetrics.avgRisk, unit: '' },
+                    { label: '최대 리스크', base: baseMetrics.maxRisk, branch: branchMetrics.maxRisk, unit: '' },
+                    { label: 'Critical 객체', base: baseMetrics.criticalCount, branch: branchMetrics.criticalCount, unit: '개' },
+                    { label: 'High+ 객체', base: baseMetrics.highCount, branch: branchMetrics.highCount, unit: '개' },
+                ].map((kpi, idx) => {
+                    const delta = kpi.branch - kpi.base;
+                    return (
+                        <div key={idx} className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 hover:border-purple-800/40 transition-colors">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-3 font-bold">{kpi.label}</div>
+                            <div className="flex items-end justify-between">
+                                <div>
+                                    <div className="text-xs text-slate-500 mb-0.5">Base</div>
+                                    <div className="text-2xl font-black text-cyan-400">{kpi.base}<span className="text-xs text-slate-600 ml-0.5">{kpi.unit}</span></div>
+                                </div>
+                                <div className="text-center px-2">
+                                    <ArrowRight size={14} className="text-slate-600 mx-auto" />
+                                    <div className={cn(
+                                        "text-xs font-bold mt-1",
+                                        delta > 0 ? 'text-rose-400' : delta < 0 ? 'text-emerald-400' : 'text-slate-500'
+                                    )}>
+                                        {delta > 0 ? '+' : ''}{delta}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs text-slate-500 mb-0.5">Branch</div>
+                                    <div className="text-2xl font-black text-purple-400">{kpi.branch}<span className="text-xs text-slate-600 ml-0.5">{kpi.unit}</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Risk by Type Bar Chart */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5">
+                    <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+                        <BarChart3 size={14} className="text-purple-400" />
+                        유형별 평균 리스크 비교
+                    </h3>
+                    <div className="space-y-3">
+                        {allTypes.map(type => {
+                            const baseVal = baseMetrics.riskByType[type] || 0;
+                            const branchVal = branchMetrics.riskByType[type] || 0;
+                            const maxVal = Math.max(baseVal, branchVal, 1);
+                            return (
+                                <div key={type} className="space-y-1">
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="text-slate-300 font-medium">{TYPE_LABELS[type] || type}</span>
+                                        <span className="text-slate-500">
+                                            <span className="text-cyan-400">{baseVal}</span>
+                                            {' → '}
+                                            <span className="text-purple-400">{branchVal}</span>
+                                            {branchVal !== baseVal && (
+                                                <span className={cn("ml-1 font-bold", branchVal > baseVal ? 'text-rose-400' : 'text-emerald-400')}>
+                                                    ({branchVal > baseVal ? '+' : ''}{branchVal - baseVal})
+                                                </span>
+                                            )}
+                                        </span>
+                                    </div>
+                                    <div className="flex gap-1 h-4">
+                                        <div className="flex-1 bg-slate-800 rounded-l overflow-hidden">
+                                            <div
+                                                className="h-full rounded-l transition-all duration-500"
+                                                style={{
+                                                    width: `${(baseVal / maxVal) * 100}%`,
+                                                    backgroundColor: TYPE_COLORS[type] || '#64748b',
+                                                    opacity: 0.6,
+                                                }}
+                                            />
+                                        </div>
+                                        <div className="flex-1 bg-slate-800 rounded-r overflow-hidden">
+                                            <div
+                                                className="h-full rounded-r transition-all duration-500"
+                                                style={{
+                                                    width: `${(branchVal / maxVal) * 100}%`,
+                                                    backgroundColor: '#a855f7',
+                                                    opacity: 0.8,
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-500 justify-end">
+                            <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-cyan-400/60" /> Base</span>
+                            <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-400/80" /> Branch</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Most Impacted Objects */}
+                <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5">
+                    <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+                        <AlertTriangle size={14} className="text-rose-400" />
+                        주요 타격 객체 ({deltas.length})
+                    </h3>
+                    <div className="space-y-2.5 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
+                        {deltas.slice(0, 15).map((d) => (
+                            <div key={d.id} className="bg-slate-800/40 border border-slate-700/30 rounded-xl px-3.5 py-2.5 hover:border-purple-800/30 transition-colors">
+                                <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider"
+                                            style={{ backgroundColor: `${TYPE_COLORS[d.type] || '#64748b'}20`, color: TYPE_COLORS[d.type] || '#64748b' }}>
+                                            {d.type}
+                                        </span>
+                                        <span className="text-xs text-slate-200 font-medium">{d.title}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <span className="text-cyan-400 font-mono">{d.baseRisk}</span>
+                                        <ArrowRight size={10} className="text-slate-600" />
+                                        <span className="text-purple-400 font-mono font-bold">{d.branchRisk}</span>
+                                        <span className={cn(
+                                            "font-bold text-[10px] px-1.5 py-0.5 rounded",
+                                            d.riskDelta > 0 ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'
+                                        )}>
+                                            {d.riskDelta > 0 ? '+' : ''}{d.riskDelta}
+                                        </span>
+                                    </div>
+                                </div>
+                                {d.propertyChanges.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                        {d.propertyChanges.slice(0, 3).map(pc => (
+                                            <span key={pc.key} className="text-[9px] text-slate-500 bg-slate-800 rounded px-1.5 py-0.5">
+                                                {pc.key}: {pc.delta > 0 ? '+' : ''}{pc.delta}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {deltas.length === 0 && (
+                            <div className="text-center py-8 text-sm text-slate-500">변동 없음</div>
+                        )}
                     </div>
                 </div>
             </div>

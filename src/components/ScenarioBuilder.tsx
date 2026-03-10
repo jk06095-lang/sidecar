@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
     Activity, Save, Sparkles, Fuel, AlertTriangle,
     Shield, TrendingUp, Box, Database, Network, Copy, Trash2, Edit2, Check, X,
-    Flame, CloudLightning, Wifi, Globe2, Package, Zap
+    Flame, CloudLightning, Wifi, Globe2, Package, Zap, GitBranch, Play
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario, SimulationParams, AppSettings } from '../types';
 import LogicMapCanvas from './widgets/LogicMapCanvas';
+import { useOntologyStore } from '../store/ontologyStore';
 
 interface ScenarioBuilderProps {
     scenarios: Scenario[];
@@ -39,6 +40,11 @@ export default function ScenarioBuilder({
     const [customFactors, setCustomFactors] = useState<any[]>([]);
     const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
     const [editName, setEditName] = useState('');
+    const [branchName, setBranchName] = useState('');
+
+    const createScenarioBranch = useOntologyStore((s) => s.createScenarioBranch);
+    const clearScenarioBranch = useOntologyStore((s) => s.clearScenarioBranch);
+    const scenarioBranch = useOntologyStore((s) => s.scenarioBranch);
 
     useEffect(() => {
         try {
@@ -130,6 +136,56 @@ export default function ScenarioBuilder({
                         {isGeneratingAiDraft ? '변수 및 상관관계 연산 중...' : 'AI로 전체 변수값 설정하기'}
                     </button>
                     {!settings.apiKey && <p className="text-[10px] text-center mt-2 text-rose-400">설정에서 Gemini API 키를 등록해야 합니다.</p>}
+                </div>
+
+                {/* Scenario Branching */}
+                <div className="border-t border-slate-800/50 pt-5">
+                    <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2 mb-3">
+                        <GitBranch size={14} className="text-purple-400" />
+                        시뮬레이션 분기 (Scenario Branch)
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mb-3">
+                        현재 파라미터를 Base로 두고, 위 슬라이더 값을 변경한 뒤 분기를 생성하면 퀀트 리스크 전이 함수가 적용된 가상 상태를 데이터 분석 탭에서 비교할 수 있습니다.
+                    </p>
+
+                    {scenarioBranch ? (
+                        <div className="bg-purple-950/20 border border-purple-800/40 rounded-xl p-3">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                                    <span className="text-xs font-bold text-purple-400">분기 활성</span>
+                                </div>
+                                <button
+                                    onClick={clearScenarioBranch}
+                                    className="text-[10px] px-2 py-1 text-slate-400 hover:text-rose-400 bg-slate-800/50 rounded transition-colors"
+                                >
+                                    분기 해제
+                                </button>
+                            </div>
+                            <div className="text-xs text-purple-300 font-medium">{scenarioBranch.name}</div>
+                            <div className="text-[10px] text-slate-500 mt-1">데이터 분석 탭에서 Base vs Branch 비교 가능</div>
+                        </div>
+                    ) : (
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={branchName}
+                                onChange={(e) => setBranchName(e.target.value)}
+                                placeholder="분기 이름 (예: 호르무즈 위기)"
+                                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
+                            />
+                            <button
+                                onClick={() => {
+                                    const name = branchName.trim() || `Branch ${new Date().toLocaleTimeString()}`;
+                                    createScenarioBranch(name, simulationParams);
+                                    setBranchName('');
+                                }}
+                                className="px-4 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition flex items-center gap-1.5 shrink-0"
+                            >
+                                <Play size={12} /> 분기 생성
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-auto border-t border-slate-800/50 pt-5">

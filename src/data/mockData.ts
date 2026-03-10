@@ -1,4 +1,4 @@
-import type { Scenario, FleetVessel, VulnerabilityDataPoint, BrokerReport, InsuranceCircular } from '../types';
+import type { Scenario, FleetVessel, VulnerabilityDataPoint, BrokerReport, InsuranceCircular, OntologyObject, OntologyLink } from '../types';
 
 // ============================================================
 // BASE SCENARIOS
@@ -399,3 +399,453 @@ export const INSURANCE_CIRCULARS: InsuranceCircular[] = [
         impact: '오만만 및 아라비해 북부 추가 지정, 사전 통보 72시간 의무화',
     },
 ];
+
+
+// ============================================================
+// ONTOLOGY GRAPH — OBJECTS (Nodes)
+// ============================================================
+const NOW = '2026-03-10T12:00:00Z';
+const mockMeta = (source = 'mock') => ({
+    createdAt: NOW,
+    updatedAt: NOW,
+    source,
+    status: 'active' as const,
+});
+
+export const ONTOLOGY_OBJECTS: OntologyObject[] = [
+    // ---- Vessels ----
+    {
+        id: 'vessel-oceanic-titan',
+        type: 'Vessel',
+        title: 'Oceanic Titan',
+        description: 'VLCC tanker operating in Persian Gulf route',
+        properties: {
+            vesselType: 'VLCC',
+            location: 'Hormuz Strait (Persian Gulf)',
+            riskScore: 55,
+            departurePort: 'Ras Tanura',
+            destinationPort: 'Ulsan',
+            sailedDays: 12.5,
+            planDays: 21.0,
+            avgSpeed: 12.4,
+            speedCp: 13.0,
+            avgIfo: 45.2,
+            foRob: 1250.0,
+            loRob: 35.5,
+            fwRob: 180.0,
+            totalConsumed: 565.0,
+            ciiRating: 'C',
+            ciiTrend: 'Stable',
+            lastReportType: 'Noon Report',
+            lastReportTime: '2026-03-09T12:00:00',
+            timezone: 'UTC+9',
+            ifoCp: 47.0,
+            speedDiff: -0.6,
+            ifoDiff: -1.8,
+            avgSpeedGoodWx: 13.1,
+            stillWaterAvgSpeedGoodWx: 13.3,
+            avgCurf: -0.2,
+            avgWxf: -0.5,
+        },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'vessel-pacific-pioneer',
+        type: 'Vessel',
+        title: 'Pacific Pioneer',
+        description: 'Suezmax tanker on West Africa – Europe route',
+        properties: {
+            vesselType: 'Suezmax',
+            location: 'West Africa (Lagos Anchorage)',
+            riskScore: 20,
+            departurePort: 'Bonny',
+            destinationPort: 'Rotterdam',
+            sailedDays: 3.0,
+            planDays: 18.0,
+            avgSpeed: 13.8,
+            speedCp: 14.0,
+            avgIfo: 52.1,
+            foRob: 2100.0,
+            loRob: 42.0,
+            fwRob: 210.0,
+            totalConsumed: 156.3,
+            ciiRating: 'B',
+            ciiTrend: 'Improving',
+            lastReportType: 'Noon Report',
+            lastReportTime: '2026-03-09T12:00:00',
+            timezone: 'UTC+1',
+            ifoCp: 53.0,
+            speedDiff: -0.2,
+            ifoDiff: -0.9,
+            avgSpeedGoodWx: 14.1,
+            stillWaterAvgSpeedGoodWx: 14.2,
+            avgCurf: 0.1,
+            avgWxf: -0.1,
+        },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'vessel-gulf-voyager',
+        type: 'Vessel',
+        title: 'Gulf Voyager',
+        description: 'Aframax tanker on Middle East – India route',
+        properties: {
+            vesselType: 'Aframax',
+            location: 'Middle East (Fujairah)',
+            riskScore: 50,
+            departurePort: 'Fujairah',
+            destinationPort: 'Mumbai',
+            sailedDays: 1.5,
+            planDays: 5.0,
+            avgSpeed: 14.2,
+            speedCp: 14.5,
+            avgIfo: 38.5,
+            foRob: 850.0,
+            loRob: 28.0,
+            fwRob: 150.0,
+            totalConsumed: 57.75,
+            ciiRating: 'B',
+            ciiTrend: 'Stable',
+            lastReportType: 'Departure Report',
+            lastReportTime: '2026-03-10T06:00:00',
+            timezone: 'UTC+4',
+            ifoCp: 40.0,
+            speedDiff: -0.3,
+            ifoDiff: -1.5,
+            avgSpeedGoodWx: 14.4,
+            stillWaterAvgSpeedGoodWx: 14.5,
+            avgCurf: 0.0,
+            avgWxf: -0.1,
+        },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'vessel-nordic-carrier',
+        type: 'Vessel',
+        title: 'Nordic Carrier',
+        description: 'VLCC at berth in Rotterdam, preparing for Asia voyage',
+        properties: {
+            vesselType: 'VLCC',
+            location: 'North Sea (Rotterdam)',
+            riskScore: 10,
+            departurePort: 'Rotterdam',
+            destinationPort: 'Ningbo',
+            sailedDays: 0,
+            planDays: 28.0,
+            avgSpeed: 0,
+            speedCp: 13.0,
+            avgIfo: 0,
+            foRob: 3200.0,
+            loRob: 55.0,
+            fwRob: 300.0,
+            totalConsumed: 0,
+            ciiRating: 'A',
+            ciiTrend: 'Improving',
+            lastReportType: 'At Berth',
+            lastReportTime: '2026-03-10T18:00:00',
+            timezone: 'UTC+1',
+            ifoCp: 47.0,
+            speedDiff: 0,
+            ifoDiff: 0,
+            avgSpeedGoodWx: 0,
+            stillWaterAvgSpeedGoodWx: 0,
+            avgCurf: 0,
+            avgWxf: 0,
+        },
+        metadata: mockMeta(),
+    },
+
+    // ---- Ports ----
+    {
+        id: 'port-fujairah',
+        type: 'Port',
+        title: 'Fujairah',
+        description: 'Major Middle East bunkering hub',
+        properties: { region: 'ME', baseWaitDays: 2.5, riskScore: 65, latitude: 25.12, longitude: 56.33 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-ras-tanura',
+        type: 'Port',
+        title: 'Ras Tanura',
+        description: 'Saudi Arabia primary crude oil export terminal',
+        properties: { region: 'ME', baseWaitDays: 1.8, riskScore: 70, latitude: 26.64, longitude: 50.16 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-singapore',
+        type: 'Port',
+        title: 'Singapore',
+        description: 'World\'s busiest transshipment hub',
+        properties: { region: 'SEA', baseWaitDays: 3.2, riskScore: 30, latitude: 1.26, longitude: 103.84 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-rotterdam',
+        type: 'Port',
+        title: 'Rotterdam',
+        description: 'Europe\'s largest port by cargo tonnage',
+        properties: { region: 'EU', baseWaitDays: 1.5, riskScore: 15, latitude: 51.95, longitude: 4.13 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-ulsan',
+        type: 'Port',
+        title: 'Ulsan',
+        description: 'South Korea major petrochemical & crude port',
+        properties: { region: 'KR', baseWaitDays: 2.0, riskScore: 20, latitude: 35.5, longitude: 129.38 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-ningbo',
+        type: 'Port',
+        title: 'Ningbo',
+        description: 'China\'s major cargo throughput port',
+        properties: { region: 'CN', baseWaitDays: 4.0, riskScore: 25, latitude: 29.87, longitude: 121.54 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-bonny',
+        type: 'Port',
+        title: 'Bonny',
+        description: 'Nigeria crude oil export terminal',
+        properties: { region: 'WAF', baseWaitDays: 2.0, riskScore: 40, latitude: 4.43, longitude: 7.17 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'port-mumbai',
+        type: 'Port',
+        title: 'Mumbai',
+        description: 'India\'s largest container port',
+        properties: { region: 'SA', baseWaitDays: 2.8, riskScore: 25, latitude: 18.95, longitude: 72.84 },
+        metadata: mockMeta(),
+    },
+
+    // ---- Commodities ----
+    {
+        id: 'commodity-vlsfo',
+        type: 'Commodity',
+        title: 'VLSFO',
+        description: 'Very Low Sulphur Fuel Oil — primary bunker fuel',
+        properties: { basePrice: 600, unit: '$/mt', riskScore: 45, volatility: 0.12 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'commodity-brent',
+        type: 'Commodity',
+        title: 'Brent Crude',
+        description: 'International crude benchmark',
+        properties: { basePrice: 75, unit: '$/bbl', riskScore: 40, volatility: 0.10 },
+        metadata: mockMeta(),
+    },
+
+    // ---- Currencies ----
+    {
+        id: 'currency-krw',
+        type: 'Currency',
+        title: 'KRW (Korean Won)',
+        properties: { code: 'KRW', baseRate: 1385, riskScore: 15 },
+        metadata: mockMeta('api:frankfurter'),
+    },
+    {
+        id: 'currency-eur',
+        type: 'Currency',
+        title: 'EUR (Euro)',
+        properties: { code: 'EUR', baseRate: 0.918, riskScore: 10 },
+        metadata: mockMeta('api:frankfurter'),
+    },
+
+    // ---- Macro Events ----
+    {
+        id: 'macro-hormuz-crisis',
+        type: 'MacroEvent',
+        title: '호르무즈 해협 위기',
+        description: 'Hormuz Strait blockade threat scenario',
+        properties: { riskScore: 92, category: 'geopolitical', severity: 'critical', region: 'ME', supplyChainImpact: 75, energyImpact: 85 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'macro-stagflation',
+        type: 'MacroEvent',
+        title: '글로벌 스태그플레이션',
+        description: 'High inflation + low growth global scenario',
+        properties: { riskScore: 65, category: 'economic', severity: 'high', region: 'global', supplyChainImpact: 55, energyImpact: 70 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'macro-pandemic',
+        type: 'MacroEvent',
+        title: '팬데믹 재발',
+        description: 'Global pandemic resurgence — port shutdowns & crew restrictions',
+        properties: { riskScore: 88, category: 'health', severity: 'critical', region: 'global', supplyChainImpact: 95, energyImpact: 40 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'macro-trade-war',
+        type: 'MacroEvent',
+        title: '미중 무역전쟁',
+        description: 'US-China 300% tariff trade war',
+        properties: { riskScore: 72, category: 'geopolitical', severity: 'high', region: 'global', supplyChainImpact: 80, energyImpact: 55 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'macro-cyber-attack',
+        type: 'MacroEvent',
+        title: '사이버 공격',
+        description: 'State-sponsored cyberattack on maritime infrastructure',
+        properties: { riskScore: 85, category: 'cyber', severity: 'critical', region: 'global', supplyChainImpact: 70, energyImpact: 45 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'macro-energy-crisis',
+        type: 'MacroEvent',
+        title: '에너지 위기',
+        description: 'OPEC production cuts + Middle East instability',
+        properties: { riskScore: 90, category: 'energy', severity: 'critical', region: 'ME', supplyChainImpact: 65, energyImpact: 98 },
+        metadata: mockMeta(),
+    },
+
+    // ---- Market / Broker Report Objects ----
+    {
+        id: 'market-vlcc-5yr',
+        type: 'Market',
+        title: 'VLCC (5-year old) Asset Value',
+        description: 'Clarksons VLCC 5-year asset valuation',
+        properties: { source: 'Clarksons', assetClass: 'VLCC (5-year old)', priceMilUsd: 112.5, wowChangePct: 1.5, sentiment: 'Firm', riskScore: 25 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'market-suezmax-5yr',
+        type: 'Market',
+        title: 'Suezmax (5-year old) Asset Value',
+        description: 'SSY Suezmax 5-year asset valuation',
+        properties: { source: 'SSY', assetClass: 'Suezmax (5-year old)', priceMilUsd: 78.0, wowChangePct: 0.8, sentiment: 'Stable with upward bias', riskScore: 20 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'market-aframax-5yr',
+        type: 'Market',
+        title: 'Aframax (5-year old) Asset Value',
+        description: 'Fearnleys Aframax 5-year asset valuation',
+        properties: { source: 'Fearnleys', assetClass: 'Aframax (5-year old)', priceMilUsd: 62.5, wowChangePct: -0.3, sentiment: 'Soft, oversupply in Mediterranean', riskScore: 35 },
+        metadata: mockMeta(),
+    },
+
+    // ---- Insurance Objects ----
+    {
+        id: 'insurance-awrp-hormuz',
+        type: 'Insurance',
+        title: '호르무즈 AWRP 인상',
+        description: 'H&M Underwriters AWRP rate hike for Hormuz Strait',
+        properties: { issuer: 'H&M Underwriters', rateFrom: 0.0005, rateTo: 0.0025, riskScore: 80, effectiveDate: '2026-03-08' },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'insurance-pni-mideast',
+        type: 'Insurance',
+        title: '중동 확장 위험지역 고시',
+        description: 'West of England P&I extended war zone notification',
+        properties: { issuer: 'West of England P&I', preNoticeHours: 72, riskScore: 70, effectiveDate: '2026-03-07' },
+        metadata: mockMeta(),
+    },
+
+    // ---- Risk Factors (for geopolitical widget) ----
+    {
+        id: 'risk-hormuz-blockade',
+        type: 'RiskFactor',
+        title: '호르무즈 봉쇄',
+        properties: { category: 'geopolitical', baseImpact: 95, riskScore: 60 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'risk-insurance-surge',
+        type: 'RiskFactor',
+        title: '보험료 폭등',
+        properties: { category: 'financial', baseImpact: 75, riskScore: 50 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'risk-fuel-disruption',
+        type: 'RiskFactor',
+        title: '연료 공급 차질',
+        properties: { category: 'supply', baseImpact: 80, riskScore: 45 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'risk-reroute-cost',
+        type: 'RiskFactor',
+        title: '우회항로 비용 증가',
+        properties: { category: 'operational', baseImpact: 60, riskScore: 40 },
+        metadata: mockMeta(),
+    },
+    {
+        id: 'risk-charter-breach',
+        type: 'RiskFactor',
+        title: '용선계약 위반',
+        properties: { category: 'legal', baseImpact: 85, riskScore: 35 },
+        metadata: mockMeta(),
+    },
+];
+
+// ============================================================
+// ONTOLOGY GRAPH — LINKS (Edges)
+// ============================================================
+export const ONTOLOGY_LINKS: OntologyLink[] = [
+    // Vessel → Port (ROUTES_THROUGH / LOCATED_AT)
+    { id: 'link-ot-fujairah', sourceId: 'vessel-oceanic-titan', targetId: 'port-fujairah', relationType: 'ROUTES_THROUGH', weight: 0.8, metadata: { label: 'Hormuz transit' } },
+    { id: 'link-ot-rastanura', sourceId: 'vessel-oceanic-titan', targetId: 'port-ras-tanura', relationType: 'LOCATED_AT', weight: 0.9, metadata: { label: 'Departure' } },
+    { id: 'link-ot-ulsan', sourceId: 'vessel-oceanic-titan', targetId: 'port-ulsan', relationType: 'ROUTES_THROUGH', weight: 0.7, metadata: { label: 'Destination' } },
+    { id: 'link-pp-bonny', sourceId: 'vessel-pacific-pioneer', targetId: 'port-bonny', relationType: 'LOCATED_AT', weight: 0.6 },
+    { id: 'link-pp-rotterdam', sourceId: 'vessel-pacific-pioneer', targetId: 'port-rotterdam', relationType: 'ROUTES_THROUGH', weight: 0.5 },
+    { id: 'link-gv-fujairah', sourceId: 'vessel-gulf-voyager', targetId: 'port-fujairah', relationType: 'LOCATED_AT', weight: 0.85 },
+    { id: 'link-gv-mumbai', sourceId: 'vessel-gulf-voyager', targetId: 'port-mumbai', relationType: 'ROUTES_THROUGH', weight: 0.6 },
+    { id: 'link-nc-rotterdam', sourceId: 'vessel-nordic-carrier', targetId: 'port-rotterdam', relationType: 'LOCATED_AT', weight: 0.3 },
+    { id: 'link-nc-ningbo', sourceId: 'vessel-nordic-carrier', targetId: 'port-ningbo', relationType: 'ROUTES_THROUGH', weight: 0.5 },
+
+    // Vessel → Commodity (CARRIES)
+    { id: 'link-ot-vlsfo', sourceId: 'vessel-oceanic-titan', targetId: 'commodity-vlsfo', relationType: 'CARRIES', weight: 0.7 },
+    { id: 'link-pp-vlsfo', sourceId: 'vessel-pacific-pioneer', targetId: 'commodity-vlsfo', relationType: 'CARRIES', weight: 0.65 },
+    { id: 'link-gv-vlsfo', sourceId: 'vessel-gulf-voyager', targetId: 'commodity-vlsfo', relationType: 'CARRIES', weight: 0.6 },
+    { id: 'link-nc-vlsfo', sourceId: 'vessel-nordic-carrier', targetId: 'commodity-vlsfo', relationType: 'CARRIES', weight: 0.55 },
+
+    // MacroEvent → Vessel (AFFECTED_BY)
+    { id: 'link-hormuz-ot', sourceId: 'macro-hormuz-crisis', targetId: 'vessel-oceanic-titan', relationType: 'AFFECTED_BY', weight: 0.95, metadata: { label: 'Direct Hormuz exposure' } },
+    { id: 'link-hormuz-gv', sourceId: 'macro-hormuz-crisis', targetId: 'vessel-gulf-voyager', relationType: 'AFFECTED_BY', weight: 0.90 },
+    { id: 'link-pandemic-all', sourceId: 'macro-pandemic', targetId: 'vessel-pacific-pioneer', relationType: 'AFFECTED_BY', weight: 0.70 },
+    { id: 'link-tradewar-nc', sourceId: 'macro-trade-war', targetId: 'vessel-nordic-carrier', relationType: 'AFFECTED_BY', weight: 0.75 },
+
+    // MacroEvent → Port (AFFECTED_BY)
+    { id: 'link-hormuz-fujairah', sourceId: 'macro-hormuz-crisis', targetId: 'port-fujairah', relationType: 'AFFECTED_BY', weight: 0.9 },
+    { id: 'link-hormuz-rastanura', sourceId: 'macro-hormuz-crisis', targetId: 'port-ras-tanura', relationType: 'AFFECTED_BY', weight: 0.95 },
+    { id: 'link-tradewar-ningbo', sourceId: 'macro-trade-war', targetId: 'port-ningbo', relationType: 'AFFECTED_BY', weight: 0.80 },
+    { id: 'link-pandemic-singapore', sourceId: 'macro-pandemic', targetId: 'port-singapore', relationType: 'AFFECTED_BY', weight: 0.85 },
+
+    // MacroEvent → Commodity (TRIGGERS price change)
+    { id: 'link-hormuz-vlsfo', sourceId: 'macro-hormuz-crisis', targetId: 'commodity-vlsfo', relationType: 'TRIGGERS', weight: 0.85 },
+    { id: 'link-hormuz-brent', sourceId: 'macro-hormuz-crisis', targetId: 'commodity-brent', relationType: 'TRIGGERS', weight: 0.90 },
+    { id: 'link-energy-vlsfo', sourceId: 'macro-energy-crisis', targetId: 'commodity-vlsfo', relationType: 'TRIGGERS', weight: 0.95 },
+    { id: 'link-energy-brent', sourceId: 'macro-energy-crisis', targetId: 'commodity-brent', relationType: 'TRIGGERS', weight: 0.95 },
+
+    // Insurance → Vessel (INSURES)
+    { id: 'link-awrp-ot', sourceId: 'insurance-awrp-hormuz', targetId: 'vessel-oceanic-titan', relationType: 'INSURES', weight: 0.8 },
+    { id: 'link-awrp-gv', sourceId: 'insurance-awrp-hormuz', targetId: 'vessel-gulf-voyager', relationType: 'INSURES', weight: 0.75 },
+    { id: 'link-pni-ot', sourceId: 'insurance-pni-mideast', targetId: 'vessel-oceanic-titan', relationType: 'INSURES', weight: 0.7 },
+
+    // Market → Vessel type (MONITORS)
+    { id: 'link-market-vlcc-ot', sourceId: 'market-vlcc-5yr', targetId: 'vessel-oceanic-titan', relationType: 'MONITORS', weight: 0.5 },
+    { id: 'link-market-vlcc-nc', sourceId: 'market-vlcc-5yr', targetId: 'vessel-nordic-carrier', relationType: 'MONITORS', weight: 0.5 },
+    { id: 'link-market-suez-pp', sourceId: 'market-suezmax-5yr', targetId: 'vessel-pacific-pioneer', relationType: 'MONITORS', weight: 0.5 },
+    { id: 'link-market-afra-gv', sourceId: 'market-aframax-5yr', targetId: 'vessel-gulf-voyager', relationType: 'MONITORS', weight: 0.5 },
+
+    // RiskFactor links
+    { id: 'link-risk-blockade-hormuz', sourceId: 'risk-hormuz-blockade', targetId: 'macro-hormuz-crisis', relationType: 'DEPENDS_ON', weight: 0.9 },
+    { id: 'link-risk-insurance-awrp', sourceId: 'risk-insurance-surge', targetId: 'insurance-awrp-hormuz', relationType: 'DEPENDS_ON', weight: 0.85 },
+    { id: 'link-risk-fuel-vlsfo', sourceId: 'risk-fuel-disruption', targetId: 'commodity-vlsfo', relationType: 'DEPENDS_ON', weight: 0.8 },
+    { id: 'link-risk-reroute-ports', sourceId: 'risk-reroute-cost', targetId: 'port-fujairah', relationType: 'DEPENDS_ON', weight: 0.7 },
+    { id: 'link-risk-charter-ot', sourceId: 'risk-charter-breach', targetId: 'vessel-oceanic-titan', relationType: 'DEPENDS_ON', weight: 0.6 },
+
+    // Commodity price denomination (PRICED_IN)
+    { id: 'link-vlsfo-krw', sourceId: 'commodity-vlsfo', targetId: 'currency-krw', relationType: 'PRICED_IN', weight: 0.3 },
+    { id: 'link-brent-eur', sourceId: 'commodity-brent', targetId: 'currency-eur', relationType: 'PRICED_IN', weight: 0.4 },
+];
+

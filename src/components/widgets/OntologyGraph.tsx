@@ -1,219 +1,274 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Network, Plus, Share2, Workflow, Save, Trash2, GitMerge, MousePointer2, PlusCircle, Folder, Sparkles, Loader2, X } from 'lucide-react';
+import { Network, Plus, Share2, Workflow, Save, Trash2, GitMerge, MousePointer2, PlusCircle, Folder, Sparkles, Loader2, X, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { fetchGeminiBriefing } from '../../services/geminiService';
+import { useOntologyStore } from '../../store/ontologyStore';
+import type { OntologyObject, OntologyLink as OntologyLinkType, OntologyObjectType } from '../../types';
 
-interface Node {
+// ============================================================
+// TYPES
+// ============================================================
+interface GraphNode {
     id: string;
     label: string;
-    x?: number;
-    y?: number;
-    vx?: number;
-    vy?: number;
-    type: 'news' | 'factor' | 'system' | 'object';
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    type: OntologyObjectType;
     radius: number;
     color: string;
+    borderColor: string;
+    riskScore: number;
+    expanded: boolean; // whether connected nodes are revealed
+    visible: boolean;  // whether this node is visible in the graph
 }
 
-interface Link {
+interface GraphLink {
+    id: string;
     source: string;
     target: string;
-    value: number;
-    aiInsight?: string;
-    id: string; // Needed for selection
+    weight: number;
+    relationType: string;
+    visible: boolean;
 }
 
 interface OntologyGraphProps {
-    data: any[];
+    onSelectObject?: (id: string | null) => void;
+    selectedObjectId?: string | null;
 }
 
-const COLORS = {
-    system: '#06b6d4', // cyan-500
-    factor: '#f59e0b', // amber-500
-    news: '#10b981',   // emerald-500
-    object: '#3b82f6', // blue-500
+// ============================================================
+// CONSTANTS
+// ============================================================
+const TYPE_CONFIG: Record<string, { color: string; icon: string; baseRadius: number }> = {
+    Vessel: { color: '#06b6d4', icon: '⛴', baseRadius: 22 },
+    Port: { color: '#a855f7', icon: '⚓', baseRadius: 20 },
+    Commodity: { color: '#f59e0b', icon: '🛢', baseRadius: 18 },
+    MacroEvent: { color: '#ef4444', icon: '⚡', baseRadius: 24 },
+    Scenario: { color: '#3b82f6', icon: '📋', baseRadius: 18 },
+    Market: { color: '#10b981', icon: '📈', baseRadius: 18 },
+    Insurance: { color: '#f97316', icon: '🛡', baseRadius: 18 },
+    Currency: { color: '#22d3ee', icon: '💱', baseRadius: 16 },
+    RiskFactor: { color: '#f43f5e', icon: '⚠', baseRadius: 20 },
 };
 
-export default function OntologyGraph({ data }: OntologyGraphProps) {
+function getRiskColor(score: number): string {
+    if (score >= 80) return '#f43f5e'; // rose
+    if (score >= 55) return '#f97316'; // orange
+    if (score >= 30) return '#f59e0b'; // amber
+    return '#10b981'; // emerald
+}
+
+function getRiskRadius(baseRadius: number, score: number): number {
+    return baseRadius + Math.min(12, score / 10);
+}
+
+// ============================================================
+// COMPONENT
+// ============================================================
+export default function OntologyGraph({ onSelectObject, selectedObjectId }: OntologyGraphProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [nodes, setNodes] = useState<Node[]>([]);
-    const [links, setLinks] = useState<Link[]>([]);
-    const [multiverses, setMultiverses] = useState<{ id: string, name: string }[]>([{ id: 'default', name: 'Main Database' }]);
-    const [activeMultiverse, setActiveMultiverse] = useState('default');
 
-    // Interaction states
-    const [mode, setMode] = useState<'pan' | 'connect' | 'add'>('pan');
-    const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-    const [selectedLink, setSelectedLink] = useState<Link | null>(null);
-    const [hoveredNode, setHoveredNode] = useState<Node | null>(null);
-    const [hoveredLink, setHoveredLink] = useState<Link | null>(null);
+    // Zustand store
+    const storeObjects = useOntologyStore((s) => s.objects);
+    const storeLinks = useOntologyStore((s) => s.links);
 
-    // AI Generation State
-    const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
-    const draggedNodeRef = useRef<Node | null>(null);
-    const connectingSourceRef = useRef<Node | null>(null);
-    const mousePosRef = useRef({ x: 0, y: 0 });
+    // Graph state
+    const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
+    const [graphLinks, setGraphLinks] = useState<GraphLink[]>([]);
+    const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-    const nodesRef = useRef<Node[]>([]);
-    const linksRef = useRef<Link[]>([]);
+    // Interaction
+    const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+    const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
+    const draggedNodeRef = useRef<GraphNode | null>(null);
 
-    // Use a stable fingerprint of data IDs to avoid re-running loadNetwork on every parent re-render
-    const dataFingerprint = JSON.stringify(data.map((d: any) => d.id).sort());
+    const nodesRef = useRef<GraphNode[]>([]);
+    const linksRef = useRef<GraphLink[]>([]);
+    const animFrameRef = useRef<number>(0);
+    const timeRef = useRef(0);
 
-    // Initialize from props and local storage
+    // ============================================================
+    // BUILD GRAPH FROM STORE
+    // ============================================================
     useEffect(() => {
-        const savedMeta = localStorage.getItem('sidecar_multiverses');
-        if (savedMeta) {
-            setMultiverses(JSON.parse(savedMeta));
-        }
+        // Initialize: show seed nodes (Vessel + MacroEvent + a few key ports)
+        const seedTypes: OntologyObjectType[] = ['Vessel', 'MacroEvent'];
+        const seedIds = new Set<string>();
 
-        const loadNetwork = () => {
-            const savedNetwork = localStorage.getItem(`sidecar_network_${activeMultiverse}`);
-            if (savedNetwork) {
-                const { savedNodes, savedLinks } = JSON.parse(savedNetwork);
+        const newNodes: GraphNode[] = [];
+        const canvasW = canvasRef.current?.width || 800;
+        const canvasH = canvasRef.current?.height || 600;
+        const cx = canvasW / 2;
+        const cy = canvasH / 2;
 
-                // Sync with canonical data to ensure we don't lose updates from the list view
-                const syncedNodes = savedNodes.map((n: Node) => {
-                    const canonical = data.find(d => d.id === n.id);
-                    if (canonical) {
-                        return { ...n, label: canonical.title.substring(0, 15) + '...' };
-                    }
-                    return n;
-                });
+        storeObjects.forEach((obj, i) => {
+            const cfg = TYPE_CONFIG[obj.type] || { color: '#64748b', icon: '?', baseRadius: 16 };
+            const riskScore = (obj.properties.riskScore as number) || 0;
+            const isSeed = seedTypes.includes(obj.type);
 
-                // Add any newly created data from the list view that isn't in this multiverse yet
-                data.forEach(item => {
-                    if (!syncedNodes.find((n: Node) => n.id === item.id)) {
-                        syncedNodes.push({
-                            id: item.id,
-                            label: item.title.substring(0, 15) + '...',
-                            type: item.type === 'factor' ? 'factor' : item.type === 'object_instance' ? 'object' : 'news',
-                            radius: item.type === 'factor' ? 20 : item.type === 'object_instance' ? 22 : 15,
-                            color: item.type === 'factor' ? COLORS.factor : item.type === 'object_instance' ? COLORS.object : COLORS.news,
-                            x: Math.random() * 600 + 100,
-                            y: Math.random() * 400 + 100,
-                            vx: 0, vy: 0
-                        });
-                    }
-                });
+            if (isSeed) seedIds.add(obj.id);
 
-                setNodes(syncedNodes);
-                setLinks(savedLinks);
-                nodesRef.current = syncedNodes;
-                linksRef.current = savedLinks;
-            } else {
-                // Initialize default
-                let parsedNodes: Node[] = [
-                    { id: 'core', label: 'SIDECAR Core', type: 'system', radius: 30, color: COLORS.system, x: 400, y: 300, vx: 0, vy: 0 }
-                ];
-                let parsedLinks: Link[] = [];
+            // Arrange seed nodes in a circle, others at random positions
+            const angle = (i / storeObjects.length) * Math.PI * 2;
+            const radius_spread = isSeed ? 180 : 280;
 
-                data.forEach((item) => {
-                    parsedNodes.push({
-                        id: item.id,
-                        label: item.title.substring(0, 15) + '...',
-                        type: item.type === 'factor' ? 'factor' : item.type === 'object_instance' ? 'object' : 'news',
-                        radius: item.type === 'factor' ? 20 : item.type === 'object_instance' ? 22 : 15,
-                        color: item.type === 'factor' ? COLORS.factor : item.type === 'object_instance' ? COLORS.object : COLORS.news,
-                        x: Math.random() * 600 + 100,
-                        y: Math.random() * 400 + 100,
-                        vx: 0, vy: 0
-                    });
-                    parsedLinks.push({ id: `link_${Date.now()}_${item.id}`, source: 'core', target: item.id, value: 1 });
-                });
+            newNodes.push({
+                id: obj.id,
+                label: obj.title,
+                x: cx + Math.cos(angle) * radius_spread + (Math.random() - 0.5) * 40,
+                y: cy + Math.sin(angle) * radius_spread + (Math.random() - 0.5) * 40,
+                vx: 0,
+                vy: 0,
+                type: obj.type,
+                radius: getRiskRadius(cfg.baseRadius, riskScore),
+                color: cfg.color,
+                borderColor: getRiskColor(riskScore),
+                riskScore,
+                expanded: isSeed,
+                visible: isSeed,
+            });
+        });
 
-                setNodes(parsedNodes);
-                setLinks(parsedLinks);
-                nodesRef.current = parsedNodes;
-                linksRef.current = parsedLinks;
-            }
-        };
-
-        loadNetwork();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [dataFingerprint, activeMultiverse]);
-
-    // CRITICAL: Keep refs always in sync with state
-    useEffect(() => {
-        nodesRef.current = nodes;
-    }, [nodes]);
-    useEffect(() => {
-        linksRef.current = links;
-    }, [links]);
-
-    // Save functionality
-    const saveNetwork = useCallback(() => {
-        localStorage.setItem(`sidecar_network_${activeMultiverse}`, JSON.stringify({
-            savedNodes: nodesRef.current,
-            savedLinks: linksRef.current
+        const newLinks: GraphLink[] = storeLinks.map((link) => ({
+            id: link.id,
+            source: link.sourceId,
+            target: link.targetId,
+            weight: link.weight,
+            relationType: link.relationType,
+            visible: false, // will be computed
         }));
-        localStorage.setItem('sidecar_multiverses', JSON.stringify(multiverses));
-    }, [activeMultiverse, multiverses]);
 
-    const handleCreateMultiverse = () => {
-        const id = `mv_${Date.now()}`;
-        const name = prompt('새로운 멀티버스 이름을 입력하세요:');
-        if (!name) return;
-        const newMvs = [...multiverses, { id, name }];
-        setMultiverses(newMvs);
-        localStorage.setItem('sidecar_multiverses', JSON.stringify(newMvs));
-        setActiveMultiverse(id);
-    };
+        // Make links visible if both endpoints are visible
+        newLinks.forEach((link) => {
+            const src = newNodes.find((n) => n.id === link.source);
+            const tgt = newNodes.find((n) => n.id === link.target);
+            link.visible = !!(src?.visible && tgt?.visible);
+        });
 
-    const handleDeleteSelected = (e?: React.MouseEvent) => {
-        if (e) e.stopPropagation();
-        if (!selectedNode || selectedNode.id === 'core') return;
-        if (confirm(`'${selectedNode.label}' 노드를 이 신경망에서 삭제하시겠습니까?`)) {
-            const newNodes = nodesRef.current.filter(n => n.id !== selectedNode.id);
-            const newLinks = linksRef.current.filter(l => l.source !== selectedNode.id && l.target !== selectedNode.id);
-            setNodes(newNodes);
-            setLinks(newLinks);
-            nodesRef.current = newNodes;
-            linksRef.current = newLinks;
-            setSelectedNode(null);
-            setSelectedLink(null);
-            saveNetwork();
-        }
-    };
-
-    const handleDeleteSelectedLink = (e?: React.MouseEvent) => {
-        if (e) e.stopPropagation();
-        if (!selectedLink) return;
-        if (confirm(`선택한 연결(신경삭)을 삭제하시겠습니까?`)) {
-            const newLinks = linksRef.current.filter(l => l.id !== selectedLink.id);
-            setLinks(newLinks);
-            linksRef.current = newLinks;
-            setSelectedLink(null);
-            saveNetwork();
-        }
-    };
-
-    const handleAddNode = () => {
-        const title = prompt('새로운 경영 요소(직접 추가)의 이름을 입력하세요:');
-        if (!title) return;
-
-        const newNode: Node = {
-            id: `custom_${Date.now()}`,
-            label: title.substring(0, 15),
-            type: 'factor',
-            radius: 20,
-            color: COLORS.factor,
-            x: 400,
-            y: 300,
-            vx: 0, vy: 0
-        };
-
-        const newNodes = [...nodesRef.current, newNode];
-        setNodes(newNodes);
+        setGraphNodes(newNodes);
+        setGraphLinks(newLinks);
         nodesRef.current = newNodes;
-        setSelectedNode(newNode);
-        setMode('pan');
-        saveNetwork();
-    };
+        linksRef.current = newLinks;
+        setExpandedIds(seedIds);
+    }, [storeObjects, storeLinks]);
 
-    // Physics Engine
+    // Sync refs
+    useEffect(() => { nodesRef.current = graphNodes; }, [graphNodes]);
+    useEffect(() => { linksRef.current = graphLinks; }, [graphLinks]);
+
+    // ============================================================
+    // EXPAND NODE (double-click): reveal connected objects
+    // ============================================================
+    const expandNode = useCallback((nodeId: string) => {
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            next.add(nodeId);
+            return next;
+        });
+
+        setGraphNodes((prevNodes) => {
+            const clickedNode = prevNodes.find((n) => n.id === nodeId);
+            if (!clickedNode) return prevNodes;
+
+            const connectedLinks = linksRef.current.filter(
+                (l) => l.source === nodeId || l.target === nodeId,
+            );
+
+            const connectedIds = new Set<string>();
+            connectedLinks.forEach((l) => {
+                connectedIds.add(l.source === nodeId ? l.target : l.source);
+            });
+
+            // Reveal connected nodes with position near the parent
+            const updated = prevNodes.map((node) => {
+                if (connectedIds.has(node.id) && !node.visible) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 100 + Math.random() * 60;
+                    return {
+                        ...node,
+                        visible: true,
+                        x: clickedNode.x + Math.cos(angle) * dist,
+                        y: clickedNode.y + Math.sin(angle) * dist,
+                        vx: Math.cos(angle) * 2,
+                        vy: Math.sin(angle) * 2,
+                    };
+                }
+                if (node.id === nodeId) {
+                    return { ...node, expanded: true };
+                }
+                return node;
+            });
+
+            // Update link visibility
+            setGraphLinks((prevLinks) =>
+                prevLinks.map((link) => {
+                    const src = updated.find((n) => n.id === link.source);
+                    const tgt = updated.find((n) => n.id === link.target);
+                    return { ...link, visible: !!(src?.visible && tgt?.visible) };
+                }),
+            );
+
+            return updated;
+        });
+    }, []);
+
+    // ============================================================
+    // COLLAPSE NODE (alt+click): hide non-seed connected nodes
+    // ============================================================
+    const collapseNode = useCallback((nodeId: string) => {
+        const seedTypes: OntologyObjectType[] = ['Vessel', 'MacroEvent'];
+
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(nodeId);
+            return next;
+        });
+
+        setGraphNodes((prevNodes) => {
+            const connectedLinks = linksRef.current.filter(
+                (l) => l.source === nodeId || l.target === nodeId,
+            );
+            const connectedIds = new Set<string>();
+            connectedLinks.forEach((l) => {
+                connectedIds.add(l.source === nodeId ? l.target : l.source);
+            });
+
+            const updated = prevNodes.map((node) => {
+                if (connectedIds.has(node.id) && !seedTypes.includes(node.type)) {
+                    // Only hide if no other expanded node is connected to it
+                    const otherExpandedConnection = linksRef.current.some(
+                        (l) =>
+                            ((l.source === node.id && l.target !== nodeId) || (l.target === node.id && l.source !== nodeId)) &&
+                            prevNodes.find((n) => n.id === (l.source === node.id ? l.target : l.source))?.expanded,
+                    );
+                    if (!otherExpandedConnection) {
+                        return { ...node, visible: false };
+                    }
+                }
+                if (node.id === nodeId) {
+                    return { ...node, expanded: false };
+                }
+                return node;
+            });
+
+            setGraphLinks((prevLinks) =>
+                prevLinks.map((link) => {
+                    const src = updated.find((n) => n.id === link.source);
+                    const tgt = updated.find((n) => n.id === link.target);
+                    return { ...link, visible: !!(src?.visible && tgt?.visible) };
+                }),
+            );
+
+            return updated;
+        });
+    }, []);
+
+    // ============================================================
+    // CANVAS PHYSICS + RENDERING ENGINE
+    // ============================================================
     useEffect(() => {
-        if (!canvasRef.current || nodes.length === 0) return;
+        if (!canvasRef.current) return;
 
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
@@ -226,258 +281,311 @@ export default function OntologyGraph({ data }: OntologyGraphProps) {
                 canvas.height = rect.height;
             }
         };
-
         updateSize();
         window.addEventListener('resize', updateSize);
 
-        let animationFrameId: number;
-        // Tuned for mature, heavy physics
-        const alpha = 0.05;
-        const friction = 0.6;
-        const repulsion = 100;
+        const alpha = 0.04;
+        const friction = 0.65;
+        const repulsion = 120;
 
         const tick = () => {
+            timeRef.current += 0.016;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const currentNodes = nodesRef.current;
             const currentLinks = linksRef.current;
             const cx = canvas.width / 2;
             const cy = canvas.height / 2;
 
-            currentNodes.forEach(node => {
+            const visibleNodes = currentNodes.filter((n) => n.visible);
+            const visibleLinks = currentLinks.filter((l) => l.visible);
+
+            // Physics
+            visibleNodes.forEach((node) => {
                 if (draggedNodeRef.current?.id === node.id) {
-                    node.vx = 0; node.vy = 0;
-                    return; // Don't apply physics to dragged node
+                    node.vx = 0;
+                    node.vy = 0;
+                    return;
                 }
 
-                if (node.x === undefined || node.y === undefined) return;
-
-                // Gentle gravity to center to keep things in view
-                node.vx! += (cx - node.x) * 0.001 * alpha;
-                node.vy! += (cy - node.y) * 0.001 * alpha;
+                // Gravity
+                node.vx += (cx - node.x) * 0.0008 * alpha;
+                node.vy += (cy - node.y) * 0.0008 * alpha;
 
                 // Repulsion
-                currentNodes.forEach(other => {
+                visibleNodes.forEach((other) => {
                     if (node === other) return;
-                    if (other.x === undefined || other.y === undefined) return;
                     const dx = node.x - other.x;
                     const dy = node.y - other.y;
                     let l = Math.sqrt(dx * dx + dy * dy);
                     if (l === 0) l = 0.1;
-
                     if (l < repulsion) {
-                        const f = alpha * (repulsion - l) / l;
-                        node.vx! += dx * f;
-                        node.vy! += dy * f;
+                        const f = alpha * (repulsion - l) / l * 1.5;
+                        node.vx += dx * f;
+                        node.vy += dy * f;
                     }
                 });
             });
 
-            // Link Attraction
-            currentLinks.forEach(link => {
-                const source = currentNodes.find(n => n.id === link.source);
-                const target = currentNodes.find(n => n.id === link.target);
-                if (source?.x !== undefined && source?.y !== undefined && target?.x !== undefined && target?.y !== undefined) {
-                    const dx = target.x - source.x;
-                    const dy = target.y - source.y;
-                    const l = Math.sqrt(dx * dx + dy * dy);
-                    if (l > 0) {
-                        const f = 0.02 * alpha * (l - 120);
-                        if (draggedNodeRef.current?.id !== source.id) {
-                            source.vx! += dx * f;
-                            source.vy! += dy * f;
-                        }
-                        if (draggedNodeRef.current?.id !== target.id) {
-                            target.vx! -= dx * f;
-                            target.vy! -= dy * f;
-                        }
+            // Link attraction
+            visibleLinks.forEach((link) => {
+                const source = visibleNodes.find((n) => n.id === link.source);
+                const target = visibleNodes.find((n) => n.id === link.target);
+                if (!source || !target) return;
+                const dx = target.x - source.x;
+                const dy = target.y - source.y;
+                const l = Math.sqrt(dx * dx + dy * dy);
+                if (l > 0) {
+                    const idealLength = 140 + (1 - link.weight) * 60;
+                    const f = 0.015 * alpha * (l - idealLength);
+                    if (draggedNodeRef.current?.id !== source.id) {
+                        source.vx += dx * f;
+                        source.vy += dy * f;
+                    }
+                    if (draggedNodeRef.current?.id !== target.id) {
+                        target.vx -= dx * f;
+                        target.vy -= dy * f;
                     }
                 }
             });
 
-            // Apply mechanics
-            currentNodes.forEach(node => {
+            // Apply velocity
+            visibleNodes.forEach((node) => {
                 if (draggedNodeRef.current?.id === node.id) return;
-                if (node.x !== undefined && node.y !== undefined && node.vx !== undefined && node.vy !== undefined) {
-                    node.x += node.vx;
-                    node.y += node.vy;
-                    node.vx *= friction;
-                    node.vy *= friction;
+                node.x += node.vx;
+                node.y += node.vy;
+                node.vx *= friction;
+                node.vy *= friction;
+                node.x = Math.max(node.radius + 5, Math.min(canvas.width - node.radius - 5, node.x));
+                node.y = Math.max(node.radius + 5, Math.min(canvas.height - node.radius - 5, node.y));
+            });
 
-                    // Bounds
-                    node.x = Math.max(node.radius, Math.min(canvas.width - node.radius, node.x));
-                    node.y = Math.max(node.radius, Math.min(canvas.height - node.radius, node.y));
+            // ---- DRAW LINKS ----
+            visibleLinks.forEach((link) => {
+                const source = visibleNodes.find((n) => n.id === link.source);
+                const target = visibleNodes.find((n) => n.id === link.target);
+                if (!source || !target) return;
+
+                const isHovered = hoveredLink?.id === link.id;
+                const isConnectedToSelected = selectedObjectId && (link.source === selectedObjectId || link.target === selectedObjectId);
+
+                ctx.beginPath();
+                const cp1x = source.x + (target.x - source.x) / 3;
+                const cp1y = source.y + (target.y - source.y) / 3 + 12;
+                const cp2x = source.x + 2 * (target.x - source.x) / 3;
+                const cp2y = source.y + 2 * (target.y - source.y) / 3 - 12;
+                ctx.moveTo(source.x, source.y);
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, target.x, target.y);
+
+                const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
+                const opacityMultiplier = isConnectedToSelected || isHovered ? 1 : 0.35;
+                gradient.addColorStop(0, `${source.color}${Math.round(opacityMultiplier * 200).toString(16).padStart(2, '0')}`);
+                gradient.addColorStop(1, `${target.color}${Math.round(opacityMultiplier * 200).toString(16).padStart(2, '0')}`);
+
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = Math.max(1, link.weight * 3) * (isHovered || isConnectedToSelected ? 1.5 : 1);
+                ctx.stroke();
+
+                // Relation label at midpoint
+                if (isHovered || isConnectedToSelected) {
+                    const midX = (source.x + target.x) / 2;
+                    const midY = (source.y + target.y) / 2;
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.textAlign = 'center';
+                    const labelBg = ctx.measureText(link.relationType);
+                    ctx.fillStyle = '#0f172aCC';
+                    ctx.fillRect(midX - labelBg.width / 2 - 4, midY - 6, labelBg.width + 8, 14);
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.fillText(link.relationType, midX, midY + 4);
                 }
             });
 
-            // Draw Links
-            currentLinks.forEach(link => {
-                const source = currentNodes.find(n => n.id === link.source);
-                const target = currentNodes.find(n => n.id === link.target);
-                if (source?.x !== undefined && source?.y !== undefined && target?.x !== undefined && target?.y !== undefined) {
-                    ctx.beginPath();
-                    ctx.moveTo(source.x, source.y);
-                    const cp1x = source.x + (target.x - source.x) / 3;
-                    const cp1y = source.y + (target.y - source.y) / 3 + 15;
-                    const cp2x = source.x + 2 * (target.x - source.x) / 3;
-                    const cp2y = source.y + 2 * (target.y - source.y) / 3 - 15;
-                    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, target.x, target.y);
-
-                    const isSelected = selectedLink?.id === link.id;
-                    const isHovered = hoveredLink?.id === link.id;
-
-                    const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
-                    if (isSelected || isHovered) {
-                        gradient.addColorStop(0, `${source.color}`);
-                        gradient.addColorStop(1, `${target.color}`);
-                    } else {
-                        gradient.addColorStop(0, `${source.color}60`);
-                        gradient.addColorStop(1, `${target.color}60`);
-                    }
-
-                    ctx.strokeStyle = gradient;
-                    ctx.lineWidth = isSelected ? 3 : (isHovered ? 2 : 1.5);
-                    if (link.aiInsight) {
-                        ctx.setLineDash([8, 4]); // Dashed line for AI-analyzed edges
-                    } else {
-                        ctx.setLineDash([]);
-                    }
-                    ctx.stroke();
-                    ctx.setLineDash([]); // Reset
-                }
-            });
-
-            // Draw Connecting Line if in Connect mode
-            if (connectingSourceRef.current && mode === 'connect') {
-                const src = connectingSourceRef.current;
-                if (src.x !== undefined && src.y !== undefined) {
-                    ctx.beginPath();
-                    ctx.moveTo(src.x, src.y);
-                    ctx.lineTo(mousePosRef.current.x, mousePosRef.current.y);
-                    ctx.strokeStyle = '#38bdf8'; // sky-400
-                    ctx.setLineDash([5, 5]);
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
-            }
-
-            // Draw Nodes
-            currentNodes.forEach(node => {
-                if (node.x === undefined || node.y === undefined) return;
-
-                const isSelected = selectedNode?.id === node.id;
+            // ---- DRAW NODES ----
+            visibleNodes.forEach((node) => {
+                const isSelected = selectedObjectId === node.id;
                 const isHovered = hoveredNode?.id === node.id;
+                const cfg = TYPE_CONFIG[node.type] || { icon: '?', baseRadius: 16 };
+                const t = timeRef.current;
 
-                // Selection glow
-                if (isSelected || isHovered) {
+                // Risk-based pulsing glow for high-risk nodes
+                if (node.riskScore >= 70) {
+                    const pulseAlpha = 0.15 + Math.sin(t * 3 + node.riskScore * 0.1) * 0.1;
+                    const pulseRadius = node.radius + 8 + Math.sin(t * 2.5) * 4;
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + (isSelected ? 6 : 3), 0, Math.PI * 2);
-                    ctx.fillStyle = `${node.color}${isSelected ? '50' : '30'}`;
+                    ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2);
+                    const glow = ctx.createRadialGradient(node.x, node.y, node.radius, node.x, node.y, pulseRadius);
+                    glow.addColorStop(0, `${node.borderColor}${Math.round(pulseAlpha * 255).toString(16).padStart(2, '0')}`);
+                    glow.addColorStop(1, `${node.borderColor}00`);
+                    ctx.fillStyle = glow;
                     ctx.fill();
                 }
 
+                // Selection/hover ring
+                if (isSelected || isHovered) {
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, node.radius + (isSelected ? 8 : 4), 0, Math.PI * 2);
+                    ctx.fillStyle = `${node.borderColor}${isSelected ? '40' : '25'}`;
+                    ctx.fill();
+
+                    if (isSelected) {
+                        ctx.beginPath();
+                        ctx.arc(node.x, node.y, node.radius + 8, 0, Math.PI * 2);
+                        ctx.strokeStyle = `${node.borderColor}60`;
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([4, 4]);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+
+                // Node body
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-                ctx.fillStyle = '#0f172a';
+                const bodyGrad = ctx.createRadialGradient(node.x - node.radius * 0.3, node.y - node.radius * 0.3, 0, node.x, node.y, node.radius);
+                bodyGrad.addColorStop(0, '#1e293b');
+                bodyGrad.addColorStop(1, '#0f172a');
+                ctx.fillStyle = bodyGrad;
                 ctx.fill();
-                ctx.strokeStyle = node.color;
+
+                // Border with risk color
+                ctx.strokeStyle = node.borderColor;
                 ctx.lineWidth = isSelected ? 3 : 2;
                 ctx.stroke();
 
-                ctx.font = isSelected ? 'bold 11px Inter, sans-serif' : '10px Inter, sans-serif';
-                ctx.fillStyle = isSelected ? '#ffffff' : '#94a3b8';
+                // Type icon
+                ctx.font = `${Math.max(12, node.radius * 0.6)}px serif`;
                 ctx.textAlign = 'center';
-                ctx.fillText(node.label, node.x, node.y + node.radius + 14);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(cfg.icon, node.x, node.y);
+
+                // Label
+                ctx.font = isSelected ? 'bold 11px Inter, sans-serif' : '10px Inter, sans-serif';
+                ctx.fillStyle = isSelected ? '#ffffff' : isHovered ? '#e2e8f0' : '#94a3b8';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+
+                // Truncate long labels
+                const maxLabelWidth = 90;
+                let displayLabel = node.label;
+                if (ctx.measureText(displayLabel).width > maxLabelWidth) {
+                    while (ctx.measureText(displayLabel + '…').width > maxLabelWidth && displayLabel.length > 3) {
+                        displayLabel = displayLabel.slice(0, -1);
+                    }
+                    displayLabel += '…';
+                }
+                ctx.fillText(displayLabel, node.x, node.y + node.radius + 6);
+
+                // Small risk score badge
+                if (node.riskScore > 0) {
+                    const badgeX = node.x + node.radius * 0.7;
+                    const badgeY = node.y - node.radius * 0.7;
+                    const badgeR = 9;
+                    ctx.beginPath();
+                    ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+                    ctx.fillStyle = node.borderColor;
+                    ctx.fill();
+                    ctx.font = 'bold 8px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(String(node.riskScore), badgeX, badgeY);
+                }
+
+                // Expand indicator (if connected but not expanded)
+                if (!node.expanded) {
+                    const connectedCount = linksRef.current.filter(
+                        (l) => l.source === node.id || l.target === node.id,
+                    ).length;
+                    const hiddenCount = connectedCount - linksRef.current.filter(
+                        (l) => l.visible && (l.source === node.id || l.target === node.id),
+                    ).length;
+
+                    if (hiddenCount > 0) {
+                        const indX = node.x - node.radius * 0.7;
+                        const indY = node.y - node.radius * 0.7;
+                        ctx.beginPath();
+                        ctx.arc(indX, indY, 8, 0, Math.PI * 2);
+                        ctx.fillStyle = '#334155';
+                        ctx.fill();
+                        ctx.strokeStyle = '#64748b';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        ctx.font = 'bold 8px "JetBrains Mono", monospace';
+                        ctx.fillStyle = '#94a3b8';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(`+${hiddenCount}`, indX, indY);
+                    }
+                }
             });
 
-            animationFrameId = requestAnimationFrame(tick);
+            animFrameRef.current = requestAnimationFrame(tick);
         };
 
         tick();
 
         return () => {
-            cancelAnimationFrame(animationFrameId);
+            cancelAnimationFrame(animFrameRef.current);
             window.removeEventListener('resize', updateSize);
         };
-    }, [nodes, links, selectedNode, hoveredNode, selectedLink, hoveredLink, mode]);
+    }, [graphNodes, graphLinks, selectedObjectId, hoveredNode, hoveredLink]);
 
-    // Canvas Mouse Handlers
+    // ============================================================
+    // MOUSE HANDLERS
+    // ============================================================
     const getMousePos = (e: React.MouseEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return { x: 0, y: 0 };
-        return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
 
     const getNodeAt = (x: number, y: number) => {
-        return nodesRef.current.find(n => {
-            if (n.x === undefined || n.y === undefined) return false;
+        return nodesRef.current.filter((n) => n.visible).find((n) => {
             const dx = n.x - x;
             const dy = n.y - y;
             return Math.sqrt(dx * dx + dy * dy) <= n.radius + 5;
         }) || null;
     };
 
-    // Point to Line segment distance for edge hovering/clicking
     const getLinkAt = (x: number, y: number) => {
-        return linksRef.current.find(l => {
-            const s = nodesRef.current.find(n => n.id === l.source);
-            const t = nodesRef.current.find(n => n.id === l.target);
-            if (!s?.x || !s?.y || !t?.x || !t?.y) return false;
+        return linksRef.current.filter((l) => l.visible).find((l) => {
+            const s = nodesRef.current.find((n) => n.id === l.source);
+            const t = nodesRef.current.find((n) => n.id === l.target);
+            if (!s || !t) return false;
 
             const A = x - s.x;
             const B = y - s.y;
             const C = t.x - s.x;
             const D = t.y - s.y;
-
             const dot = A * C + B * D;
             const len_sq = C * C + D * D;
             let param = -1;
             if (len_sq !== 0) param = dot / len_sq;
-
             let xx, yy;
-            if (param < 0) {
-                xx = s.x; yy = s.y;
-            } else if (param > 1) {
-                xx = t.x; yy = t.y;
-            } else {
-                xx = s.x + param * C;
-                yy = s.y + param * D;
-            }
+            if (param < 0) { xx = s.x; yy = s.y; }
+            else if (param > 1) { xx = t.x; yy = t.y; }
+            else { xx = s.x + param * C; yy = s.y + param * D; }
 
             const dx = x - xx;
             const dy = y - yy;
-            return Math.sqrt(dx * dx + dy * dy) < 8; // 8px hit radius for edge
+            return Math.sqrt(dx * dx + dy * dy) < 10;
         }) || null;
     };
 
     const handleMouseDown = (e: React.MouseEvent) => {
         const { x, y } = getMousePos(e);
-        const clickedNode = getNodeAt(x, y);
-        const clickedLink = getLinkAt(x, y);
-
-        if (clickedNode) {
-            setSelectedNode(clickedNode);
-            setSelectedLink(null);
-            if (mode === 'connect') {
-                connectingSourceRef.current = clickedNode;
-            } else {
-                draggedNodeRef.current = clickedNode;
-            }
-        } else if (clickedLink) {
-            setSelectedLink(clickedLink);
-            setSelectedNode(null);
+        const clicked = getNodeAt(x, y);
+        if (clicked) {
+            draggedNodeRef.current = clicked;
+            // Single click → select
+            onSelectObject?.(clicked.id);
         } else {
-            setSelectedNode(null);
-            setSelectedLink(null);
+            onSelectObject?.(null);
         }
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
         const pos = getMousePos(e);
-        mousePosRef.current = pos;
 
         const node = getNodeAt(pos.x, pos.y);
         if (node !== hoveredNode) setHoveredNode(node);
@@ -486,201 +594,151 @@ export default function OntologyGraph({ data }: OntologyGraphProps) {
             const link = getLinkAt(pos.x, pos.y);
             if (link !== hoveredLink) setHoveredLink(link);
         } else {
-            setHoveredLink(null);
+            if (hoveredLink) setHoveredLink(null);
         }
 
-        if (draggedNodeRef.current && mode === 'pan') {
+        if (draggedNodeRef.current) {
             draggedNodeRef.current.x = pos.x;
             draggedNodeRef.current.y = pos.y;
         }
     };
 
-    const handleMouseUp = (e: React.MouseEvent) => {
-        if (mode === 'connect' && connectingSourceRef.current) {
-            const { x, y } = getMousePos(e);
-            const targetNode = getNodeAt(x, y);
-
-            if (targetNode && targetNode.id !== connectingSourceRef.current.id) {
-                // Check if link exists
-                const existing = linksRef.current.find(l =>
-                    (l.source === connectingSourceRef.current!.id && l.target === targetNode.id) ||
-                    (l.target === connectingSourceRef.current!.id && l.source === targetNode.id)
-                );
-
-                if (!existing) {
-                    const newLinkId = `link_${Date.now()}`;
-                    const newLinks = [...linksRef.current, {
-                        id: newLinkId,
-                        source: connectingSourceRef.current.id,
-                        target: targetNode.id,
-                        value: 1
-                    }];
-                    setLinks(newLinks);
-                    linksRef.current = newLinks;
-                    saveNetwork();
-
-                    // Generate AI Insight for this new edge
-                    generateEdgeInsight(connectingSourceRef.current, targetNode, newLinkId);
-                }
-            }
-            connectingSourceRef.current = null;
-        }
+    const handleMouseUp = () => {
         draggedNodeRef.current = null;
     };
 
-    const generateEdgeInsight = async (source: Node, target: Node, linkId: string) => {
-        const apiKey = localStorage.getItem('gemini_api_key');
-        if (!apiKey) return;
-
-        setIsGeneratingInsight(true);
-        try {
-            // Find full canonical data if possible
-            const srcDoc = data.find(d => d.id === source.id) || { title: source.label, content: '사용자 정의 노드' };
-            const tgtDoc = data.find(d => d.id === target.id) || { title: target.label, content: '사용자 정의 노드' };
-
-            const prompt = `당신은 최고 수준의 엔터프라이즈 인텔리전스 AI입니다. 사용자가 온톨로지 신경망에서 두 개의 데이터 노드를 연결했습니다. 이 두 데이터가 어떻게 융합되어 어떤 비즈니스 시나리오 결론을 도출하는지 2~3문장으로 날카롭게 요약하세요. 
-            노드 A: [${srcDoc.title}] - ${srcDoc.content}
-            노드 B: [${tgtDoc.title}] - ${tgtDoc.content}`;
-
-            const insight = await fetchGeminiBriefing(apiKey, prompt);
-
-            // Update the link with the generated insight
-            setLinks(prev => {
-                const updated = prev.map(l => l.id === linkId ? { ...l, aiInsight: insight } : l);
-                linksRef.current = updated;
-                return updated;
-            });
-            saveNetwork();
-
-        } catch (e) {
-            console.error("Fusion failed", e);
-        } finally {
-            setIsGeneratingInsight(false);
+    const handleDoubleClick = (e: React.MouseEvent) => {
+        const { x, y } = getMousePos(e);
+        const clicked = getNodeAt(x, y);
+        if (clicked) {
+            if (clicked.expanded) {
+                collapseNode(clicked.id);
+            } else {
+                expandNode(clicked.id);
+            }
         }
     };
 
+    // ============================================================
+    // EXPAND ALL / COLLAPSE ALL
+    // ============================================================
+    const handleExpandAll = () => {
+        setGraphNodes((prev) => prev.map((n) => ({ ...n, visible: true, expanded: true })));
+        setGraphLinks((prev) => prev.map((l) => ({ ...l, visible: true })));
+        setExpandedIds(new Set(storeObjects.map((o) => o.id)));
+    };
+
+    const handleCollapseAll = () => {
+        const seedTypes: OntologyObjectType[] = ['Vessel', 'MacroEvent'];
+        setGraphNodes((prev) =>
+            prev.map((n) => ({
+                ...n,
+                visible: seedTypes.includes(n.type),
+                expanded: seedTypes.includes(n.type),
+            })),
+        );
+        setGraphLinks((prev) => {
+            const visible = new Set(nodesRef.current.filter((n) => seedTypes.includes(n.type)).map((n) => n.id));
+            return prev.map((l) => ({ ...l, visible: visible.has(l.source) && visible.has(l.target) }));
+        });
+        setExpandedIds(new Set(storeObjects.filter((o) => seedTypes.includes(o.type)).map((o) => o.id)));
+    };
+
+    // Stats
+    const visibleNodeCount = graphNodes.filter((n) => n.visible).length;
+    const totalNodeCount = graphNodes.length;
+    const visibleLinkCount = graphLinks.filter((l) => l.visible).length;
+
     return (
         <div className="w-full h-full relative bg-slate-950 overflow-hidden flex flex-col">
-            {/* Toolbar Row - sits ABOVE the canvas */}
-            <div className="shrink-0 bg-slate-900/80 border-b border-slate-700/50 p-2.5 flex items-center gap-4 z-20" onMouseDown={e => e.stopPropagation()}>
+            {/* Toolbar */}
+            <div className="shrink-0 bg-slate-900/80 border-b border-slate-700/50 p-2.5 flex items-center gap-4 z-20">
                 <div className="flex items-center gap-2 pr-4 border-r border-slate-700">
-                    <Folder className="text-cyan-400" size={16} />
-                    <select
-                        value={activeMultiverse}
-                        onChange={(e) => { saveNetwork(); setActiveMultiverse(e.target.value); }}
-                        className="bg-transparent text-sm font-semibold text-slate-100 focus:outline-none"
-                    >
-                        {multiverses.map(mv => (
-                            <option key={mv.id} value={mv.id} className="bg-slate-900">{mv.name}</option>
-                        ))}
-                    </select>
-                    <button onClick={handleCreateMultiverse} title="새로운 멀티버스 생성" className="text-slate-400 hover:text-cyan-400 p-1">
-                        <PlusCircle size={14} />
-                    </button>
+                    <Network className="text-cyan-400" size={16} />
+                    <span className="text-sm font-semibold text-slate-100">Ontology Vertex Graph</span>
                 </div>
 
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => setMode('pan')}
-                        className={cn("p-1.5 rounded-md transition-colors flex items-center text-xs gap-1", mode === 'pan' ? "bg-cyan-500/20 text-cyan-400" : "text-slate-400 hover:text-slate-200")}
-                        title="선택 및 이동"
+                        onClick={handleExpandAll}
+                        className="p-1.5 rounded-md transition-colors flex items-center text-xs gap-1 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10"
+                        title="모든 노드 확장"
                     >
-                        <MousePointer2 size={16} /> 선택/이동
+                        <Maximize2 size={14} /> 전체 확장
                     </button>
                     <button
-                        onClick={() => setMode('connect')}
-                        className={cn("p-1.5 rounded-md transition-colors flex items-center text-xs gap-1", mode === 'connect' ? "bg-purple-500/20 text-purple-400" : "text-slate-400 hover:text-slate-200")}
-                        title="노드 드래그하여 연결"
+                        onClick={handleCollapseAll}
+                        className="p-1.5 rounded-md transition-colors flex items-center text-xs gap-1 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10"
+                        title="시드 노드만 표시"
                     >
-                        <GitMerge size={16} /> 연결망 그리기
+                        <Minimize2 size={14} /> 축소
                     </button>
-                    <button
-                        onClick={handleAddNode}
-                        className="p-1.5 rounded-md transition-colors flex items-center text-xs gap-1 text-slate-400 hover:text-amber-400"
-                        title="새 노드 추가"
-                    >
-                        <Plus size={16} /> 새 노드
-                    </button>
-                    <div className="w-px h-4 bg-slate-700 mx-1"></div>
-                    <button
-                        onClick={saveNetwork}
-                        className="p-1.5 rounded-md transition-colors flex items-center text-xs gap-1 text-slate-400 hover:text-emerald-400"
-                        title="현재 멀티버스 저장"
-                    >
-                        <Save size={16} /> 저장
-                    </button>
+                </div>
+
+                <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-slate-500">
+                    <span>Nodes: <span className="text-slate-300">{visibleNodeCount}</span>/{totalNodeCount}</span>
+                    <span>Links: <span className="text-slate-300">{visibleLinkCount}</span></span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">ONTOLOGY STORE</span>
                 </div>
             </div>
 
-            {/* Main canvas area */}
+            {/* Canvas */}
             <div className="flex-1 relative overflow-hidden">
                 <canvas
                     ref={canvasRef}
                     className={cn(
-                        "w-full h-full",
-                        mode === 'connect' ? "cursor-crosshair" : hoveredNode ? "cursor-pointer" : "cursor-default"
+                        'w-full h-full',
+                        hoveredNode ? 'cursor-pointer' : 'cursor-default',
                     )}
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
-                    style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)', backgroundSize: '24px 24px' }}
+                    onDoubleClick={handleDoubleClick}
+                    style={{
+                        backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.03) 1px, transparent 0)',
+                        backgroundSize: '24px 24px',
+                    }}
                 />
 
-                {/* Selection info panels - overlayed on bottom-left */}
-                <div className="absolute bottom-4 left-4 z-30 flex flex-col gap-3 pointer-events-auto" onMouseDown={e => e.stopPropagation()}>
-                    {selectedNode && (
-                        <div className="bg-slate-900/90 backdrop-blur border border-slate-700 p-3 rounded-xl shadow-xl w-64 animate-slide-up">
-                            <div className="text-[10px] font-bold tracking-widest uppercase mb-1 flex items-center justify-between" style={{ color: selectedNode.color }}>
-                                <span>Selected {selectedNode.type}</span>
-                                {selectedNode.id !== 'core' && (
-                                    <button onClick={(e) => handleDeleteSelected(e)} className="text-slate-500 hover:text-rose-400 p-1"><Trash2 size={12} /></button>
-                                )}
+                {/* Legend */}
+                <div className="absolute bottom-4 left-4 z-30 bg-slate-900/90 backdrop-blur border border-slate-700/50 rounded-xl p-3 shadow-xl">
+                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-2">Object Types</div>
+                    <div className="grid grid-cols-3 gap-x-4 gap-y-1">
+                        {Object.entries(TYPE_CONFIG).map(([type, cfg]) => (
+                            <div key={type} className="flex items-center gap-1.5">
+                                <span className="text-sm">{cfg.icon}</span>
+                                <span className="text-[9px] text-slate-400">{type}</span>
                             </div>
-                            <div className="font-semibold text-slate-100 text-sm mb-2">{selectedNode.label}</div>
-                            <p className="text-xs text-slate-400 leading-relaxed mb-3">
-                                ID: {selectedNode.id.substring(0, 8)}...<br />
-                                연결된 신경망: {links.filter(l => l.source === selectedNode.id || l.target === selectedNode.id).length}개
-                            </p>
-                            <button onClick={() => setSelectedNode(null)} className="w-full py-1.5 text-xs text-slate-400 bg-slate-800 hover:bg-slate-700 rounded transition-colors">닫기</button>
-                        </div>
-                    )}
-
-                    {selectedLink && (
-                        <div className="bg-slate-900/90 backdrop-blur border border-slate-700 p-4 rounded-xl shadow-2xl w-80 animate-slide-up relative">
-                            <button onClick={() => setSelectedLink(null)} className="absolute top-3 right-3 text-slate-500 hover:text-slate-300"><X size={14} /></button>
-                            <div className="text-[10px] font-bold tracking-widest uppercase mb-3 flex items-center gap-2 text-purple-400">
-                                <Sparkles size={12} /> AI Fusion Insight
-                            </div>
-                            <div className="flex items-center gap-2 mb-3 text-xs bg-slate-950 p-2 rounded border border-slate-800">
-                                <span className="text-slate-300 truncate w-[110px]">{nodes.find(n => n.id === selectedLink.source)?.label}</span>
-                                <GitMerge size={12} className="text-slate-500 shrink-0" />
-                                <span className="text-slate-300 truncate w-[110px]">{nodes.find(n => n.id === selectedLink.target)?.label}</span>
-                            </div>
-                            {selectedLink.aiInsight ? (
-                                <div className="text-sm text-slate-200 leading-relaxed bg-purple-950/20 p-3 rounded-lg border border-purple-900/30 font-serif">
-                                    {selectedLink.aiInsight}
-                                </div>
-                            ) : (
-                                <div className="text-xs text-slate-500 italic py-2 text-center">
-                                    수동 연결됨. AI 분석 데이터가 없습니다.
-                                </div>
-                            )}
-                            <div className="mt-4 flex justify-end">
-                                <button onClick={(e) => handleDeleteSelectedLink(e)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-rose-400 hover:bg-slate-800 rounded transition-colors">
-                                    <Trash2 size={12} /> 연결 끊기
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {isGeneratingInsight && (
-                        <div className="bg-purple-900/40 backdrop-blur border border-purple-500/30 p-3 rounded-xl shadow-xl w-64 flex flex-col items-center justify-center gap-2 animate-pulse">
-                            <Loader2 size={20} className="text-purple-400 animate-spin" />
-                            <span className="text-xs font-semibold text-purple-300">AI 융합 결론 도출 중 (Gemini)...</span>
-                        </div>
-                    )}
+                        ))}
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-800/50 text-[9px] text-slate-500">
+                        <span className="text-slate-400">더블클릭</span> = 확장/축소 · <span className="text-slate-400">클릭</span> = 상세 보기
+                    </div>
                 </div>
+
+                {/* Hovered node tooltip */}
+                {hoveredNode && !draggedNodeRef.current && (
+                    <div
+                        className="absolute z-40 bg-slate-900/95 backdrop-blur border border-slate-700 rounded-lg p-3 shadow-xl pointer-events-none min-w-[180px]"
+                        style={{
+                            left: Math.min(hoveredNode.x + 20, (canvasRef.current?.width || 800) - 200),
+                            top: hoveredNode.y - 20,
+                        }}
+                    >
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-sm">{TYPE_CONFIG[hoveredNode.type]?.icon}</span>
+                            <span className="text-xs font-semibold text-slate-200">{hoveredNode.label}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">{hoveredNode.type}</span>
+                            <span className="font-mono" style={{ color: hoveredNode.borderColor }}>Risk: {hoveredNode.riskScore}</span>
+                        </div>
+                        {!hoveredNode.expanded && (
+                            <div className="mt-1.5 text-[9px] text-slate-500 italic">더블클릭하여 관계 탐색</div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );

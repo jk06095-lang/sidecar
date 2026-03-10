@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Database, Plus, Search, Trash2, Edit2, Save, X, FileText, CheckCircle2, RotateCcw, Box, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import OntologyGraph from './widgets/OntologyGraph';
+import Object360Panel from './widgets/Object360Panel';
 import ObjectTypeWizard from './widgets/ObjectTypeWizard';
 import type { ObjectTypeDefinition } from '../types';
 
@@ -147,6 +148,15 @@ export default function Ontology() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [showAddForm, setShowAddForm] = useState(false);
     const [showObjectWizard, setShowObjectWizard] = useState(false);
+    const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+
+    const handleSelectObject = useCallback((id: string | null) => {
+        setSelectedObjectId(id);
+    }, []);
+
+    const handleNavigateObject = useCallback((id: string) => {
+        setSelectedObjectId(id);
+    }, []);
     const [objectTypes, setObjectTypes] = useState<ObjectTypeDefinition[]>(() => {
         try {
             const saved = localStorage.getItem('sidecar_object_types');
@@ -576,8 +586,17 @@ export default function Ontology() {
                         </div>
                     </div>
                 ) : (
-                    <div className="flex-1 bg-slate-900/50 border border-slate-800/80 rounded-2xl overflow-hidden relative shadow-inner">
-                        <OntologyGraph data={items} />
+                    <div className="flex-1 flex overflow-hidden rounded-2xl border border-slate-800/80 shadow-inner">
+                        <div className="flex-1 bg-slate-900/50 overflow-hidden relative">
+                            <OntologyGraph onSelectObject={handleSelectObject} selectedObjectId={selectedObjectId} />
+                        </div>
+                        {selectedObjectId && (
+                            <Object360Panel
+                                objectId={selectedObjectId}
+                                onClose={() => setSelectedObjectId(null)}
+                                onNavigate={handleNavigateObject}
+                            />
+                        )}
                     </div>
                 )}
             </div>

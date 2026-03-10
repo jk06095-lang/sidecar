@@ -9,6 +9,7 @@
   --animate-slide-down: slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   --animate-pulse-slow: pulse-slow 2s ease-in-out infinite;
   --animate-progress: progress 3s ease-in-out infinite;
+  --animate-slide-left: slide-left 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Custom scrollbar */
@@ -84,6 +85,18 @@ input[type='range']::-moz-range-thumb {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 

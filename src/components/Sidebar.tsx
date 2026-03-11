@@ -3,7 +3,8 @@ import {
   Home, Newspaper, Settings, Anchor, FileText,
   Activity, Menu, Zap,
   Database, Shield, TrendingUp, Server, CheckCircle2,
-  Star, Edit2, Check, X, Trash2, Globe, LogOut
+  Star, Edit2, Check, X, Trash2, Globe, LogOut,
+  ChevronRight, ChevronDown as ChevronDownIcon, FolderOpen, Folder, Copy, RefreshCw, Save, Plus
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario } from '../types';
@@ -23,6 +24,8 @@ interface SidebarProps {
   onOpenSettings: () => void;
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
+  onCopyScenario?: (id: string) => void;
+  onDeleteScenario?: (id: string) => void;
 }
 
 const FAVORITES_KEY = 'sidecar_scenario_favorites';
@@ -43,10 +46,17 @@ export default function Sidebar({
   onOpenSettings,
   isMinimized = false,
   onToggleMinimize,
+  onCopyScenario,
+  onDeleteScenario,
 }: SidebarProps) {
   const [favorites, setFavorites] = useState<FavoriteEntry[]>(() => loadFavoritesLocal());
   const [editingFavId, setEditingFavId] = useState<string | null>(null);
   const [editAlias, setEditAlias] = useState('');
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
+    preset: true,
+    custom: true,
+    favorites: true,
+  });
 
   // Hydrate from Firestore on mount
   useEffect(() => {
@@ -93,11 +103,72 @@ export default function Sidebar({
     return fav?.alias || scenario.name;
   };
 
-  // Split scenarios into favorites and others
+  const toggleCategory = (cat: string) => {
+    setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+  };
+
+  // Categorize scenarios for file-tree
+  const presetScenarios = scenarios.filter(s => !s.isCustom);
+  const customScenarios = scenarios.filter(s => s.isCustom);
   const favScenarios = favorites
     .map(f => scenarios.find(s => s.id === f.scenarioId))
     .filter(Boolean) as Scenario[];
-  const nonFavScenarios = scenarios.filter(s => !isFavorited(s.id));
+
+  // ---- File-tree scenario item ----
+  const ScenarioItem = ({ s, indent = 0 }: { s: Scenario; indent?: number }) => {
+    const isActive = activeScenarioId === s.id;
+    const isFav = isFavorited(s.id);
+    return (
+      <div
+        className={cn(
+          "group flex items-center gap-1.5 py-1 px-2 rounded text-[11px] cursor-pointer transition-all",
+          isActive
+            ? "bg-cyan-500/10 text-cyan-300 border border-cyan-500/30"
+            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
+        )}
+        style={{ paddingLeft: `${8 + indent * 12}px` }}
+        onClick={() => onScenarioQuickSwitch(s.id)}
+      >
+        <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', getRiskColor(s))} />
+        <span className="truncate flex-1 font-mono text-[10px]">{getDisplayName(s)}</span>
+        {/* Action buttons on hover */}
+        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleFavorite(s.id); }}
+            title={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+            className="p-0.5"
+          >
+            <Star size={9} className={cn(isFav ? "text-amber-400 fill-amber-400" : "text-slate-600 hover:text-amber-400")} />
+          </button>
+          {s.isCustom && onCopyScenario && (
+            <button onClick={(e) => { e.stopPropagation(); onCopyScenario(s.id); }} title="복제" className="p-0.5 text-slate-600 hover:text-cyan-400">
+              <Copy size={9} />
+            </button>
+          )}
+          {s.isCustom && onDeleteScenario && (
+            <button onClick={(e) => { e.stopPropagation(); onDeleteScenario(s.id); }} title="삭제" className="p-0.5 text-slate-600 hover:text-rose-400">
+              <Trash2 size={9} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ---- Folder header ----
+  const FolderHeader = ({ label, count, catKey, icon }: { label: string; count: number; catKey: string; icon: React.ReactNode }) => (
+    <div
+      onClick={() => toggleCategory(catKey)}
+      className="flex items-center gap-1.5 py-1 px-2 cursor-pointer text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors select-none"
+    >
+      {expandedCategories[catKey]
+        ? <ChevronDownIcon size={10} className="text-slate-600" />
+        : <ChevronRight size={10} className="text-slate-600" />}
+      {icon}
+      <span>{label}</span>
+      <span className="ml-auto text-[9px] text-slate-600 font-mono">{count}</span>
+    </div>
+  );
 
   return (
     <div className={cn(
@@ -165,7 +236,7 @@ export default function Sidebar({
       </div>
 
       {/* Dynamic Interaction Area */}
-      <div className={cn("flex-1 overflow-y-auto px-4 py-4 space-y-4", isMinimized && "hidden")}>
+      <div className={cn("flex-1 overflow-y-auto px-3 py-3 space-y-3", isMinimized && "hidden")}>
         {activeTab === 'home' && (
           <div className="bg-cyan-950/30 border border-cyan-900/50 rounded-lg p-3">
             <h5 className="text-[11px] font-bold text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={12} /> 대시보드 로드맵</h5>
@@ -183,27 +254,25 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* ═══ SCENARIO QUICK ACTIONS — Favorites system ═══ */}
+        {/* ═══ SCENARIO FILE TREE ═══ */}
         {activeTab === 'scenario-builder' && (
-          <div className="space-y-3">
+          <div className="space-y-1">
             {/* Favorites */}
-            <div className="bg-amber-950/30 border border-amber-900/50 rounded-lg p-3">
-              <h5 className="text-[11px] font-bold text-amber-400 mb-2 uppercase tracking-widest flex items-center gap-1.5">
-                <Star size={11} className="fill-amber-400" /> 즐겨찾기
-                <span className="ml-auto text-[9px] text-slate-600 font-mono">{favScenarios.length}</span>
-              </h5>
-              {favScenarios.length === 0 ? (
-                <p className="text-[10px] text-slate-500 leading-relaxed">아래 목록에서 ⭐ 눌러 즐겨찾기에 추가하세요</p>
-              ) : (
-                <div className="space-y-1">
-                  {favScenarios.map(s => (
+            <FolderHeader label="즐겨찾기" count={favScenarios.length} catKey="favorites" icon={<Star size={10} className="text-amber-400" />} />
+            {expandedCategories.favorites && (
+              <div className="ml-1 space-y-0.5">
+                {favScenarios.length === 0 ? (
+                  <p className="text-[9px] text-slate-600 pl-6 py-1">⭐ 시나리오에서 즐겨찾기를 추가하세요</p>
+                ) : (
+                  favScenarios.map(s => (
                     <div key={s.id} className="group relative">
                       {editingFavId === s.id ? (
-                        <div className="flex items-center gap-1 p-1 bg-slate-900/60 rounded border border-amber-900/50">
+                        <div className="flex items-center gap-1 p-1 bg-slate-900/60 rounded border border-amber-900/50 ml-3">
                           <input
                             type="text" value={editAlias} onChange={(e) => setEditAlias(e.target.value)}
                             className="flex-1 bg-transparent text-[11px] text-white px-1.5 py-0.5 focus:outline-none placeholder-slate-600"
                             autoFocus placeholder={s.name}
+                            onKeyDown={(e) => e.key === 'Enter' && updateAlias(s.id, editAlias)}
                           />
                           <button onClick={() => updateAlias(s.id, editAlias)} title="저장" className="p-0.5 text-emerald-400 hover:bg-slate-800 rounded"><Check size={10} /></button>
                           <button onClick={() => setEditingFavId(null)} title="취소" className="p-0.5 text-slate-400 hover:bg-slate-800 rounded"><X size={10} /></button>
@@ -212,15 +281,15 @@ export default function Sidebar({
                         <div
                           onClick={() => onScenarioQuickSwitch(s.id)}
                           className={cn(
-                            "text-[11px] cursor-pointer p-1.5 rounded border transition-all flex items-center gap-2",
+                            "flex items-center gap-1.5 py-1 px-2 rounded text-[11px] cursor-pointer transition-all ml-3",
                             activeScenarioId === s.id
-                              ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
-                              : "text-slate-400 hover:text-amber-300 bg-slate-900/50 border-slate-800 hover:border-amber-900/50"
+                              ? "bg-amber-500/10 text-amber-300 border border-amber-500/30"
+                              : "text-slate-400 hover:text-amber-300 bg-transparent border border-transparent hover:border-amber-900/30"
                           )}
                         >
-                          <Star size={10} className="text-amber-400 fill-amber-400 shrink-0" />
+                          <Star size={9} className="text-amber-400 fill-amber-400 shrink-0" />
                           <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', getRiskColor(s))} />
-                          <span className="truncate flex-1">{getDisplayName(s)}</span>
+                          <span className="truncate flex-1 font-mono text-[10px]">{getDisplayName(s)}</span>
                           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
                             <button onClick={(e) => { e.stopPropagation(); setEditAlias(favorites.find(f => f.scenarioId === s.id)?.alias || ''); setEditingFavId(s.id); }} title="별칭 설정" className="p-0.5 text-slate-500 hover:text-amber-400"><Edit2 size={9} /></button>
                             <button onClick={(e) => { e.stopPropagation(); removeFavorite(s.id); }} title="즐겨찾기 해제" className="p-0.5 text-slate-500 hover:text-rose-400"><Trash2 size={9} /></button>
@@ -228,44 +297,33 @@ export default function Sidebar({
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* All Scenarios */}
-            <div className="bg-slate-800/20 border border-slate-800/50 rounded-lg p-3">
-              <h5 className="text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-widest flex items-center gap-1.5">
-                <Zap size={11} /> 전체 시나리오
-                <span className="ml-auto text-[9px] text-slate-600 font-mono">{scenarios.length}</span>
-              </h5>
-              <div className="space-y-1">
-                {scenarios.map(s => (
-                  <div
-                    key={s.id}
-                    onClick={() => onScenarioQuickSwitch(s.id)}
-                    className={cn(
-                      "group text-[11px] cursor-pointer p-1.5 rounded border transition-all flex items-center gap-2",
-                      activeScenarioId === s.id
-                        ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
-                        : "text-slate-400 hover:text-slate-200 bg-slate-900/30 border-slate-800/50 hover:border-slate-700"
-                    )}
-                  >
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleFavorite(s.id); }}
-                      title={isFavorited(s.id) ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-                      className="shrink-0 p-0.5"
-                    >
-                      <Star size={10} className={cn(
-                        isFavorited(s.id) ? "text-amber-400 fill-amber-400" : "text-slate-600 group-hover:text-slate-400"
-                      )} />
-                    </button>
-                    <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', getRiskColor(s))} />
-                    <span className="truncate flex-1">{s.name}</span>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
-            </div>
+            )}
+
+            {/* Divider */}
+            <div className="border-t border-slate-800/40 my-1.5" />
+
+            {/* Preset Scenarios */}
+            <FolderHeader label="시스템 프리셋" count={presetScenarios.length} catKey="preset" icon={<Folder size={10} className="text-cyan-500" />} />
+            {expandedCategories.preset && (
+              <div className="ml-1 space-y-0.5">
+                {presetScenarios.map(s => <ScenarioItem key={s.id} s={s} indent={1} />)}
+              </div>
+            )}
+
+            {/* Custom Scenarios */}
+            <FolderHeader label="사용자 시나리오" count={customScenarios.length} catKey="custom" icon={<FolderOpen size={10} className="text-emerald-500" />} />
+            {expandedCategories.custom && (
+              <div className="ml-1 space-y-0.5">
+                {customScenarios.length === 0 ? (
+                  <p className="text-[9px] text-slate-600 pl-6 py-1">시나리오 빌더에서 새 시나리오를 저장하세요</p>
+                ) : (
+                  customScenarios.map(s => <ScenarioItem key={s.id} s={s} indent={1} />)
+                )}
+              </div>
+            )}
           </div>
         )}
 

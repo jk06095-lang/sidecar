@@ -302,6 +302,8 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
         isMinimized={isSidebarMinimized}
         onToggleMinimize={() => setIsSidebarMinimized(!isSidebarMinimized)}
+        onCopyScenario={handleCopyScenario}
+        onDeleteScenario={handleDeleteScenario}
       />
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopTabBar
@@ -327,6 +329,7 @@ export default function App() {
               onScenarioChange={handleScenarioChange}
               onParamsChange={handleParamsChange}
               onSaveScenario={handleSaveScenario}
+              onNavigateTab={handleSetActiveTab}
             />
           )}
           {activeTab === 'reports' && <Reports />}

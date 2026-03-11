@@ -54,6 +54,7 @@ export default function Home({
   onScenarioChange,
   onParamsChange,
   onSaveScenario,
+  onNavigateTab,
 }: HomeProps) {
   const [showScenarioDropdown, setShowScenarioDropdown] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -66,6 +67,7 @@ export default function Home({
     try {
       const saved = localStorage.getItem('sidecar_widget_layout');
       return saved ? JSON.parse(saved) : {
+        bevi: true,
         fleetMap: true,
         fleet: true,
         hormuzWeather: true,
@@ -78,7 +80,7 @@ export default function Home({
         geopoliticalRisk: true,
         portCongestion: true,
       };
-    } catch { return { fleetMap: true, fleet: true, hormuzWeather: true, singaporeWeather: true, busanWeather: true, suezWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
+    } catch { return { bevi: true, fleetMap: true, fleet: true, hormuzWeather: true, singaporeWeather: true, busanWeather: true, suezWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
   });
 
   useEffect(() => {

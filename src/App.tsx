@@ -10,6 +10,7 @@ import ScenarioBuilder from './components/ScenarioBuilder';
 import DataAnalysis from './components/DataAnalysis';
 import { useOntologyStore } from './store/ontologyStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
+import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/marketDataService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -75,6 +76,7 @@ export default function App() {
 
   // ============================================================
   // REALTIME AUTO-FETCH: 30-second interval when realtime scenario is active
+  // Uses Yahoo Finance (via marketDataService) + free exchange rate API
   // ============================================================
   useEffect(() => {
     const isRealtimeActive = activeScenarioId === 'realtime' && !realtimeOverrideRef.current;
@@ -82,24 +84,33 @@ export default function App() {
 
     const fetchRealtimeData = async () => {
       try {
-        // Use real free API for exchange rates
-        const fxRes = await fetch('https://open.er-api.com/v6/latest/USD').then(r => r.json()).catch(() => null);
-        const krwRate = fxRes?.rates?.KRW || 1350;
-        const eurRate = fxRes?.rates?.EUR || 0.92;
+        // Fetch real market data from Yahoo Finance
+        const [fxRes, marketQuotes] = await Promise.all([
+          fetch('https://open.er-api.com/v6/latest/USD').then(r => r.json()).catch(() => null),
+          fetchAllMarketData().catch(() => []),
+        ]);
 
-        // Simulate realistic oil price fluctuation based on time-of-day and minor randomness
+        const krwRate = fxRes?.rates?.KRW || 1350;
+
+        // Map market quotes to scenario variable params
+        const marketParams = mapQuotesToScenarioParams(marketQuotes);
+
+        // Use real Brent price for VLSFO approximation (VLSFO ≈ Brent × 6.5 $/mt conversion)
+        const brentPrice = marketParams.brentCrude || 82;
+        const vlsfoFromBrent = Math.round(brentPrice * 7.2 + 30); // rough conversion
+
+        // Build sentiment from market volatility
         const hour = new Date().getHours();
         const minuteSeed = new Date().getMinutes();
-        const oilBase = 580 + Math.sin(hour * 0.5) * 40 + (minuteSeed % 7) * 5;
-        const sentimentBase = 25 + Math.floor(Math.random() * 20) + (hour > 18 || hour < 6 ? 15 : 0);
+        const sentimentBase = 25 + Math.floor(Math.random() * 15) + (hour > 18 || hour < 6 ? 10 : 0);
 
         // Derive supply chain stress from FX volatility proxy
-        const fxVolatility = Math.abs(krwRate - 1350) / 13.5; // % deviation from baseline
+        const fxVolatility = Math.abs(krwRate - 1350) / 13.5;
         const supplyStress = Math.min(90, 15 + fxVolatility * 2 + (minuteSeed % 10));
-        const energyCrisis = Math.min(85, 15 + Math.abs(oilBase - 600) / 5);
+        const energyCrisis = Math.min(85, 15 + Math.abs(brentPrice - 80) / 2);
 
         const newParams: SimulationParams = {
-          vlsfoPrice: Math.round(oilBase),
+          vlsfoPrice: vlsfoFromBrent,
           newsSentimentScore: Math.min(95, sentimentBase),
           awrpRate: +(0.02 + Math.random() * 0.05).toFixed(3),
           interestRate: +(4.0 + Math.random() * 1.5).toFixed(1),
@@ -109,13 +120,16 @@ export default function App() {
           pandemicRisk: Math.round(Math.random() * 8),
           tradeWarIntensity: Math.round(20 + Math.random() * 20),
           energyCrisisLevel: Math.round(energyCrisis),
+          // Inject real market data directly
+          ...marketParams,
+          // Override usdKrw with FX API (more reliable)
+          usdKrw: Math.round(krwRate),
         };
 
         storeSetSimulationParams(newParams);
         storeUpdateRealtimeParams(newParams);
       } catch (err) {
         console.warn('Realtime fetch failed, using local simulation:', err);
-        // Fallback: minor random perturbation
         const prev = useOntologyStore.getState().simulationParams;
         storeSetSimulationParams({
           ...prev,

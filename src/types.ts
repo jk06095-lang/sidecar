@@ -87,6 +87,7 @@ export interface Scenario {
   params: SimulationParams;
   isCustom?: boolean;
   isRealtime?: boolean;
+  selectedVariableIds?: string[];
 }
 
 export interface VulnerabilityDataPoint {
@@ -170,6 +171,18 @@ export type OntologyObjectType =
   | 'Insurance'
   | 'Currency'
   | 'RiskFactor';
+
+/** Vessel-specific properties — required schema for type='Vessel' ontology objects */
+export interface VesselProperties {
+  fuel: number;           // bunker ROB percentage 0–100
+  freshWater: number;     // fresh water ROB percentage 0–100
+  lubeOil: number;        // lube oil ROB percentage 0–100
+  crewCount: number;      // onboard crew headcount
+  speed: number;          // current speed in knots
+  heading: number;        // heading in degrees 0–360
+  destination: string;    // destination port name
+  eta: string;            // ETA ISO datetime string
+}
 
 /** Dynamic property bag for ontology objects — all quant values live here */
 export interface OntologyProperties {

@@ -2,11 +2,12 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
     TrendingUp, Plus, X, BarChart3, LineChart, Hash, Table2, Filter as FilterIcon,
     Calculator, Save, Trash2, ChevronDown, Sparkles, ArrowRight, GripVertical, Eye,
-    GitBranch, TrendingDown, AlertTriangle, Zap
+    GitBranch, TrendingDown, AlertTriangle, Zap, CandlestickChart
 } from 'lucide-react';
 import { cn, computeObjectDeltas, computeBranchMetrics } from '../lib/utils';
 import type { SimulationParams, ChartDataPoint, FleetVessel } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
+import TradingViewWidget from './widgets/TradingViewWidget';
 
 // ============================================================
 // TYPES
@@ -113,6 +114,7 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
     });
 
     const [showAddMenu, setShowAddMenu] = useState(false);
+    const [activeTab, setActiveTab] = useState<'analytics' | 'market'>('analytics');
 
     const saveCards = useCallback((newCards: AnalysisCard[]) => {
         setCards(newCards);
@@ -397,15 +399,39 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
     return (
         <div className="h-full flex flex-col bg-slate-950 overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/50 bg-slate-900/50 shrink-0">
-                <div>
-                    <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2.5">
-                        <TrendingUp className="text-cyan-400" size={20} />
-                        데이터 분석 (Analysis Canvas)
+            <div className="flex items-center justify-between px-6 py-3 border-b border-slate-800/50 bg-slate-900/50 shrink-0">
+                <div className="flex items-center gap-6">
+                    <h1 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                        <TrendingUp className="text-cyan-400" size={18} />
+                        데이터 분석
                     </h1>
-                    <p className="text-xs text-slate-500 mt-1">
-                        카드 기반 데이터 탐색 · 통계 연산 · 시계열 분석 · 위젯 빌더
-                    </p>
+                    {/* Tab nav */}
+                    <div className="flex items-center gap-1 bg-zinc-800/60 rounded-lg p-0.5">
+                        <button
+                            onClick={() => setActiveTab('analytics')}
+                            title="분석 캐버스"
+                            className={cn(
+                                'px-3 py-1.5 text-xs font-bold rounded-md transition-all',
+                                activeTab === 'analytics'
+                                    ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                                    : 'text-slate-400 hover:text-slate-200'
+                            )}
+                        >
+                            <Calculator size={12} className="inline mr-1" /> Analytics
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('market')}
+                            title="마켓 터미널"
+                            className={cn(
+                                'px-3 py-1.5 text-xs font-bold rounded-md transition-all',
+                                activeTab === 'market'
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : 'text-slate-400 hover:text-slate-200'
+                            )}
+                        >
+                            <CandlestickChart size={12} className="inline mr-1" /> Market
+                        </button>
+                    </div>
                 </div>
                 <div className="flex items-center gap-3">
                     {/* Branch indicator */}
@@ -448,90 +474,95 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
                 </div>
             </div>
 
-            {/* Canvas — Card Grid */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-                {/* Scenario Branch Comparison Dashboard */}
-                {scenarioBranch && <BranchComparisonDashboard baseObjects={scenarioBranch.baseObjects} branch={scenarioBranch} />}
+            {/* TAB: Market Terminal */}
+            {activeTab === 'market' ? (
+                <TradingViewWidget className="flex-1" />
+            ) : (
+                /* TAB: Analysis Canvas */
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+                    {/* Scenario Branch Comparison Dashboard */}
+                    {scenarioBranch && <BranchComparisonDashboard baseObjects={scenarioBranch.baseObjects} branch={scenarioBranch} />}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {cards.map(card => {
-                        const meta = CARD_TYPE_META[card.type];
-                        return (
-                            <div
-                                key={card.id}
-                                className={cn(
-                                    "bg-slate-900/70 border border-slate-800/80 rounded-2xl overflow-hidden hover:border-slate-700 transition-all shadow-lg",
-                                    card.type === 'table' && 'md:col-span-2',
-                                    card.type === 'timeseries' && 'md:col-span-2'
-                                )}
-                            >
-                                {/* Card Header */}
-                                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50 bg-slate-800/20">
-                                    <div className="flex items-center gap-2.5">
-                                        <GripVertical size={12} className="text-slate-600" />
-                                        <span className={cn("shrink-0", meta.color)}>{meta.icon}</span>
-                                        <h3 className="text-sm font-semibold text-slate-200 truncate max-w-[200px]">{card.title}</h3>
-                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 uppercase tracking-wider font-bold">{meta.label}</span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                        {cards.map(card => {
+                            const meta = CARD_TYPE_META[card.type];
+                            return (
+                                <div
+                                    key={card.id}
+                                    className={cn(
+                                        "bg-slate-900/70 border border-slate-800/80 rounded-2xl overflow-hidden hover:border-slate-700 transition-all shadow-lg",
+                                        card.type === 'table' && 'md:col-span-2',
+                                        card.type === 'timeseries' && 'md:col-span-2'
+                                    )}
+                                >
+                                    {/* Card Header */}
+                                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50 bg-slate-800/20">
+                                        <div className="flex items-center gap-2.5">
+                                            <GripVertical size={12} className="text-slate-600" />
+                                            <span className={cn("shrink-0", meta.color)}>{meta.icon}</span>
+                                            <h3 className="text-sm font-semibold text-slate-200 truncate max-w-[200px]">{card.title}</h3>
+                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 uppercase tracking-wider font-bold">{meta.label}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                onClick={() => saveAsWidget(card)}
+                                                title="대시보드에 위젯으로 저장"
+                                                className="p-1.5 text-slate-500 hover:text-cyan-400 rounded-md hover:bg-slate-800 transition-colors"
+                                            >
+                                                <Save size={13} />
+                                            </button>
+                                            <button
+                                                onClick={() => removeCard(card.id)}
+                                                className="p-1.5 text-slate-500 hover:text-rose-400 rounded-md hover:bg-slate-800 transition-colors"
+                                            >
+                                                <Trash2 size={13} />
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-1.5">
-                                        <button
-                                            onClick={() => saveAsWidget(card)}
-                                            title="대시보드에 위젯으로 저장"
-                                            className="p-1.5 text-slate-500 hover:text-cyan-400 rounded-md hover:bg-slate-800 transition-colors"
-                                        >
-                                            <Save size={13} />
-                                        </button>
-                                        <button
-                                            onClick={() => removeCard(card.id)}
-                                            className="p-1.5 text-slate-500 hover:text-rose-400 rounded-md hover:bg-slate-800 transition-colors"
-                                        >
-                                            <Trash2 size={13} />
-                                        </button>
+
+                                    {/* Card Content */}
+                                    <div className="min-h-[120px]">
+                                        {renderCardContent(card)}
                                     </div>
                                 </div>
+                            );
+                        })}
 
-                                {/* Card Content */}
-                                <div className="min-h-[120px]">
-                                    {renderCardContent(card)}
+                        {/* Empty state / Add card prompt */}
+                        {cards.length === 0 && (
+                            <div className="col-span-full flex items-center justify-center py-20">
+                                <div className="text-center">
+                                    <Sparkles className="text-cyan-400 mx-auto mb-4" size={40} />
+                                    <h3 className="text-lg font-bold text-slate-300">분석 캔버스가 비어있습니다</h3>
+                                    <p className="text-sm text-slate-500 mt-2">상단의 "Add Card"를 클릭하여 분석 카드를 추가하세요.</p>
                                 </div>
                             </div>
-                        );
-                    })}
+                        )}
+                    </div>
 
-                    {/* Empty state / Add card prompt */}
-                    {cards.length === 0 && (
-                        <div className="col-span-full flex items-center justify-center py-20">
-                            <div className="text-center">
-                                <Sparkles className="text-cyan-400 mx-auto mb-4" size={40} />
-                                <h3 className="text-lg font-bold text-slate-300">분석 캔버스가 비어있습니다</h3>
-                                <p className="text-sm text-slate-500 mt-2">상단의 "Add Card"를 클릭하여 분석 카드를 추가하세요.</p>
-                            </div>
+                    {/* Statistics Summary Panel */}
+                    <div className="mt-8 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6">
+                        <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                            <Calculator size={14} className="text-cyan-400" /> 실시간 통계 요약
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
+                            {[
+                                { label: '변동성 지수', value: computedStats.compositeVolatility, unit: '/100', color: computedStats.compositeVolatility > 50 ? 'text-rose-400' : 'text-emerald-400' },
+                                { label: '평균 Spread', value: computedStats.avgSpread, unit: 'WS', color: 'text-cyan-400' },
+                                { label: 'Spread σ', value: computedStats.spreadStdDev, unit: '', color: 'text-amber-400' },
+                                { label: 'ρ (감성↔Spread)', value: computedStats.sentimentCorrelation, unit: '', color: 'text-violet-400' },
+                                { label: '선대 규모', value: computedStats.fleetCount, unit: '척', color: 'text-slate-200' },
+                                { label: '고위험 선박', value: computedStats.highRiskCount, unit: '척', color: computedStats.highRiskCount > 2 ? 'text-rose-400' : 'text-emerald-400' },
+                            ].map((stat, i) => (
+                                <div key={i} className="bg-slate-800/50 rounded-xl p-3 text-center">
+                                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5">{stat.label}</div>
+                                    <div className={cn("text-xl font-black", stat.color)}>{stat.value}<span className="text-xs text-slate-600 ml-0.5">{stat.unit}</span></div>
+                                </div>
+                            ))}
                         </div>
-                    )}
-                </div>
-
-                {/* Statistics Summary Panel */}
-                <div className="mt-8 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6">
-                    <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2 uppercase tracking-wider">
-                        <Calculator size={14} className="text-cyan-400" /> 실시간 통계 요약
-                    </h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
-                        {[
-                            { label: '변동성 지수', value: computedStats.compositeVolatility, unit: '/100', color: computedStats.compositeVolatility > 50 ? 'text-rose-400' : 'text-emerald-400' },
-                            { label: '평균 Spread', value: computedStats.avgSpread, unit: 'WS', color: 'text-cyan-400' },
-                            { label: 'Spread σ', value: computedStats.spreadStdDev, unit: '', color: 'text-amber-400' },
-                            { label: 'ρ (감성↔Spread)', value: computedStats.sentimentCorrelation, unit: '', color: 'text-violet-400' },
-                            { label: '선대 규모', value: computedStats.fleetCount, unit: '척', color: 'text-slate-200' },
-                            { label: '고위험 선박', value: computedStats.highRiskCount, unit: '척', color: computedStats.highRiskCount > 2 ? 'text-rose-400' : 'text-emerald-400' },
-                        ].map((stat, i) => (
-                            <div key={i} className="bg-slate-800/50 rounded-xl p-3 text-center">
-                                <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5">{stat.label}</div>
-                                <div className={cn("text-xl font-black", stat.color)}>{stat.value}<span className="text-xs text-slate-600 ml-0.5">{stat.unit}</span></div>
-                            </div>
-                        ))}
                     </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 }

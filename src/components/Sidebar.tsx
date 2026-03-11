@@ -1,7 +1,9 @@
+import { useState, useEffect } from 'react';
 import {
-  Home, Newspaper, Settings, Anchor, Ship, FileText,
-  Activity, AlertTriangle, Globe, Menu, Zap,
-  Database, Shield, TrendingUp, Server, CheckCircle2
+  Home, Newspaper, Settings, Anchor, FileText,
+  Activity, Menu, Zap,
+  Database, Shield, TrendingUp, Server, CheckCircle2,
+  Star, Edit2, Check, X, Trash2, Globe
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario } from '../types';
@@ -17,6 +19,24 @@ interface SidebarProps {
   onToggleMinimize?: () => void;
 }
 
+interface FavoriteEntry {
+  scenarioId: string;
+  alias?: string; // custom user name
+}
+
+const FAVORITES_KEY = 'sidecar_scenario_favorites';
+
+function loadFavorites(): FavoriteEntry[] {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveFavorites(favs: FavoriteEntry[]) {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+}
+
 export default function Sidebar({
   activeTab,
   setActiveTab,
@@ -27,6 +47,12 @@ export default function Sidebar({
   isMinimized = false,
   onToggleMinimize,
 }: SidebarProps) {
+  const [favorites, setFavorites] = useState<FavoriteEntry[]>(() => loadFavorites());
+  const [editingFavId, setEditingFavId] = useState<string | null>(null);
+  const [editAlias, setEditAlias] = useState('');
+
+  useEffect(() => saveFavorites(favorites), [favorites]);
+
   const navItemClass =
     `flex items-center gap-3 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 cursor-pointer transition-all duration-200 rounded-lg ${isMinimized ? 'justify-center mx-3' : 'px-4 mx-2'}`;
   const activeClass = 'bg-slate-800/80 text-cyan-400 font-medium shadow-inner';
@@ -37,6 +63,36 @@ export default function Sidebar({
     if (s > 50) return 'bg-amber-500';
     return 'bg-emerald-500';
   };
+
+  const isFavorited = (id: string) => favorites.some(f => f.scenarioId === id);
+
+  const toggleFavorite = (scenarioId: string) => {
+    if (isFavorited(scenarioId)) {
+      setFavorites(prev => prev.filter(f => f.scenarioId !== scenarioId));
+    } else {
+      setFavorites(prev => [...prev, { scenarioId }]);
+    }
+  };
+
+  const updateAlias = (scenarioId: string, alias: string) => {
+    setFavorites(prev => prev.map(f => f.scenarioId === scenarioId ? { ...f, alias: alias.trim() || undefined } : f));
+    setEditingFavId(null);
+  };
+
+  const removeFavorite = (scenarioId: string) => {
+    setFavorites(prev => prev.filter(f => f.scenarioId !== scenarioId));
+  };
+
+  const getDisplayName = (scenario: Scenario) => {
+    const fav = favorites.find(f => f.scenarioId === scenario.id);
+    return fav?.alias || scenario.name;
+  };
+
+  // Split scenarios into favorites and others
+  const favScenarios = favorites
+    .map(f => scenarios.find(s => s.id === f.scenarioId))
+    .filter(Boolean) as Scenario[];
+  const nonFavScenarios = scenarios.filter(s => !isFavorited(s.id));
 
   return (
     <div className={cn(
@@ -56,7 +112,7 @@ export default function Sidebar({
             </div>
           )}
         </div>
-        <button onClick={onToggleMinimize} className="text-slate-500 hover:text-slate-300 transition-colors">
+        <button onClick={onToggleMinimize} className="text-slate-500 hover:text-slate-300 transition-colors" title="사이드바 토글">
           <Menu size={18} />
         </button>
       </div>
@@ -71,11 +127,11 @@ export default function Sidebar({
           <FileText size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && <span>보고서</span>}
         </div>
-        <div title="뉴스" className={cn(navItemClass, activeTab === 'news' && activeClass, "relative")} onClick={() => setActiveTab('news')}>
+        <div title="INTELLIGENCE DB" className={cn(navItemClass, activeTab === 'news' && activeClass, "relative")} onClick={() => setActiveTab('news')}>
           <Newspaper size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && (
             <>
-              <span>뉴스</span>
+              <span>INTELLIGENCE DB</span>
               <span className="ml-auto bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">Live</span>
             </>
           )}
@@ -117,19 +173,93 @@ export default function Sidebar({
             <button className="w-full text-left text-xs bg-slate-800/50 hover:bg-slate-700 p-2 rounded text-slate-300 transition-colors">📊 PPT/Word 추출 양식</button>
           </div>
         )}
+
+        {/* ═══ SCENARIO QUICK ACTIONS — Favorites system ═══ */}
         {activeTab === 'scenario-builder' && (
-          <div className="bg-amber-950/30 border border-amber-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-amber-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Zap size={12} /> 시나리오 퀵-액션</h5>
-            <div className="space-y-1.5">
-              {scenarios.map((s) => (
-                <div key={s.id} onClick={() => onScenarioQuickSwitch(s.id)} className="text-[11px] cursor-pointer text-slate-400 hover:text-amber-300 p-1.5 bg-slate-900/50 rounded border border-slate-800 hover:border-amber-900/50 transition-all flex items-center gap-2">
-                  <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', getRiskColor(s))} />
-                  <span className="truncate">{s.name}</span>
+          <div className="space-y-3">
+            {/* Favorites */}
+            <div className="bg-amber-950/30 border border-amber-900/50 rounded-lg p-3">
+              <h5 className="text-[11px] font-bold text-amber-400 mb-2 uppercase tracking-widest flex items-center gap-1.5">
+                <Star size={11} className="fill-amber-400" /> 즐겨찾기
+                <span className="ml-auto text-[9px] text-slate-600 font-mono">{favScenarios.length}</span>
+              </h5>
+              {favScenarios.length === 0 ? (
+                <p className="text-[10px] text-slate-500 leading-relaxed">아래 목록에서 ⭐ 눌러 즐겨찾기에 추가하세요</p>
+              ) : (
+                <div className="space-y-1">
+                  {favScenarios.map(s => (
+                    <div key={s.id} className="group relative">
+                      {editingFavId === s.id ? (
+                        <div className="flex items-center gap-1 p-1 bg-slate-900/60 rounded border border-amber-900/50">
+                          <input
+                            type="text" value={editAlias} onChange={(e) => setEditAlias(e.target.value)}
+                            className="flex-1 bg-transparent text-[11px] text-white px-1.5 py-0.5 focus:outline-none placeholder-slate-600"
+                            autoFocus placeholder={s.name}
+                          />
+                          <button onClick={() => updateAlias(s.id, editAlias)} title="저장" className="p-0.5 text-emerald-400 hover:bg-slate-800 rounded"><Check size={10} /></button>
+                          <button onClick={() => setEditingFavId(null)} title="취소" className="p-0.5 text-slate-400 hover:bg-slate-800 rounded"><X size={10} /></button>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => onScenarioQuickSwitch(s.id)}
+                          className={cn(
+                            "text-[11px] cursor-pointer p-1.5 rounded border transition-all flex items-center gap-2",
+                            activeScenarioId === s.id
+                              ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                              : "text-slate-400 hover:text-amber-300 bg-slate-900/50 border-slate-800 hover:border-amber-900/50"
+                          )}
+                        >
+                          <Star size={10} className="text-amber-400 fill-amber-400 shrink-0" />
+                          <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', getRiskColor(s))} />
+                          <span className="truncate flex-1">{getDisplayName(s)}</span>
+                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
+                            <button onClick={(e) => { e.stopPropagation(); setEditAlias(favorites.find(f => f.scenarioId === s.id)?.alias || ''); setEditingFavId(s.id); }} title="별칭 설정" className="p-0.5 text-slate-500 hover:text-amber-400"><Edit2 size={9} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); removeFavorite(s.id); }} title="즐겨찾기 해제" className="p-0.5 text-slate-500 hover:text-rose-400"><Trash2 size={9} /></button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+            </div>
+
+            {/* All Scenarios */}
+            <div className="bg-slate-800/20 border border-slate-800/50 rounded-lg p-3">
+              <h5 className="text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-widest flex items-center gap-1.5">
+                <Zap size={11} /> 전체 시나리오
+                <span className="ml-auto text-[9px] text-slate-600 font-mono">{scenarios.length}</span>
+              </h5>
+              <div className="space-y-1">
+                {scenarios.map(s => (
+                  <div
+                    key={s.id}
+                    onClick={() => onScenarioQuickSwitch(s.id)}
+                    className={cn(
+                      "group text-[11px] cursor-pointer p-1.5 rounded border transition-all flex items-center gap-2",
+                      activeScenarioId === s.id
+                        ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
+                        : "text-slate-400 hover:text-slate-200 bg-slate-900/30 border-slate-800/50 hover:border-slate-700"
+                    )}
+                  >
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFavorite(s.id); }}
+                      title={isFavorited(s.id) ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+                      className="shrink-0 p-0.5"
+                    >
+                      <Star size={10} className={cn(
+                        isFavorited(s.id) ? "text-amber-400 fill-amber-400" : "text-slate-600 group-hover:text-slate-400"
+                      )} />
+                    </button>
+                    <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', getRiskColor(s))} />
+                    <span className="truncate flex-1">{s.name}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
+
         {activeTab === 'ontology' && (
           <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
             <h5 className="text-[11px] font-bold text-emerald-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Shield size={12} /> 온톨로지 규칙</h5>

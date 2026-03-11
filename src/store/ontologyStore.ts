@@ -14,7 +14,6 @@ import type {
 import { computeScenarioBranch } from '../lib/utils';
 import {
     BASE_SCENARIOS,
-    FLEET_DATA,
     BASE_VULNERABILITY_DATA,
     BROKER_REPORTS,
     INSURANCE_CIRCULARS,
@@ -244,15 +243,8 @@ interface OntologyState {
 const initialParams = BASE_SCENARIOS[0].params;
 
 export const useOntologyStore = create<OntologyState>((set, get) => {
-    // Build merged fleet on init: ontology vessels + legacy FLEET_DATA
-    const ontologyFleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
-    const initialMergedFleet = [...ontologyFleet];
-    // Append any FLEET_DATA vessels not already present in ontology
-    FLEET_DATA.forEach((fv) => {
-        if (!initialMergedFleet.find((v) => v.vessel_name === fv.vessel_name)) {
-            initialMergedFleet.push(fv);
-        }
-    });
+    // Fleet is built purely from ontology vessels — no legacy FLEET_DATA merge needed
+    const initialMergedFleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
 
     return {
         // ---- Graph Data ----
@@ -390,18 +382,12 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const state = get();
             const { simulationParams, objects } = state;
 
-            // Build merged fleet from ontology + localStorage legacy data
+            // Fleet is now purely derived from ontology objects
             const ontologyFleet = mapOntologyToFleetVessels(objects);
             let mergedFleet = [...ontologyFleet];
 
-            // Append FLEET_DATA vessels not covered by ontology
-            FLEET_DATA.forEach((fv) => {
-                if (!mergedFleet.find((v) => v.vessel_name === fv.vessel_name)) {
-                    mergedFleet.push(fv);
-                }
-            });
-
             // Also include localStorage ontology data (legacy compat)
+            // DEDUP: only add vessels NOT already present in ontologyFleet
             try {
                 const stored = localStorage.getItem('sidecar_ontology');
                 if (stored) {
@@ -447,7 +433,15 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         })),
                     ];
 
-                    mergedFleet = [...customFleet, ...mergedFleet];
+                    // Dedup: only add entries not already in ontologyFleet
+                    // Normalize names by stripping emoji prefixes (🚢) and trimming whitespace
+                    const normalize = (n: string) => n.replace(/^[^\w]+/, '').trim();
+                    const existingNames = new Set(mergedFleet.map(v => normalize(v.vessel_name)));
+                    customFleet.forEach(cv => {
+                        if (!existingNames.has(normalize(cv.vessel_name))) {
+                            mergedFleet.push(cv);
+                        }
+                    });
                 }
             } catch (e) {
                 console.error('Failed to parse ontology fleet data', e);

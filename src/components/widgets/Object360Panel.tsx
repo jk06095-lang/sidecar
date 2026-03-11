@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, TrendingDown, AlertTriangle, Zap, DollarSign, Link2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
 import ActionWizard, { getActionsForType } from './ActionWizard';
+import { getCachedSanctionsCheck } from '../../services/maritimeService';
+import type { SanctionsResult } from '../../services/maritimeService';
 import type { OntologyObject, OntologyLink, OntologyActionType } from '../../types';
 
 interface Object360PanelProps {
@@ -285,34 +287,185 @@ function VesselWidget({ obj }: { obj: OntologyObject }) {
     const riskScore = (p.riskScore as number) || 0;
     const riskLevel = riskScore > 80 ? 'Critical' : riskScore > 50 ? 'High' : riskScore > 30 ? 'Medium' : 'Low';
 
+    // Sanctions check state
+    const [sanctions, setSanctions] = useState<SanctionsResult | null>(null);
+
+    useEffect(() => {
+        const vesselName = obj.title.replace(/^[^\w]+/, '').trim();
+        const imo = p.imo ? String(p.imo) : undefined;
+        getCachedSanctionsCheck(vesselName, imo).then(setSanctions);
+    }, [obj.title, p.imo]);
+
+    // Resource levels
+    const fuel = Number(p.fuel ?? 100);
+    const freshWater = Number(p.freshWater ?? 100);
+    const lubeOil = Number(p.lubeOil ?? 100);
+    const crewCount = Number(p.crewCount ?? 0);
+    const speed = Number(p.speed ?? p.avgSpeed ?? 0);
+    const heading = Number(p.heading ?? 0);
+    const destination = String(p.destination ?? p.destinationPort ?? '-');
+    const eta = p.eta ? new Date(String(p.eta)).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+
+    const getBarColor = (val: number, healthColor: string) =>
+        val < 30 ? 'bg-rose-500 animate-pulse' : healthColor;
+
+    const getTextColor = (val: number, healthColor: string) =>
+        val < 30 ? 'text-rose-400' : healthColor;
+
+    const sanctionsBadge = sanctions ? (
+        sanctions.status === 'CLEAR'
+            ? <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">✅ CLEAR</span>
+            : sanctions.status === 'SANCTIONED'
+                ? <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 animate-pulse">🚫 SANCTIONED</span>
+                : sanctions.status === 'PARTIAL_MATCH'
+                    ? <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">⚠ PARTIAL ({sanctions.matchCount})</span>
+                    : sanctions.status === 'ERROR'
+                        ? <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-500/15 text-slate-400 border border-slate-500/30">⚠ API Error</span>
+                        : <span className="px-2 py-0.5 rounded-full text-[9px] text-slate-500">⏳ checking...</span>
+    ) : <span className="px-2 py-0.5 rounded-full text-[9px] text-slate-500">⏳ checking...</span>;
+
     return (
-        <div className="p-4 border-b border-slate-800/50">
+        <div className="p-4 border-b border-slate-800/50 space-y-4">
             <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Ship size={12} /> Vessel Status
+                <Ship size={12} /> Vessel Status Dashboard
             </h3>
+
+            {/* ── Sanctions Check Badge ── */}
+            <div className="flex items-center justify-between bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/30">
+                <div className="flex items-center gap-2">
+                    <Shield size={12} className="text-amber-400" />
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">OpenSanctions</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    {sanctionsBadge}
+                    <button
+                        onClick={async () => {
+                            setSanctions(null);
+                            const vesselName = obj.title.replace(/^[^\w]+/, '').trim();
+                            const imo = p.imo ? String(p.imo) : undefined;
+                            const result = await getCachedSanctionsCheck(vesselName, imo);
+                            setSanctions(result);
+                        }}
+                        title="제재 재확인"
+                        className="p-1 text-slate-500 hover:text-cyan-400 transition-colors"
+                    >
+                        🔄
+                    </button>
+                </div>
+            </div>
+
+            {/* ── Vessel Identity Chips (IMO / MMSI / Flag / Call Sign) ── */}
+            {(p.imo || p.mmsi || p.flag || p.callSign) && (
+                <div className="flex flex-wrap gap-1.5">
+                    {p.imo && <span className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/30 text-[9px] font-mono text-slate-300">IMO {String(p.imo)}</span>}
+                    {p.mmsi && <span className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/30 text-[9px] font-mono text-slate-300">MMSI {String(p.mmsi)}</span>}
+                    {p.callSign && <span className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/30 text-[9px] font-mono text-slate-300">📡 {String(p.callSign)}</span>}
+                    {p.flag && <span className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/30 text-[9px] text-slate-300">🏳️ {String(p.flag)}</span>}
+                    {p.dwt && <span className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/30 text-[9px] font-mono text-slate-300">{Number(p.dwt).toLocaleString()} DWT</span>}
+                    {p.yearBuilt && <span className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/30 text-[9px] font-mono text-slate-300">Built {String(p.yearBuilt)}</span>}
+                </div>
+            )}
+
+            {/* ── Vessel Info Chips ── */}
             <div className="grid grid-cols-2 gap-2">
                 <MiniCard label="선종" value={String(p.vesselType || '-')} color="text-slate-200" />
-                <MiniCard label="위치" value={String(p.location || '-')} color="text-slate-200" />
-                <MiniCard label="항해 진행" value={`${p.sailedDays || 0}/${p.planDays || 0}d`} color="text-cyan-400" />
-                <MiniCard label="평균 속도" value={`${p.avgSpeed || 0} kn`} color="text-cyan-400" />
+                <MiniCard label="Risk Level" value={riskLevel} color={
+                    riskLevel === 'Critical' ? 'text-rose-400' : riskLevel === 'High' ? 'text-orange-400' : riskLevel === 'Medium' ? 'text-amber-400' : 'text-emerald-400'
+                } />
                 <MiniCard label="CII 등급" value={String(p.ciiRating || '-')} color={
                     p.ciiRating === 'A' ? 'text-emerald-400' : p.ciiRating === 'B' ? 'text-cyan-400' : p.ciiRating === 'C' ? 'text-amber-400' : 'text-rose-400'
                 } />
                 <MiniCard label="F.O. ROB" value={`${Number(p.foRob || 0).toLocaleString()} mt`} color="text-slate-200" />
-                <MiniCard label="연료 소모" value={`${p.avgIfo || 0} mt/d`} color="text-amber-400" />
-                <MiniCard label="Risk Level" value={riskLevel} color={
-                    riskLevel === 'Critical' ? 'text-rose-400' : riskLevel === 'High' ? 'text-orange-400' : riskLevel === 'Medium' ? 'text-amber-400' : 'text-emerald-400'
-                } />
             </div>
-            <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                    className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, ((Number(p.sailedDays) || 0) / (Number(p.planDays) || 1)) * 100)}%` }}
-                />
+
+            {/* ── Resource Level Progress Bars ── */}
+            <div className="space-y-3 bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
+                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                    <Fuel size={10} /> 선박 소모품 잔량 (Consumables)
+                </div>
+
+                {/* Fuel */}
+                <div>
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-slate-400 flex items-center gap-1">⛽ Fuel (Bunker)</span>
+                        <div className="flex items-center gap-1.5">
+                            {fuel < 30 && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-bold animate-pulse border border-rose-500/30">⚠ CRITICAL</span>}
+                            <span className={cn('text-xs font-bold font-mono', getTextColor(fuel, 'text-emerald-400'))}>{fuel}%</span>
+                        </div>
+                    </div>
+                    <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all duration-700', getBarColor(fuel, 'bg-emerald-500'))} style={{ width: `${fuel}%` }} />
+                    </div>
+                </div>
+
+                {/* Fresh Water */}
+                <div>
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-slate-400 flex items-center gap-1">💧 Fresh Water</span>
+                        <div className="flex items-center gap-1.5">
+                            {freshWater < 30 && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-bold animate-pulse border border-rose-500/30">⚠ CRITICAL</span>}
+                            <span className={cn('text-xs font-bold font-mono', getTextColor(freshWater, 'text-cyan-400'))}>{freshWater}%</span>
+                        </div>
+                    </div>
+                    <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all duration-700', getBarColor(freshWater, 'bg-cyan-500'))} style={{ width: `${freshWater}%` }} />
+                    </div>
+                </div>
+
+                {/* Lube Oil */}
+                <div>
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-slate-400 flex items-center gap-1">🛢️ Lube Oil</span>
+                        <div className="flex items-center gap-1.5">
+                            {lubeOil < 30 && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-bold animate-pulse border border-rose-500/30">⚠ CRITICAL</span>}
+                            <span className={cn('text-xs font-bold font-mono', getTextColor(lubeOil, 'text-blue-400'))}>{lubeOil}%</span>
+                        </div>
+                    </div>
+                    <div className="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all duration-700', getBarColor(lubeOil, 'bg-blue-500'))} style={{ width: `${lubeOil}%` }} />
+                    </div>
+                </div>
             </div>
-            <div className="flex justify-between mt-1 text-[9px] text-slate-500 font-mono">
-                <span>{p.departurePort}</span>
-                <span>{p.destinationPort}</span>
+
+            {/* ── Crew / Speed / Heading Chips ── */}
+            <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/30">
+                    <Ship size={12} className="text-cyan-400" />
+                    <span className="text-[10px] text-slate-400">승선원</span>
+                    <span className="text-xs font-bold text-slate-200 font-mono">{crewCount}명</span>
+                </div>
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/30">
+                    <Navigation size={12} className="text-emerald-400" />
+                    <span className="text-[10px] text-slate-400">속도</span>
+                    <span className="text-xs font-bold text-slate-200 font-mono">{speed} kn</span>
+                </div>
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/30">
+                    <Navigation size={12} className="text-amber-400" style={{ transform: `rotate(${heading}deg)` }} />
+                    <span className="text-[10px] text-slate-400">기수</span>
+                    <span className="text-xs font-bold text-slate-200 font-mono">{heading}°</span>
+                </div>
+            </div>
+
+            {/* ── Voyage Progress ── */}
+            <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-slate-400">항해 진행</span>
+                    <span className="text-xs text-cyan-400 font-mono font-bold">{p.sailedDays || 0}/{p.planDays || 0}d</span>
+                </div>
+                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                        className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, ((Number(p.sailedDays) || 0) / (Number(p.planDays) || 1)) * 100)}%` }}
+                    />
+                </div>
+                <div className="flex justify-between mt-1.5 text-[9px] text-slate-500 font-mono">
+                    <span>{p.departurePort}</span>
+                    <span>{destination}</span>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/30">
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1"><Anchor size={10} /> ETA</span>
+                    <span className="text-xs font-medium text-slate-200 font-mono">{eta}</span>
+                </div>
             </div>
         </div>
     );

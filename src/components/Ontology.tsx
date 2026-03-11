@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import OntologyGraph from './widgets/OntologyGraph';
 import Object360Panel from './widgets/Object360Panel';
 import ObjectTypeWizard from './widgets/ObjectTypeWizard';
+import { VESSEL_PRESETS, FLAG_OPTIONS } from '../services/maritimeService';
 import type { ObjectTypeDefinition } from '../types';
 
 interface OntologyItem {
@@ -42,11 +43,9 @@ interface TreeFolder {
 }
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-    '운영 자산': <Ship size={13} className="text-cyan-400" />,
-    '비상 대응 지침': <AlertTriangle size={13} className="text-rose-400" />,
-    '운영 요소': <TrendingUp size={13} className="text-amber-400" />,
-    '규제 요소': <Shield size={13} className="text-emerald-400" />,
-    '내부 지침': <FileText size={13} className="text-blue-400" />,
+    '거시 경제 & 리스크': <AlertTriangle size={13} className="text-rose-400" />,
+    '물리적 해사 자산': <Ship size={13} className="text-cyan-400" />,
+    '글로벌 병목 & 항만': <Anchor size={13} className="text-purple-400" />,
     'Object Instance': <Sparkles size={13} className="text-cyan-400" />,
 };
 
@@ -86,14 +85,12 @@ export default function Ontology() {
     ];
 
     const defaultOntology: OntologyItem[] = [
-        { id: 'obj_oceanic_titan', category: '운영 자산', title: 'Oceanic Titan', content: 'VLCC급 원유 운반선. 현재 페르시아만 호르무즈 해협 통과 중.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'object_instance', objectTypeId: 'FleetVessel', properties: { vesselId: 'V-001', name: 'Oceanic Titan', type: 'VLCC', location: 'Hormuz Strait (Persian Gulf)', riskScore: 55 } },
-        { id: 'obj_pacific_pioneer', category: '운영 자산', title: 'Pacific Pioneer', content: 'Suezmax급 유조선. 서아프리카 라고스 정박 후 출항.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'object_instance', objectTypeId: 'FleetVessel', properties: { vesselId: 'V-002', name: 'Pacific Pioneer', type: 'Suezmax', location: 'West Africa (Lagos Anchorage)', riskScore: 20 } },
-        { id: 'obj_gulf_voyager', category: '운영 자산', title: 'Gulf Voyager', content: 'Aframax급 유조선. 중동 푸자이라 인근에서 급유 대기.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'object_instance', objectTypeId: 'FleetVessel', properties: { vesselId: 'V-003', name: 'Gulf Voyager', type: 'Aframax', location: 'Middle East (Fujairah)', riskScore: 50 } },
-        { id: 'obj_nordic_carrier', category: '운영 자산', title: 'Nordic Carrier', content: 'VLCC급. 북유럽 로테르담 인근 항해 중. 안정구역.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'object_instance', objectTypeId: 'FleetVessel', properties: { vesselId: 'V-004', name: 'Nordic Carrier', type: 'VLCC', location: 'North Sea (Rotterdam)', riskScore: 10 } },
-        { id: '1', category: '비상 대응 지침', title: '페르시아만/호르무즈 해협 통항 행동 지침', content: '이란/이스라엘 통항 레벨 3 격상. UKMTO 보고 필수.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'document' },
-        { id: 'f_vlcc', category: '운영 요소', subCategory: '자산 (Asset)', title: 'VLCC Fleet Size (보유 선대)', content: '현재 운영 중인 초대형 원유 운반선 총 톤수 및 댓수. (연결 노드: VLSFO, 운임)', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'factor' },
-        { id: 'f_port_congestion', category: '운영 요소', title: 'Port Congestion Index (항만 체선율)', content: '글로벌 주요 허브 항만(상하이, 싱가포르 등)의 물류 지연 및 대기 시간 지표. 공급망 마비 시 상승.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'factor' },
-        { id: 'f_eco_compliance', category: '규제 요소', title: '대체 연비 규제 (CII/EEXI) 달성률', content: 'IMO 환경 규제 대응을 위한 선대 효율성 달성 지표. 위반 시 운항 정지 스크랩.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'factor' },
+        // ── Physical Vessel Objects (editable/deletable) ──
+        { id: 'vessel-vl-breeze', category: '물리적 해사 자산', title: '🚢 VL BREEZE', content: 'VLCC 319K DWT Crude Oil Tanker. 대한민국 국적 (IMO 9926738). Ras Laffan → Ulsan. 현재 Persian Gulf 대기.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'object_instance', objectTypeId: 'FleetVessel', properties: { vesselId: 'V-001', name: 'VL BREEZE', type: 'Crude Oil Tanker (VLCC)', location: 'Persian Gulf — Ras Laffan OPL', riskScore: 72 } },
+        { id: 'vessel-star-maria', category: '물리적 해사 자산', title: '🚢 STAR MARIA', content: 'Bulk Carrier 82K DWT. 마셜아일랜드 국적 (IMO 9401489). Sharjah → Shinas. Arabian Sea 항해 중.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'object_instance', objectTypeId: 'FleetVessel', properties: { vesselId: 'V-002', name: 'STAR MARIA', type: 'Bulk Carrier', location: 'Arabian Sea — En Route to Shinas', riskScore: 55 } },
+        // ── Macro & Risk Documents ──
+        { id: 'doc_hormuz_sop', category: '거시 경제 & 리스크', title: '페르시아만/호르무즈 해협 통항 행동 지침', content: '이란/이스라엘 통항 레벨 3 격상. UKMTO 보고 필수. 모든 선박은 사전 72시간 통보 의무.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'document' },
+        { id: 'doc_imo_cii', category: '거시 경제 & 리스크', title: 'IMO CII/EEXI 규제 달성률 보고', content: 'IMO 환경 규제 대응을 위한 선대 효율성 달성 지표. 위반 시 운항 정지 리스크.', lastUpdated: new Date().toLocaleDateString('ko-KR'), isActive: true, type: 'document' },
     ];
 
     const [items, setItems] = useState<OntologyItem[]>(() => {
@@ -247,7 +244,7 @@ export default function Ontology() {
         });
 
         // Sort categories for consistent order
-        const order = ['운영 자산', '비상 대응 지침', '운영 요소', '규제 요소', '내부 지침'];
+        const order = ['물리적 해사 자산', '거시 경제 & 리스크', '글로벌 병목 & 항만'];
         const sorted = [...categoryMap.entries()].sort(([a], [b]) => {
             const ai = order.indexOf(a);
             const bi = order.indexOf(b);
@@ -284,141 +281,119 @@ export default function Ontology() {
     // RENDER
     // ============================================================
     return (
-        <div className="flex h-full bg-slate-950 overflow-hidden">
+        <div className="flex h-full w-full bg-slate-950 overflow-hidden">
             {/* ========== LEFT PANEL: File Tree Explorer ========== */}
-            <div className="w-[320px] shrink-0 flex flex-col bg-slate-900/70 border-r border-slate-800/60 overflow-hidden">
-                {/* Tree Header */}
-                <div className="px-4 py-3.5 border-b border-slate-800/60 bg-slate-900/90 shrink-0">
-                    <div className="flex items-center justify-between mb-3">
-                        <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2 tracking-wide uppercase">
-                            <Database size={14} className="text-cyan-400" />
-                            Object Explorer
+            <div className="w-[280px] shrink-0 flex flex-col bg-zinc-900/80 border-r border-zinc-800 overflow-hidden">
+                {/* Sticky Search Header — Glassmorphism */}
+                <div className="sticky top-0 z-10 px-3 py-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-xl shrink-0">
+                    <div className="flex items-center justify-between mb-2.5">
+                        <h2 className="text-xs font-bold text-slate-200 flex items-center gap-1.5 tracking-widest uppercase">
+                            <Database size={12} className="text-cyan-400" />
+                            Explorer
                         </h2>
-                        <span className="text-[10px] text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full font-mono">
-                            {totalCount} nodes
+                        <span className="text-[9px] text-slate-500 bg-zinc-800 px-1.5 py-0.5 rounded font-mono">
+                            {totalCount}
                         </span>
                     </div>
-
-                    {/* Search */}
                     <div className="relative">
-                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
                         <input
                             type="text"
                             placeholder="노드 검색..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full bg-slate-800/80 border border-slate-700/50 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500/50 transition-colors placeholder-slate-500"
+                            className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all placeholder-slate-600"
                         />
                     </div>
                 </div>
 
-                {/* Toolbar: Add buttons */}
-                <div className="px-3 py-2 border-b border-slate-800/40 flex items-center gap-1.5 shrink-0 bg-slate-900/40">
+                {/* Toolbar */}
+                <div className="px-2 py-1.5 border-b border-zinc-800/60 flex items-center gap-1 shrink-0 bg-zinc-900/40">
                     <button
-                        onClick={() => { setFormData({ ...formData, type: 'document', category: '내부 지침' }); setShowAddForm(true); }}
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] font-medium rounded-md transition-colors border border-slate-700/50"
-                        title="문서 추가"
+                        onClick={() => {
+                            setFormData({
+                                category: '물리적 해사 자산',
+                                title: '',
+                                content: '',
+                                type: 'object_instance',
+                                objectTypeId: 'FleetVessel',
+                                properties: { vesselId: `V-${String(Date.now()).slice(-4)}`, name: '', type: '', location: '', riskScore: 50 },
+                            });
+                            setShowAddForm(true);
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 bg-cyan-900/30 hover:bg-cyan-800/40 text-cyan-400 hover:text-cyan-300 text-[10px] font-bold rounded transition-colors border border-cyan-800/40"
+                        title="오브제 추가"
                     >
-                        <Plus size={10} /> 객체 추가
+                        <Plus size={11} /> 오브제 추가
                     </button>
                     <button
-                        onClick={() => { setFormData({ category: '운영 요소', title: '', content: '', type: 'factor', subCategory: '자산 (Asset)', defaultValue: 50 }); setShowAddForm(true); }}
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] font-medium rounded-md transition-colors border border-slate-700/50"
-                        title="관계 연결"
+                        onClick={() => { setFormData({ category: '거시 경제 & 리스크', title: '', content: '', type: 'document' }); setShowAddForm(true); }}
+                        className="flex items-center gap-1 px-2 py-1 bg-zinc-800/60 hover:bg-zinc-700 text-slate-400 hover:text-slate-200 text-[10px] font-medium rounded transition-colors border border-zinc-700/50"
+                        title="문서 추가"
                     >
-                        <Link2 size={10} /> 관계 연결
+                        <FileText size={10} /> 문서
                     </button>
                     <div className="flex-1" />
                     <button
                         onClick={() => setShowObjectWizard(true)}
-                        className="flex items-center gap-1 px-2 py-1.5 bg-cyan-900/30 hover:bg-cyan-800/40 text-cyan-400 text-[10px] font-bold rounded-md transition-colors border border-cyan-700/30"
+                        className="p-1 text-slate-500 hover:text-cyan-400 rounded transition-colors"
                         title="Create Object Type"
                     >
-                        <Sparkles size={10} /> Type
+                        <Sparkles size={11} />
                     </button>
                     <button
                         onClick={handleResetDefaults}
-                        className="p-1.5 text-slate-500 hover:text-amber-400 rounded-md transition-colors"
+                        className="p-1 text-slate-500 hover:text-amber-400 rounded transition-colors"
                         title="초기화"
                     >
                         <RotateCcw size={11} />
                     </button>
                 </div>
 
-                {/* Object Types Section (collapsed by default) */}
-                {objectTypes.length > 0 && (
-                    <div className="px-2 pt-2 pb-1 shrink-0">
-                        <div className="text-[9px] text-slate-500 uppercase tracking-widest px-2 mb-1 font-bold">Schema Types</div>
-                        {objectTypes.map(ot => (
-                            <div key={ot.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-800/40 group/ot transition-colors">
-                                <Sparkles size={11} className="text-cyan-500 shrink-0" />
-                                <span className="text-[11px] text-slate-300 truncate flex-1">{ot.displayName}</span>
-                                <span className="text-[9px] text-slate-600 font-mono">{ot.properties.length}p</span>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const defaultProps: Record<string, any> = {};
-                                        ot.properties.forEach(p => defaultProps[p.id] = p.baseType === 'number' ? 0 : '');
-                                        setFormData({ category: ot.groups[0] || 'Object Instance', title: `New ${ot.displayName}`, content: `Instance of ${ot.displayName}`, type: 'object_instance', objectTypeId: ot.id, properties: defaultProps });
-                                        setShowAddForm(true);
-                                    }}
-                                    className="opacity-0 group-hover/ot:opacity-100 p-0.5 text-cyan-500 hover:text-cyan-300 transition-all"
-                                    title="Add Instance"
-                                >
-                                    <Plus size={11} />
-                                </button>
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); setObjectTypes(objectTypes.filter(o => o.id !== ot.id)); }}
-                                    className="opacity-0 group-hover/ot:opacity-100 p-0.5 text-slate-600 hover:text-rose-400 transition-all"
-                                    title="Delete Type"
-                                >
-                                    <Trash2 size={10} />
-                                </button>
-                            </div>
-                        ))}
-                        <div className="border-b border-slate-800/40 mt-1.5 mb-1" />
-                    </div>
-                )}
+                {/* Object Types are intentionally not rendered as tree nodes.
+                    Vessels are physical objects, not abstract schema types.
+                    The graph shows real object instances from the Zustand store. */}
 
                 {/* ========== FILE TREE ========== */}
-                <div ref={treeListRef} className="flex-1 overflow-y-auto custom-scrollbar px-2 py-1 min-h-0">
+                <div ref={treeListRef} className="flex-1 overflow-y-auto custom-scrollbar px-1.5 py-1 min-h-0">
                     {treeFolders.length === 0 && (
                         <div className="text-center text-xs text-slate-500 mt-10">검색 결과 없음</div>
                     )}
 
                     {treeFolders.map(folder => {
-                        const isExpanded = expandedFolders[folder.name] ?? (folder.name === '운영 자산');
+                        const isExpanded = expandedFolders[folder.name] ?? (folder.name === '물리적 해사 자산');
                         return (
-                            <div key={folder.name} className="mb-0.5 select-none">
+                            <div key={folder.name} className="mb-px select-none">
                                 {/* Folder row */}
                                 <button
                                     onClick={() => toggleFolder(folder.name)}
-                                    className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-slate-800/40 text-slate-300 transition-colors group/folder"
+                                    className="w-full flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-800/50 text-slate-300 transition-colors group/folder"
                                 >
                                     <ChevronRight
-                                        size={12}
+                                        size={11}
                                         className={cn(
                                             "text-slate-500 transition-transform duration-200 shrink-0",
                                             isExpanded && "rotate-90"
                                         )}
                                     />
                                     {isExpanded
-                                        ? <FolderOpen size={14} className="text-amber-500 shrink-0" />
-                                        : <Folder size={14} className="text-amber-500/70 shrink-0" />
+                                        ? <FolderOpen size={13} className="text-amber-500 shrink-0" />
+                                        : <Folder size={13} className="text-amber-500/70 shrink-0" />
                                     }
                                     <span className="text-[11px] font-semibold tracking-wide truncate">{folder.name}</span>
-                                    <span className="ml-auto text-[9px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded-full shrink-0">
+                                    <span className="ml-auto text-[9px] text-slate-600 bg-zinc-800/60 px-1.5 rounded shrink-0">
                                         {folder.items.length}
                                     </span>
                                 </button>
 
-                                {/* Folder children with indent + guide line */}
+                                {/* Folder children — VS Code depth guide */}
                                 {isExpanded && (
-                                    <div className="ml-[14px] pl-3 border-l border-slate-800/50 space-y-px pb-1">
+                                    <div className="ml-[14px] pl-2.5 border-l border-zinc-700/50 space-y-px pb-0.5">
                                         {folder.items.map(item => {
                                             const isSelected = selectedObjectId === item.id;
                                             const riskScore = item.properties?.riskScore;
                                             const riskLevel = item.vesselData?.riskLevel;
+                                            const effectiveRisk = riskScore ?? (riskLevel === 'Critical' ? 90 : riskLevel === 'High' ? 70 : riskLevel === 'Medium' ? 50 : 20);
 
                                             return (
                                                 <div
@@ -426,50 +401,49 @@ export default function Ontology() {
                                                     key={item.id}
                                                     onClick={() => handleSelectObject(item.id)}
                                                     className={cn(
-                                                        "group/item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-all relative",
-                                                        "before:absolute before:left-[-13px] before:top-1/2 before:w-2.5 before:h-px before:bg-slate-800/50",
+                                                        "group/item flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-all duration-150 relative",
+                                                        "before:absolute before:left-[-11px] before:top-1/2 before:w-2 before:h-px before:bg-zinc-700/50",
                                                         isSelected
-                                                            ? "bg-cyan-500/10 text-cyan-300 border border-cyan-500/20"
+                                                            ? "bg-blue-500/10 text-blue-400 border-l-2 border-l-blue-400 -ml-px pl-[9px]"
                                                             : item.isActive
-                                                                ? "hover:bg-slate-800/30 text-slate-300"
-                                                                : "hover:bg-slate-800/20 text-slate-500 opacity-50"
+                                                                ? "hover:bg-zinc-800/50 text-slate-300"
+                                                                : "hover:bg-zinc-800/30 text-slate-500 opacity-50"
                                                     )}
                                                 >
-                                                    {/* Item type icon */}
                                                     <div className="shrink-0">
-                                                        {ITEM_TYPE_ICONS[item.type || 'document'] || <FileText size={12} className="text-slate-400" />}
+                                                        {ITEM_TYPE_ICONS[item.type || 'document'] || <FileText size={11} className="text-slate-400" />}
                                                     </div>
 
-                                                    {/* Title */}
+                                                    {/* Title with search highlight */}
                                                     <span className={cn(
-                                                        "text-[11px] truncate flex-1 leading-tight",
+                                                        "text-sm truncate flex-1 leading-tight",
                                                         isSelected ? "font-semibold" : "font-medium"
-                                                    )}>
-                                                        {item.title}
+                                                    )} dangerouslySetInnerHTML={searchTerm ? {
+                                                        __html: item.title.replace(
+                                                            new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+                                                            '<mark class="bg-yellow-400/30 text-yellow-200 rounded-sm px-0.5">$1</mark>'
+                                                        )
+                                                    } : undefined}>
+                                                        {searchTerm ? undefined : item.title}
                                                     </span>
 
-                                                    {/* Risk indicator dot */}
-                                                    {riskLevel && (
-                                                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", RISK_DOT[riskLevel] || 'bg-slate-500')} />
-                                                    )}
-                                                    {riskScore !== undefined && riskScore >= 40 && !riskLevel && (
-                                                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0",
-                                                            riskScore >= 70 ? 'bg-rose-500' : riskScore >= 50 ? 'bg-amber-500' : 'bg-cyan-500'
-                                                        )} />
-                                                    )}
+                                                    {/* Risk dot */}
+                                                    <div className={cn("w-1.5 h-1.5 rounded-full shrink-0",
+                                                        effectiveRisk >= 70 ? 'bg-rose-500 animate-pulse' : effectiveRisk >= 40 ? 'bg-amber-500' : 'bg-emerald-500'
+                                                    )} />
 
-                                                    {/* Hover actions */}
-                                                    <div className="hidden group-hover/item:flex items-center gap-0.5 shrink-0">
+                                                    {/* Quick Actions — hover reveal */}
+                                                    <div className="opacity-0 group-hover/item:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity duration-150">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); editItem(item); }}
-                                                            className="p-1 text-slate-500 hover:text-cyan-400 rounded transition-colors"
+                                                            className="p-0.5 text-slate-500 hover:text-cyan-400 rounded transition-colors"
                                                             title="편집"
                                                         >
                                                             <Edit2 size={10} />
                                                         </button>
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}
-                                                            className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
+                                                            className="p-0.5 text-slate-500 hover:text-rose-400 rounded transition-colors"
                                                             title="삭제"
                                                         >
                                                             <Trash2 size={10} />
@@ -587,34 +561,147 @@ export default function Ontology() {
                             )}
 
                             {formData.type === 'object_instance' && formData.objectTypeId && (
-                                <div className="border border-cyan-900/30 bg-cyan-950/10 p-5 rounded-xl space-y-4">
-                                    <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-cyan-900/50 pb-2">
-                                        <Sparkles size={12} /> Object Properties ({formData.objectTypeId})
+                                <div className="border border-cyan-900/30 bg-cyan-950/10 p-5 rounded-xl space-y-5">
+                                    <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest flex items-center gap-2 border-b border-cyan-900/50 pb-2">
+                                        <Ship size={12} /> 선박 등록 — Vessel Preset
                                     </p>
+
+                                    {/* Vessel Type Preset Selector */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-400 mb-2">선종 프리셋 (Quick Select)</label>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {VESSEL_PRESETS.map(preset => (
+                                                <button
+                                                    key={preset.id}
+                                                    type="button"
+                                                    onClick={() => setFormData(prev => ({
+                                                        ...prev,
+                                                        properties: {
+                                                            ...prev.properties,
+                                                            type: preset.defaults.vesselType,
+                                                            dwt: preset.defaults.dwt,
+                                                            loa: preset.defaults.loa,
+                                                            beam: preset.defaults.beam,
+                                                            speedCp: preset.defaults.speedCp,
+                                                            avgIfo: preset.defaults.avgIfo,
+                                                        },
+                                                    }))}
+                                                    title={preset.labelKo}
+                                                    className={cn(
+                                                        'px-2.5 py-1.5 text-[10px] font-bold rounded-lg border transition-all',
+                                                        formData.properties?.type === preset.defaults.vesselType
+                                                            ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300'
+                                                            : 'bg-slate-800/60 border-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                                                    )}
+                                                >
+                                                    {preset.icon} {preset.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Core Identity Fields */}
                                     <div className="grid grid-cols-2 gap-4">
-                                        {objectTypes.find(ot => ot.id === formData.objectTypeId)?.properties.map(prop => (
-                                            <div key={prop.id}>
-                                                <label className="block text-xs font-medium text-slate-400 mb-1.5 flex items-center gap-1.5">
-                                                    {prop.displayName}
-                                                    {prop.isPrimaryKey && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[8px] uppercase tracking-wider">PK</span>}
-                                                    {prop.isTitleKey && <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[8px] uppercase tracking-wider">Title</span>}
-                                                </label>
-                                                <input
-                                                    type={prop.baseType === 'number' ? 'number' : 'text'}
-                                                    value={formData.properties?.[prop.id] !== undefined ? formData.properties[prop.id] : ''}
-                                                    onChange={e => {
-                                                        const val = prop.baseType === 'number' ? Number(e.target.value) : e.target.value;
-                                                        setFormData(prev => {
-                                                            const newProps = { ...prev.properties, [prop.id]: val };
-                                                            const isTitle = prop.isTitleKey;
-                                                            return { ...prev, properties: newProps, title: isTitle ? String(val) : prev.title };
-                                                        });
-                                                    }}
-                                                    placeholder={`Enter ${prop.displayName}`}
-                                                    className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
-                                                />
+                                        <div className="col-span-2">
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">선명 (Vessel Name) *</label>
+                                            <input
+                                                type="text"
+                                                value={formData.properties?.name || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, title: `🚢 ${e.target.value}`, properties: { ...prev.properties, name: e.target.value } }))}
+                                                placeholder="예: VL BREEZE"
+                                                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">IMO 번호</label>
+                                            <input
+                                                type="text"
+                                                value={formData.properties?.imo || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, imo: e.target.value } }))}
+                                                placeholder="7자리 (예: 9926738)"
+                                                maxLength={7}
+                                                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">MMSI</label>
+                                            <input
+                                                type="text"
+                                                value={formData.properties?.mmsi || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, mmsi: e.target.value } }))}
+                                                placeholder="9자리 (예: 441345000)"
+                                                maxLength={9}
+                                                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">Call Sign (호출부호)</label>
+                                            <input
+                                                type="text"
+                                                value={formData.properties?.callSign || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, callSign: e.target.value } }))}
+                                                placeholder="예: D7YP"
+                                                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">국적 (Flag)</label>
+                                            <select
+                                                value={formData.properties?.flag || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, flag: e.target.value } }))}
+                                                title="국적 선택"
+                                                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
+                                            >
+                                                <option value="">선택...</option>
+                                                {FLAG_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Physical Specifications */}
+                                    <div>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                            <Anchor size={10} /> 선체 제원 (Physical Specs)
+                                        </p>
+                                        <div className="grid grid-cols-4 gap-3">
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">DWT (t)</label>
+                                                <input type="number" value={formData.properties?.dwt || ''} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, dwt: Number(e.target.value) } }))} placeholder="300000" className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono" />
                                             </div>
-                                        ))}
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">LOA (m)</label>
+                                                <input type="number" value={formData.properties?.loa || ''} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, loa: Number(e.target.value) } }))} placeholder="333" className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">Beam (m)</label>
+                                                <input type="number" value={formData.properties?.beam || ''} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, beam: Number(e.target.value) } }))} placeholder="60" className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">건조년도</label>
+                                                <input type="number" value={formData.properties?.yearBuilt || ''} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, yearBuilt: Number(e.target.value) } }))} placeholder="2022" className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono" />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Operational defaults */}
+                                    <div>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                            <Fuel size={10} /> 운항 초기값 (Operational Defaults)
+                                        </p>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">위치 (Location)</label>
+                                                <input type="text" value={formData.properties?.location || ''} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, location: e.target.value } }))} placeholder="예: Persian Gulf" className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">Risk Score</label>
+                                                <input type="number" min={0} max={100} value={formData.properties?.riskScore ?? 50} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, riskScore: Number(e.target.value) } }))} className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-medium text-slate-500 mb-1">선종 (Type)</label>
+                                                <input type="text" value={formData.properties?.type || ''} onChange={e => setFormData(prev => ({ ...prev, properties: { ...prev.properties, type: e.target.value } }))} placeholder="Auto-filled by preset" className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500" />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -642,17 +729,29 @@ export default function Ontology() {
                         </div>
                     </div>
                 ) : (
-                    /* ========== GRAPH + Object360 Panel ========== */
+                    /* ========== GRAPH + 360 Inspector ========== */
                     <div className="flex-1 flex overflow-hidden min-h-0">
-                        <div className="flex-1 bg-slate-900/50 overflow-hidden relative min-h-0">
+                        <div className="flex-1 bg-slate-950 overflow-hidden relative min-h-0">
                             <OntologyGraph onSelectObject={handleSelectObject} selectedObjectId={selectedObjectId} />
                         </div>
-                        {selectedObjectId && (
+                        {/* Right 360 Pane — always visible */}
+                        {selectedObjectId ? (
                             <Object360Panel
                                 objectId={selectedObjectId}
                                 onClose={() => setSelectedObjectId(null)}
                                 onNavigate={handleNavigateObject}
                             />
+                        ) : (
+                            <div className="w-[360px] shrink-0 bg-zinc-900/60 border-l border-zinc-800 flex flex-col items-center justify-center text-center p-8">
+                                <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/30 flex items-center justify-center mb-4">
+                                    <Database size={24} className="text-zinc-600" />
+                                </div>
+                                <p className="text-sm font-medium text-zinc-500 mb-1">자산을 선택하여</p>
+                                <p className="text-sm font-medium text-zinc-500">상세 속성을 확인하세요</p>
+                                <p className="text-[10px] text-zinc-600 mt-3 max-w-[200px] leading-relaxed">
+                                    좌측 트리 또는 중앙 그래프에서 노드를 클릭하면 360° 인스펙터가 표시됩니다.
+                                </p>
+                            </div>
                         )}
                     </div>
                 )}

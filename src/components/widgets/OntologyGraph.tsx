@@ -83,10 +83,33 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
     const draggedNodeRef = useRef<GraphNode | null>(null);
 
+    // Figma-like pan/zoom
+    const [panX, setPanX] = useState(0);
+    const [panY, setPanY] = useState(0);
+    const [zoom, setZoom] = useState(1);
+    const spaceHeldRef = useRef(false);
+    const isPanningRef = useRef(false);
+    const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
     const nodesRef = useRef<GraphNode[]>([]);
     const linksRef = useRef<GraphLink[]>([]);
     const animFrameRef = useRef<number>(0);
     const timeRef = useRef(0);
+    const panRef = useRef({ x: 0, y: 0 });
+    const zoomRef = useRef(1);
+
+    // Sync pan/zoom refs
+    useEffect(() => { panRef.current = { x: panX, y: panY }; }, [panX, panY]);
+    useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+    // Spacebar listener
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); spaceHeldRef.current = true; } };
+        const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { spaceHeldRef.current = false; isPanningRef.current = false; } };
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+        return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    }, []);
 
     // ============================================================
     // BUILD GRAPH FROM STORE
@@ -295,6 +318,11 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
             const currentLinks = linksRef.current;
             const cx = canvas.width / 2;
             const cy = canvas.height / 2;
+
+            // Apply pan/zoom transform
+            ctx.save();
+            ctx.translate(panRef.current.x, panRef.current.y);
+            ctx.scale(zoomRef.current, zoomRef.current);
 
             const visibleNodes = currentNodes.filter((n) => n.visible);
             const visibleLinks = currentLinks.filter((l) => l.visible);
@@ -519,6 +547,8 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 }
             });
 
+            ctx.restore();
+
             animFrameRef.current = requestAnimationFrame(tick);
         };
 
@@ -536,7 +566,13 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     const getMousePos = (e: React.MouseEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return { x: 0, y: 0 };
-        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        // Transform screen coords through inverse pan/zoom
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        return {
+            x: (screenX - panRef.current.x) / zoomRef.current,
+            y: (screenY - panRef.current.y) / zoomRef.current,
+        };
     };
 
     const getNodeAt = (x: number, y: number) => {
@@ -573,11 +609,16 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     };
 
     const handleMouseDown = (e: React.MouseEvent) => {
+        // Spacebar held → start panning
+        if (spaceHeldRef.current) {
+            isPanningRef.current = true;
+            panStartRef.current = { x: e.clientX, y: e.clientY, panX: panRef.current.x, panY: panRef.current.y };
+            return;
+        }
         const { x, y } = getMousePos(e);
         const clicked = getNodeAt(x, y);
         if (clicked) {
             draggedNodeRef.current = clicked;
-            // Single click → select
             onSelectObject?.(clicked.id);
         } else {
             onSelectObject?.(null);
@@ -585,6 +626,13 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
+        // Panning
+        if (isPanningRef.current) {
+            setPanX(panStartRef.current.panX + (e.clientX - panStartRef.current.x));
+            setPanY(panStartRef.current.panY + (e.clientY - panStartRef.current.y));
+            return;
+        }
+
         const pos = getMousePos(e);
 
         const node = getNodeAt(pos.x, pos.y);
@@ -605,7 +653,23 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
 
     const handleMouseUp = () => {
         draggedNodeRef.current = null;
+        isPanningRef.current = false;
     };
+
+    const handleWheel = useCallback((e: React.WheelEvent) => {
+        e.preventDefault();
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newZoom = Math.max(0.3, Math.min(3, zoomRef.current * delta));
+        // Zoom towards mouse position
+        const scale = newZoom / zoomRef.current;
+        setPanX(mouseX - scale * (mouseX - panRef.current.x));
+        setPanY(mouseY - scale * (mouseY - panRef.current.y));
+        setZoom(newZoom);
+    }, []);
 
     const handleDoubleClick = (e: React.MouseEvent) => {
         const { x, y } = getMousePos(e);
@@ -688,13 +752,14 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                     ref={canvasRef}
                     className={cn(
                         'w-full h-full',
-                        hoveredNode ? 'cursor-pointer' : 'cursor-default',
+                        spaceHeldRef.current ? (isPanningRef.current ? 'cursor-grabbing' : 'cursor-grab') : hoveredNode ? 'cursor-pointer' : 'cursor-default',
                     )}
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
                     onDoubleClick={handleDoubleClick}
+                    onWheel={handleWheel}
                     style={{
                         backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.03) 1px, transparent 0)',
                         backgroundSize: '24px 24px',
@@ -713,7 +778,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                         ))}
                     </div>
                     <div className="mt-2 pt-2 border-t border-slate-800/50 text-[9px] text-slate-500">
-                        <span className="text-slate-400">더블클릭</span> = 확장/축소 · <span className="text-slate-400">클릭</span> = 상세 보기
+                        <span className="text-slate-400">더블클릭</span> = 확장/축소 · <span className="text-slate-400">클릭</span> = 상세 보기 · <span className="text-slate-400">Space+드래그</span> = 팬 · <span className="text-slate-400">스크롤</span> = 줌
                     </div>
                 </div>
 

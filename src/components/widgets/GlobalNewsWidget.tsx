@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { Radio, AlertCircle, Bookmark, Loader2, Zap, ExternalLink } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings } from '../../types';
-import { fetchAllFeeds } from '../../services/newsService';
+import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, type FinOpsStats } from '../../services/newsService';
 import { evaluateNewsSignals } from '../../services/geminiService';
 
 const RISK_COLORS: Record<string, string> = {
@@ -14,15 +14,16 @@ const RISK_COLORS: Record<string, string> = {
 
 interface GlobalNewsWidgetProps {
     onTagClick?: (tag: string) => void;
+    onStatsUpdate?: (stats: FinOpsStats) => void;
 }
 
-export default function GlobalNewsWidget({ onTagClick }: GlobalNewsWidgetProps) {
+export default function GlobalNewsWidget({ onTagClick, onStatsUpdate }: GlobalNewsWidgetProps) {
     const [articles, setArticles] = useState<IntelArticle[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
-    const evaluationQueue = useRef<IntelArticle[]>([]);
-    const isEvaluating = useRef(false);
+    const [stats, setStats] = useState<FinOpsStats>(getFinOpsStats());
     const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    const initialized = useRef(false);
 
     // Read settings
     const getSettings = (): AppSettings => {
@@ -31,15 +32,13 @@ export default function GlobalNewsWidget({ onTagClick }: GlobalNewsWidgetProps) 
         } catch { return { apiKey: '', theme: 'dark', language: 'ko', osintSources: [], osintKeywords: [] }; }
     };
 
-    // LLM batch evaluation (2 articles at a time)
-    const processEvaluationQueue = useCallback(async () => {
+    // ============================================================
+    // TIER 3 HANDLER: Called by newsService when batch is ready
+    // Performs the actual LLM API call via gemini-flash
+    // ============================================================
+    const handleBatchEvaluation = useCallback(async (batch: IntelArticle[]) => {
         const settings = getSettings();
-        if (!settings.apiKey || isEvaluating.current || evaluationQueue.current.length === 0) return;
-
-        isEvaluating.current = true;
-
-        // Take up to 2 from queue
-        const batch = evaluationQueue.current.splice(0, 2);
+        if (!settings.apiKey || batch.length === 0) return;
 
         try {
             const evaluations = await evaluateNewsSignals(
@@ -61,39 +60,41 @@ export default function GlobalNewsWidget({ onTagClick }: GlobalNewsWidgetProps) 
                     dropped: evaluation.dropped,
                 };
             }));
+
+            // Update stats
+            const newStats = getFinOpsStats();
+            setStats(newStats);
+            onStatsUpdate?.(newStats);
         } catch (err) {
-            console.warn('[GlobalNewsWidget] Evaluation error:', err);
+            console.warn('[GlobalNewsWidget] Batch evaluation error:', err);
         }
+    }, [onStatsUpdate]);
 
-        isEvaluating.current = false;
-
-        // Continue processing if more in queue
-        if (evaluationQueue.current.length > 0) {
-            setTimeout(processEvaluationQueue, 3000); // 3s delay between batches
-        }
-    }, []);
+    // Register batch handler with newsService
+    useEffect(() => {
+        setBatchEvaluationHandler(handleBatchEvaluation);
+    }, [handleBatchEvaluation]);
 
     // Fetch and merge new articles
     const fetchAndMerge = useCallback(async () => {
         try {
             const settings = getSettings();
-            const newArticles = await fetchAllFeeds(settings.osintSources, settings.osintKeywords);
+            const { passed } = await fetchAndProcess(settings.osintSources, settings.osintKeywords);
 
-            if (newArticles.length > 0) {
+            if (passed.length > 0) {
                 setArticles(prev => {
                     const existing = new Set(prev.map(a => a.id));
-                    const truly_new = newArticles.filter(a => !existing.has(a.id));
+                    const truly_new = passed.filter(a => !existing.has(a.id));
                     if (truly_new.length === 0) return prev;
-
-                    // Add to evaluation queue
-                    evaluationQueue.current.push(...truly_new);
-                    if (!isEvaluating.current) {
-                        setTimeout(processEvaluationQueue, 1000);
-                    }
-
-                    return [...truly_new, ...prev].slice(0, 50); // Keep max 50
+                    return [...truly_new, ...prev].slice(0, 50);
                 });
             }
+
+            // Update stats
+            const newStats = getFinOpsStats();
+            setStats(newStats);
+            onStatsUpdate?.(newStats);
+
             setLoading(false);
             setError(false);
         } catch (err) {
@@ -101,13 +102,16 @@ export default function GlobalNewsWidget({ onTagClick }: GlobalNewsWidgetProps) 
             setError(true);
             setLoading(false);
         }
-    }, [processEvaluationQueue]);
+    }, [onStatsUpdate]);
 
     useEffect(() => {
+        if (initialized.current) return;
+        initialized.current = true;
+
         // Initial fetch
         fetchAndMerge();
 
-        // Poll every 60 seconds (avoid rate limits on free APIs)
+        // Poll every 60 seconds
         pollTimer.current = setInterval(fetchAndMerge, 60000);
 
         return () => {
@@ -156,6 +160,7 @@ export default function GlobalNewsWidget({ onTagClick }: GlobalNewsWidgetProps) 
 
     return (
         <div className="flex flex-col h-full bg-slate-900/40 rounded-lg border border-slate-700/30 overflow-hidden group">
+            {/* Header with FinOps stats */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50 bg-slate-800/20">
                 <Radio size={14} className="text-amber-400 animate-pulse" />
                 <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-widest">OSINT Intelligence Feed</h4>
@@ -164,6 +169,14 @@ export default function GlobalNewsWidget({ onTagClick }: GlobalNewsWidgetProps) 
                         {visibleArticles.filter(a => a.evaluated).length}/{visibleArticles.length} evaluated
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[9px] bg-slate-800 text-slate-400 font-mono">LIVE</span>
+                </span>
+            </div>
+
+            {/* FinOps Shield Banner */}
+            <div className="px-3 py-1.5 border-b border-slate-800/30 bg-emerald-950/10 flex items-center gap-1.5 shrink-0">
+                <Shield size={10} className="text-emerald-500 shrink-0" />
+                <span className="text-[9px] text-emerald-400/80 font-mono leading-tight truncate">
+                    ⚡ FinOps Shield Active: {stats.droppedByLocalFilter + stats.droppedByDedup} filtered locally ➔ {stats.sentToAIP} signals via AIP ({stats.apiCallCount} calls, ~{stats.costSavingsPercent}% cost saved)
                 </span>
             </div>
 

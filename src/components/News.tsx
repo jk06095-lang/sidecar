@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Filter, AlertTriangle, Newspaper, Search, Folder, FolderOpen, FileText,
     ChevronRight, Tag, Bookmark, ShieldAlert, GitBranch, ChevronDown,
-    Radio, Zap, Hash, RefreshCw, Loader2
+    Radio, Zap, Hash, RefreshCw, Loader2, Shield
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
 import { useOntologyStore } from '../store/ontologyStore';
+import { getFinOpsStats, type FinOpsStats } from '../services/newsService';
 import type { IntelArticle } from '../types';
 
 export default function News() {
@@ -15,6 +16,7 @@ export default function News() {
     const [searchQuery, setSearchQuery] = useState('');
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
     const [showSkeletons, setShowSkeletons] = useState(true);
+    const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
 
     // Ontology store for tag navigation
     const objects = useOntologyStore(s => s.objects);
@@ -223,8 +225,15 @@ export default function News() {
                         </div>
                     </div>
                     <p className="text-xs text-slate-400">
-                        다중 소스 RSS 수집 → AIP 시그널 평가 → 노이즈 필터링 → 액션 시그널 추출
+                        다중 소스 RSS 수집 → 3-Tier 퍼널 필터 → AIP 시그널 평가 → 액션 시그널 추출
                     </p>
+                    {/* FinOps Shield Stats Banner */}
+                    <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/20 border border-emerald-800/20">
+                        <Shield size={14} className="text-emerald-500 shrink-0" />
+                        <span className="text-[10px] text-emerald-400/90 font-mono leading-relaxed">
+                            ⚡ FinOps Shield Active: {finOpsStats.droppedByLocalFilter + finOpsStats.droppedByDedup} articles filtered locally ➔ {finOpsStats.sentToAIP} critical signals analyzed via AIP ({finOpsStats.apiCallCount} batch calls, ~{finOpsStats.costSavingsPercent}% cost saved)
+                        </span>
+                    </div>
                 </div>
 
                 {/* Skeleton loading state */}
@@ -246,12 +255,12 @@ export default function News() {
 
                 {/* The global news widget */}
                 <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                    <GlobalNewsWidget onTagClick={handleTagClick} />
+                    <GlobalNewsWidget onTagClick={handleTagClick} onStatsUpdate={setFinOpsStats} />
                 </div>
 
-                <div className="mt-4 p-4 rounded-xl border border-amber-900/30 bg-amber-950/20 text-sm text-amber-200/80 leading-relaxed shadow-lg">
-                    <AlertTriangle size={16} className="text-amber-500 mb-2 inline-block mr-2" />
-                    <strong>Intelligence Pipeline:</strong> 실시간 RSS 수집 → Gemini AIP 시그널 평가 → Impact Score 50점 이상 시그널만 표시. #해시태그를 클릭하면 온톨로지 객체의 360° 뷰가 열립니다.
+                <div className="mt-4 p-3.5 rounded-xl border border-amber-900/30 bg-amber-950/20 text-xs text-amber-200/80 leading-relaxed shadow-lg">
+                    <AlertTriangle size={14} className="text-amber-500 mb-1.5 inline-block mr-1.5" />
+                    <strong>3-Tier Intelligence Funnel:</strong> Tier 1 로컬 키워드/온톨로지 필터($0) → Tier 2 중복 캐시($0) → Tier 3 마이크로배치 5건/1호출(gemini-flash) → Impact ≥50 시그널만 표시. Pro 모델은 심층 브리핑 요청 시에만 작동.
                 </div>
             </div>
         </div>

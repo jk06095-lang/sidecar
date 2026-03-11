@@ -365,10 +365,21 @@ export async function evaluateNewsSignals(
 ${JSON.stringify(articlesJSON, null, 2)}`;
 
     try {
+        // ============================================================
+        // FinOps MODEL ROUTING: Real-time news scoring uses the CHEAPEST
+        // model (gemini-2.5-flash). Pro models are reserved ONLY for
+        // on-demand deep-dive briefings (BriefingModal / AIP Reports).
+        // ============================================================
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
         });
+
+        // Track API call for FinOps telemetry
+        try {
+            const { incrementApiCallCount } = await import('./newsService');
+            incrementApiCallCount();
+        } catch { /* newsService may not be loaded yet */ }
 
         const text = response.text || '';
         // Extract JSON from response (handle markdown code fences)
@@ -394,4 +405,5 @@ ${JSON.stringify(articlesJSON, null, 2)}`;
         return [];
     }
 }
+
 

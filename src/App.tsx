@@ -8,6 +8,8 @@ import Reports from './components/Reports';
 import ApiManager from './components/ApiManager';
 import ScenarioBuilder from './components/ScenarioBuilder';
 import DataAnalysis from './components/DataAnalysis';
+import IntegratedEditor from './components/IntegratedEditor';
+import TopTabBar, { type Notification } from './components/TopTabBar';
 import { useOntologyStore } from './store/ontologyStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
 import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/marketDataService';
@@ -23,6 +25,68 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isSidebarMinimized, setIsSidebarMinimized] = useState(false);
   const realtimeOverrideRef = useRef(false);
+
+  // Open tabs management (browser-like)
+  const [openTabs, setOpenTabs] = useState<string[]>(['home']);
+
+  // Notification system
+  const [notifications, setNotifications] = useState<Notification[]>([
+    {
+      id: 'n1',
+      title: '시스템 초기화',
+      message: 'SIDECAR AIP Platform이 성공적으로 초기화되었습니다.',
+      type: 'success',
+      timestamp: new Date(),
+      read: false,
+    },
+    {
+      id: 'n2',
+      title: '실시간 데이터',
+      message: 'Yahoo Finance 실시간 시세 연동 활성화됨. 유가, 환율, 원자재 데이터 수신 중.',
+      type: 'info',
+      timestamp: new Date(Date.now() - 300000),
+      read: false,
+    },
+  ]);
+
+  // Add notification helper
+  const addNotification = useCallback((title: string, message: string, type: Notification['type'] = 'info') => {
+    setNotifications(prev => [{
+      id: `n_${Date.now()}`,
+      title,
+      message,
+      type,
+      timestamp: new Date(),
+      read: false,
+    }, ...prev]);
+  }, []);
+
+  const handleNotificationRead = useCallback((id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  }, []);
+
+  const handleClearNotifications = useCallback(() => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  }, []);
+
+  // Tab management (open/close/switch)
+  const handleSetActiveTab = useCallback((tab: string) => {
+    setActiveTab(tab);
+    setOpenTabs(prev => prev.includes(tab) ? prev : [...prev, tab]);
+  }, []);
+
+  const handleTabClose = useCallback((tab: string) => {
+    if (tab === 'home') return; // Can't close home
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t !== tab);
+      if (activeTab === tab) {
+        const idx = prev.indexOf(tab);
+        const newActive = next[Math.min(idx, next.length - 1)] || 'home';
+        setActiveTab(newActive);
+      }
+      return next;
+    });
+  }, [activeTab]);
 
   // ============================================================
   // ONTOLOGY STORE — single source of truth for all data
@@ -223,7 +287,7 @@ export default function App() {
     <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden light:bg-slate-50 light:text-slate-900 transition-colors duration-300">
       <Sidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSetActiveTab}
         scenarios={scenarios}
         activeScenarioId={activeScenarioId}
         onScenarioQuickSwitch={handleScenarioChange}
@@ -231,56 +295,69 @@ export default function App() {
         isMinimized={isSidebarMinimized}
         onToggleMinimize={() => setIsSidebarMinimized(!isSidebarMinimized)}
       />
-      <main className="flex-1 overflow-hidden">
-        {activeTab === 'home' && (
-          <Home
-            scenarios={scenarios}
-            activeScenario={activeScenario}
-            activeScenarioId={activeScenarioId}
-            simulationParams={simulationParams}
-            dynamicChartData={dynamicChartData}
-            dynamicFleetData={dynamicFleetData}
-            brokerReports={brokerReports}
-            insuranceCirculars={insuranceCirculars}
-            onScenarioChange={handleScenarioChange}
-            onParamsChange={handleParamsChange}
-            onSaveScenario={handleSaveScenario}
-          />
-        )}
-        {activeTab === 'reports' && <Reports />}
-        {activeTab === 'news' && <News />}
-        {activeTab === 'ontology' && <Ontology />}
-        {activeTab === 'api-manager' && <ApiManager settings={settings} onSettingsChange={setSettings} />}
-        {activeTab === 'data-analysis' && (
-          <DataAnalysis
-            simulationParams={simulationParams}
-            dynamicChartData={dynamicChartData}
-            dynamicFleetData={dynamicFleetData}
-          />
-        )}
-        {activeTab === 'scenario-builder' && (
-          <ScenarioBuilder
-            scenarios={scenarios}
-            activeScenarioId={activeScenarioId}
-            simulationParams={simulationParams}
-            onScenarioChange={handleScenarioChange}
-            onParamsChange={handleParamsChange}
-            onSaveScenario={handleSaveScenario}
-            onUpdateScenario={handleUpdateScenario}
-            onCopyScenario={handleCopyScenario}
-            onDeleteScenario={handleDeleteScenario}
-            settings={settings}
-          />
-        )}
-        {activeTab !== 'home' && activeTab !== 'reports' && activeTab !== 'news' && activeTab !== 'ontology' && activeTab !== 'api-manager' && activeTab !== 'scenario-builder' && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <h1 className="text-xl font-semibold text-slate-400 capitalize">{activeTab.replace('-', ' ')}</h1>
-              <p className="mt-2 text-sm text-slate-600">이 섹션은 개발 예정입니다.</p>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <TopTabBar
+          activeTab={activeTab}
+          openTabs={openTabs}
+          onTabClick={handleSetActiveTab}
+          onTabClose={handleTabClose}
+          onOpenSettings={() => setShowSettings(true)}
+          notifications={notifications}
+          onNotificationRead={handleNotificationRead}
+          onClearNotifications={handleClearNotifications}
+        />
+        <main className="flex-1 overflow-hidden">
+          {activeTab === 'home' && (
+            <Home
+              scenarios={scenarios}
+              activeScenario={activeScenario}
+              activeScenarioId={activeScenarioId}
+              simulationParams={simulationParams}
+              dynamicChartData={dynamicChartData}
+              dynamicFleetData={dynamicFleetData}
+              brokerReports={brokerReports}
+              insuranceCirculars={insuranceCirculars}
+              onScenarioChange={handleScenarioChange}
+              onParamsChange={handleParamsChange}
+              onSaveScenario={handleSaveScenario}
+            />
+          )}
+          {activeTab === 'reports' && <Reports />}
+          {activeTab === 'news' && <News />}
+          {activeTab === 'ontology' && <Ontology />}
+          {activeTab === 'api-manager' && <ApiManager settings={settings} onSettingsChange={setSettings} />}
+          {activeTab === 'data-analysis' && (
+            <DataAnalysis
+              simulationParams={simulationParams}
+              dynamicChartData={dynamicChartData}
+              dynamicFleetData={dynamicFleetData}
+            />
+          )}
+          {activeTab === 'scenario-builder' && (
+            <ScenarioBuilder
+              scenarios={scenarios}
+              activeScenarioId={activeScenarioId}
+              simulationParams={simulationParams}
+              onScenarioChange={handleScenarioChange}
+              onParamsChange={handleParamsChange}
+              onSaveScenario={handleSaveScenario}
+              onUpdateScenario={handleUpdateScenario}
+              onCopyScenario={handleCopyScenario}
+              onDeleteScenario={handleDeleteScenario}
+              settings={settings}
+            />
+          )}
+          {activeTab === 'editor' && <IntegratedEditor />}
+          {activeTab !== 'home' && activeTab !== 'reports' && activeTab !== 'news' && activeTab !== 'ontology' && activeTab !== 'api-manager' && activeTab !== 'scenario-builder' && activeTab !== 'data-analysis' && activeTab !== 'editor' && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <h1 className="text-xl font-semibold text-slate-400 capitalize">{activeTab.replace('-', ' ')}</h1>
+                <p className="mt-2 text-sm text-slate-600">이 섹션은 개발 예정입니다.</p>
+              </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
 
       {/* Modals */}
       <SettingsModal

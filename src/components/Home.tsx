@@ -12,6 +12,7 @@ import type { Scenario, SimulationParams, ChartDataPoint, FleetVessel, BrokerRep
 import HormuzWeatherWidget from './widgets/HormuzWeatherWidget';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
 import FleetStatusWidget from './widgets/FleetStatusWidget';
+import FleetMapWidget from './widgets/FleetMapWidget';
 import CurrencyWidget from './widgets/CurrencyWidget';
 import OilPriceWidget from './widgets/OilPriceWidget';
 import GeopoliticalRiskWidget from './widgets/GeopoliticalRiskWidget';
@@ -71,6 +72,7 @@ export default function Home({
     try {
       const saved = localStorage.getItem('sidecar_widget_layout');
       return saved ? JSON.parse(saved) : {
+        fleetMap: true,
         fleet: true,
         hormuzWeather: true,
         globalNews: true,
@@ -79,7 +81,7 @@ export default function Home({
         geopoliticalRisk: true,
         portCongestion: true,
       };
-    } catch { return { fleet: true, hormuzWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
+    } catch { return { fleetMap: true, fleet: true, hormuzWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
   });
 
   useEffect(() => {
@@ -91,6 +93,7 @@ export default function Home({
   };
 
   const WIDGET_CATALOG = [
+    { id: 'fleetMap', name: 'Fleet Tracker', icon: '🗯️', category: 'Core', desc: '위성지도 기반 선대 실시간 위치 추적' },
     { id: 'fleet', name: 'Fleet Status', icon: '🚢', category: 'Core', desc: '선대 현황 및 리스크 상태' },
     { id: 'hormuzWeather', name: 'Hormuz Telemetry', icon: '🌊', category: 'Environment', desc: 'Open-Meteo Marine API 실시간 해양 기상' },
     { id: 'globalNews', name: 'Global News Intel', icon: '📡', category: 'Intelligence', desc: '글로벌 경제 뉴스 피드' },
@@ -342,6 +345,9 @@ export default function Home({
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
               {/* Live Environment Widgets */}
               <div className="xl:col-span-2 flex flex-col gap-4">
+                {widgetVisibility.fleetMap && (
+                  <FleetMapWidget vessels={dynamicFleetData} />
+                )}
                 {widgetVisibility.fleet && (
                   <div className="min-h-[200px]">
                     <FleetStatusWidget fleetData={dynamicFleetData} />

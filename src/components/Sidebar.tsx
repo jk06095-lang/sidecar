@@ -3,7 +3,7 @@ import {
   Home, Newspaper, Settings, Anchor, FileText,
   Activity, Menu, Zap,
   Database, Shield, TrendingUp, Server, CheckCircle2,
-  Star, Edit2, Check, X, Trash2, Globe
+  Star, Edit2, Check, X, Trash2, Globe, LogOut
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario } from '../types';
@@ -12,6 +12,7 @@ import {
   saveFavorites as firestoreSaveFavorites,
   type FavoriteEntry,
 } from '../services/firestoreService';
+import { logout } from './AuthGate';
 
 interface SidebarProps {
   activeTab: string;
@@ -152,6 +153,10 @@ export default function Sidebar({
         <div title="데이터 분석" className={cn(navItemClass, activeTab === 'data-analysis' && activeClass)} onClick={() => setActiveTab('data-analysis')}>
           <TrendingUp size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && <span>데이터 분석</span>}
+        </div>
+        <div title="에디터" className={cn(navItemClass, activeTab === 'editor' && activeClass)} onClick={() => setActiveTab('editor')}>
+          <Database size={isMinimized ? 20 : 16} className="shrink-0" />
+          {!isMinimized && <span>에디터</span>}
         </div>
         <div title="외부 API" className={cn(navItemClass, activeTab === 'api-manager' && activeClass)} onClick={() => setActiveTab('api-manager')}>
           <Server size={isMinimized ? 20 : 16} className="shrink-0" />
@@ -296,6 +301,14 @@ export default function Sidebar({
         >
           <Settings size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && <span className="text-xs font-semibold">플랫폼 설정</span>}
+        </div>
+        <div
+          className={cn(navItemClass, 'py-2 px-3 justify-center text-rose-400 hover:text-rose-300')}
+          onClick={logout}
+          title="로그아웃"
+        >
+          <LogOut size={isMinimized ? 20 : 16} className="shrink-0" />
+          {!isMinimized && <span className="text-xs font-semibold">로그아웃</span>}
         </div>
       </div>
     </div>

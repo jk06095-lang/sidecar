@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings, Key, X, Save, Palette, Globe, Radio, Plus, Tag } from 'lucide-react';
+import { Settings, X, Save, Palette, Globe, Radio, Plus, Tag } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { AppSettings } from '../types';
 import { DEFAULT_OSINT_SOURCES, DEFAULT_OSINT_KEYWORDS } from '../services/newsService';
@@ -13,7 +13,7 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: SettingsModalProps) {
     const [tempSettings, setTempSettings] = useState<AppSettings>(settings);
-    const [activeTab, setActiveTab] = useState<'general' | 'api' | 'osint'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'osint'>('general');
     const [newSource, setNewSource] = useState('');
     const [newKeyword, setNewKeyword] = useState('');
 
@@ -78,14 +78,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                         일반 설정
                     </button>
                     <button
-                        onClick={() => setActiveTab('api')}
-                        className={cn('flex-1 py-3 text-sm font-medium transition-colors',
-                            activeTab === 'api' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-slate-800/50' : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800/30'
-                        )}
-                    >
-                        API 연동
-                    </button>
-                    <button
                         onClick={() => setActiveTab('osint')}
                         className={cn('flex-1 py-3 text-sm font-medium transition-colors',
                             activeTab === 'osint' ? 'text-amber-400 border-b-2 border-amber-400 bg-amber-900/20' : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800/30'
@@ -146,35 +138,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                                         English
                                     </button>
                                 </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'api' && (
-                        <div className="space-y-6 animate-fade-in">
-                            <div>
-                                <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-2">
-                                    <Key size={16} className="text-cyan-400" />
-                                    Gemini API Key
-                                </label>
-                                <input
-                                    type="password"
-                                    value={tempSettings.apiKey}
-                                    onChange={(e) => setTempSettings(prev => ({ ...prev, apiKey: e.target.value }))}
-                                    placeholder="AIzaSy..."
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 outline-none transition-all font-mono"
-                                />
-                                <p className="mt-2 text-xs text-slate-500">
-                                    AI 브리핑 생성, 데이터 분석, 뉴스 시그널 평가를 위해 필요합니다.
-                                </p>
-                            </div>
-                            <div className="flex justify-end">
-                                <button
-                                    onClick={handleClearApi}
-                                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 text-xs font-medium rounded-lg transition-colors border border-slate-700"
-                                >
-                                    키 지우기
-                                </button>
                             </div>
                         </div>
                     )}

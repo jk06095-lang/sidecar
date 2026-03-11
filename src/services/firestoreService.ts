@@ -15,12 +15,12 @@
  * rules_version = '2';
  * service cloud.firestore {
  *   match /databases/{database}/documents {
- *     // Global app data (single-user mode, no auth required)
+ *     // Require authentication for all app data
  *     match /app/{docId} {
- *       allow read, write: if true;
+ *       allow read, write: if request.auth != null;
  *     }
  *     match /app/{docId}/{sub=**} {
- *       allow read, write: if true;
+ *       allow read, write: if request.auth != null;
  *     }
  *   }
  * }

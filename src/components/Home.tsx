@@ -127,16 +127,16 @@ export default function Home({
   const isCrisis = simulationParams.newsSentimentScore > 70;
 
   return (
-    <div className="flex h-full bg-slate-950">
-      <div className="flex h-full bg-slate-950">
+    <div className="flex w-full h-full bg-slate-950">
+      <div className="flex w-full h-full bg-slate-950">
         {/* LEFT PANEL: Controls (Removed, shifted to Scenario Builder sidebar element) */}
         <div className="hidden"></div>
 
         {/* MAIN AREA */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 w-full overflow-y-auto custom-scrollbar">
           <div className="p-5 space-y-4">
             {/* Top Metrics Bar */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <MetricCard
                 label="운임 변동성(Spread)"
                 value={currentSpread.toFixed(1)}

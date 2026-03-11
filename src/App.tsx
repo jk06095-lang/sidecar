@@ -292,7 +292,7 @@ export default function App() {
   // handleGenerateBriefing moved to Reports.tsx
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden light:bg-slate-50 light:text-slate-900 transition-colors duration-300">
+    <div className="flex h-screen min-w-[768px] min-h-[600px] bg-slate-950 text-slate-200 font-sans overflow-hidden light:bg-slate-50 light:text-slate-900 transition-colors duration-300">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={handleSetActiveTab}

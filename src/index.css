@@ -209,6 +209,21 @@ body {
   background-color: #020617;
   color: #e2e8f0;
   overflow: hidden;
+  min-width: 768px;
+  min-height: 600px;
+}
+
+/* When window is smaller than min dimensions, allow scrolling instead of clipping */
+@media (max-width: 767px) {
+  body {
+    overflow: auto;
+  }
+}
+
+@media (max-height: 599px) {
+  body {
+    overflow: auto;
+  }
 }
 
 /* =============================================

@@ -54,12 +54,44 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>) {
 // ============================================================
 
 const STORAGE_KEY = 'sidecar_grid_layout';
-const COLS: Record<string, number> = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 };
+const COLS: Record<string, number> = { xxl: 16, xl: 14, lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 };
 const ROW_HEIGHT = 60;
-const BREAKPOINTS: Record<string, number> = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 };
+const BREAKPOINTS: Record<string, number> = { xxl: 1800, xl: 1400, lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 };
 
-/** Default layout for lg breakpoint */
-const DEFAULT_LAYOUT: LayoutItem[] = [
+/** Default layout for xxl breakpoint (16 columns — ultrawide / multi-monitor) */
+const DEFAULT_LAYOUT_XXL: LayoutItem[] = [
+    { i: 'bevi', x: 0, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
+    { i: 'fleetMap', x: 4, y: 0, w: 12, h: 6, minW: 4, minH: 4 },
+    { i: 'fleet', x: 0, y: 4, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'hormuzWeather', x: 0, y: 9, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'singaporeWeather', x: 4, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'busanWeather', x: 8, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'suezWeather', x: 12, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'globalNews', x: 0, y: 14, w: 10, h: 6, minW: 4, minH: 4 },
+    { i: 'currency', x: 10, y: 11, w: 6, h: 6, minW: 3, minH: 3 },
+    { i: 'oilPrice', x: 0, y: 20, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'geopoliticalRisk', x: 4, y: 20, w: 4, h: 6, minW: 3, minH: 3 },
+    { i: 'portCongestion', x: 8, y: 17, w: 4, h: 5, minW: 3, minH: 3 },
+];
+
+/** Default layout for xl breakpoint (14 columns — large PC monitor) */
+const DEFAULT_LAYOUT_XL: LayoutItem[] = [
+    { i: 'bevi', x: 0, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
+    { i: 'fleetMap', x: 4, y: 0, w: 10, h: 6, minW: 4, minH: 4 },
+    { i: 'fleet', x: 0, y: 4, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'hormuzWeather', x: 0, y: 9, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: 'singaporeWeather', x: 4, y: 6, w: 5, h: 5, minW: 3, minH: 3 },
+    { i: 'busanWeather', x: 9, y: 6, w: 5, h: 5, minW: 3, minH: 3 },
+    { i: 'suezWeather', x: 4, y: 11, w: 5, h: 5, minW: 3, minH: 3 },
+    { i: 'globalNews', x: 0, y: 14, w: 9, h: 6, minW: 4, minH: 4 },
+    { i: 'currency', x: 9, y: 11, w: 5, h: 6, minW: 3, minH: 3 },
+    { i: 'oilPrice', x: 0, y: 20, w: 5, h: 5, minW: 3, minH: 3 },
+    { i: 'geopoliticalRisk', x: 5, y: 20, w: 4, h: 6, minW: 3, minH: 3 },
+    { i: 'portCongestion', x: 9, y: 17, w: 5, h: 5, minW: 3, minH: 3 },
+];
+
+/** Default layout for lg breakpoint (12 columns — standard PC / laptop) */
+const DEFAULT_LAYOUT_LG: LayoutItem[] = [
     { i: 'bevi', x: 0, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
     { i: 'fleetMap', x: 4, y: 0, w: 8, h: 6, minW: 4, minH: 4 },
     { i: 'fleet', x: 0, y: 4, w: 4, h: 5, minW: 3, minH: 3 },
@@ -73,6 +105,13 @@ const DEFAULT_LAYOUT: LayoutItem[] = [
     { i: 'portCongestion', x: 8, y: 17, w: 4, h: 5, minW: 3, minH: 3 },
     { i: 'suezWeather', x: 0, y: 25, w: 4, h: 5, minW: 3, minH: 3 },
 ];
+
+/** All default layouts keyed by breakpoint */
+const DEFAULT_LAYOUTS: ResponsiveLayouts = {
+    xxl: DEFAULT_LAYOUT_XXL,
+    xl: DEFAULT_LAYOUT_XL,
+    lg: DEFAULT_LAYOUT_LG,
+};
 
 // ============================================================
 // LSEG MARKET DATA POLLING INTERVAL (60s)
@@ -119,14 +158,19 @@ export default function DashboardGrid({ widgetVisibility, simulationParams, dyna
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved) as ResponsiveLayouts;
-                const lgLayout: LayoutItem[] = [...(parsed.lg || [])];
-                // Merge: if new widgets were added to DEFAULT, include them
-                const savedIds = new Set(lgLayout.map((l) => l.i));
-                const missing = DEFAULT_LAYOUT.filter(d => !savedIds.has(d.i));
-                return { ...parsed, lg: [...lgLayout, ...missing] };
+                // Merge missing widgets into each breakpoint
+                const merged: ResponsiveLayouts = { ...DEFAULT_LAYOUTS };
+                for (const bp of Object.keys(DEFAULT_LAYOUTS) as string[]) {
+                    const savedBp: LayoutItem[] = [...(parsed[bp] || DEFAULT_LAYOUTS[bp] || [])];
+                    const defaultBp = DEFAULT_LAYOUTS[bp] || [];
+                    const savedIds = new Set(savedBp.map((l) => l.i));
+                    const missing = defaultBp.filter(d => !savedIds.has(d.i));
+                    merged[bp] = [...savedBp, ...missing];
+                }
+                return merged;
             }
         } catch { /* ignore */ }
-        return { lg: [...DEFAULT_LAYOUT] };
+        return { ...DEFAULT_LAYOUTS };
     });
 
     const handleLayoutChange = useCallback((layout: Layout, allLayouts: ResponsiveLayouts) => {
@@ -136,11 +180,21 @@ export default function DashboardGrid({ widgetVisibility, simulationParams, dyna
         } catch { /* ignore */ }
     }, []);
 
-    // Filter layout by visibility
-    const visibleLayout = useMemo((): LayoutItem[] => {
-        const lg = layouts.lg ? [...layouts.lg] : [...DEFAULT_LAYOUT];
-        return lg.filter(l => widgetVisibility[l.i] !== false);
+    // Filter layouts by visibility for all breakpoints
+    const visibleLayouts = useMemo((): ResponsiveLayouts => {
+        const result: ResponsiveLayouts = {};
+        for (const bp of Object.keys(COLS)) {
+            const bpLayout = layouts[bp] || DEFAULT_LAYOUTS[bp] || DEFAULT_LAYOUT_LG;
+            result[bp] = bpLayout.filter(l => widgetVisibility[l.i] !== false);
+        }
+        return result;
     }, [layouts, widgetVisibility]);
+
+    // Primary visible layout for rendering children (use the largest available)
+    const visibleLayout = useMemo((): LayoutItem[] => {
+        const source = visibleLayouts.xxl || visibleLayouts.lg || DEFAULT_LAYOUT_LG;
+        return [...source] as LayoutItem[];
+    }, [visibleLayouts]);
 
     // ---- Widget renderer ----
     const renderWidget = (widgetId: string) => {
@@ -201,7 +255,7 @@ export default function DashboardGrid({ widgetVisibility, simulationParams, dyna
                     <Responsive
                         className="dashboard-grid"
                         width={containerWidth}
-                        layouts={{ lg: visibleLayout }}
+                        layouts={visibleLayouts}
                         breakpoints={BREAKPOINTS}
                         cols={COLS}
                         rowHeight={ROW_HEIGHT}

@@ -118,17 +118,22 @@ export default function App() {
 
   // App Settings (Theme, Language, API Key)
   const [settings, setSettings] = useState<AppSettings>(() => {
-    try {
-      const saved = localStorage.getItem('sidecar_settings');
-      if (saved) return JSON.parse(saved);
-    } catch (e) { console.error('Failed to parse settings', e); }
-    return {
+    const defaults: AppSettings = {
       apiKey: import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '',
       theme: 'dark',
       language: 'ko',
       osintSources: [],
       osintKeywords: [],
+      persistenceThresholdMinutes: 30,
+      persistenceMinArticles: 3,
+      crisisKeywords: [],
+      pollingIntervalMinutes: 10,
     };
+    try {
+      const saved = localStorage.getItem('sidecar_settings');
+      if (saved) return { ...defaults, ...JSON.parse(saved) };
+    } catch (e) { console.error('Failed to parse settings', e); }
+    return defaults;
   });
 
   // Briefing generation moved to Reports.tsx
@@ -222,7 +227,7 @@ export default function App() {
     };
 
     fetchRealtimeData(); // initial fetch
-    const interval = setInterval(fetchRealtimeData, 30000); // 30s
+    const interval = setInterval(fetchRealtimeData, 600_000); // 10-minute batch cycle
     return () => clearInterval(interval);
   }, [activeScenarioId, storeSetSimulationParams, storeUpdateRealtimeParams]);
 

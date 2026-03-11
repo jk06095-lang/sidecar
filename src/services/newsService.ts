@@ -174,6 +174,172 @@ function passesDedup(article: IntelArticle): boolean {
 }
 
 // ============================================================
+// TIER 2.5: KEYWORD PERSISTENCE TRACKER (Cost: $0)
+// Regex-only crisis detection → buffer → 30min threshold gate
+// ============================================================
+
+export const DEFAULT_CRISIS_TERMS = [
+    'strike', 'missile', 'blockade', 'premium', 'hormuz', 'ukmto',
+    'houthi', 'piracy', 'drone', 'war.?risk', 'sanctions', 'closure',
+    'attack', 'seizure', 'hostage', 'mine', 'torpedo', 'convoy',
+    'naval', 'escalat', 'conflict', 'threat', 'terror', 'hijack',
+    'detained', 'explosion', 'casualt', 'embargo', 'evacuat',
+];
+
+interface TrackedKeyword {
+    keyword: string;
+    firstSeenAt: number;       // timestamp
+    articleBuffer: IntelArticle[];
+    escalated: boolean;        // already flushed to LLM
+}
+
+// In-memory persistence map: keyword → tracker state
+const keywordTrackerMap = new Map<string, TrackedKeyword>();
+
+// Read thresholds from settings (fallback defaults)
+function getTrackerSettings(): { thresholdMs: number; minArticles: number; crisisRegex: RegExp } {
+    try {
+        const raw = localStorage.getItem('sidecar_settings');
+        if (raw) {
+            const s = JSON.parse(raw);
+            const thresholdMin = s.persistenceThresholdMinutes ?? 30;
+            const minArticles = s.persistenceMinArticles ?? 3;
+            const customTerms: string[] = s.crisisKeywords ?? [];
+            const allTerms = [...DEFAULT_CRISIS_TERMS, ...customTerms.map((t: string) => t.toLowerCase().replace(/[^a-z0-9.?]/g, ''))].filter(Boolean);
+            const uniqueTerms = [...new Set(allTerms)];
+            return {
+                thresholdMs: thresholdMin * 60 * 1000,
+                minArticles,
+                crisisRegex: new RegExp(`(${uniqueTerms.join('|')})`, 'i'),
+            };
+        }
+    } catch { /* ignore */ }
+    return {
+        thresholdMs: 30 * 60 * 1000,
+        minArticles: 3,
+        crisisRegex: new RegExp(`(${DEFAULT_CRISIS_TERMS.join('|')})`, 'i'),
+    };
+}
+
+/**
+ * Scan article for crisis keywords using pure regex ($0 cost).
+ * Returns matched keywords or empty array.
+ */
+function detectCrisisKeywords(article: IntelArticle): string[] {
+    const text = `${article.title} ${article.description}`.toLowerCase();
+    const matches: string[] = [];
+
+    // Get custom terms from settings
+    let customTerms: string[] = [];
+    try {
+        const s = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
+        customTerms = (s.crisisKeywords || []).map((t: string) => t.toLowerCase().trim()).filter(Boolean);
+    } catch { /* ignore */ }
+
+    const allTerms = [...new Set([...DEFAULT_CRISIS_TERMS, ...customTerms])];
+
+    for (const term of allTerms) {
+        try {
+            if (new RegExp(term, 'i').test(text) && !matches.includes(term)) {
+                matches.push(term);
+            }
+        } catch { /* invalid regex term, skip */ }
+    }
+
+    return matches;
+}
+
+/**
+ * Tier 2.5: Persistence Gate
+ * Returns true if article should be escalated to LLM (Tier 3).
+ * Returns false if article should go to feed silently.
+ */
+function persistenceGate(article: IntelArticle): boolean {
+    const keywords = detectCrisisKeywords(article);
+
+    // No crisis keywords → bypass gate, show in feed without LLM
+    if (keywords.length === 0) {
+        return false;
+    }
+
+    const now = Date.now();
+    const { thresholdMs, minArticles } = getTrackerSettings();
+
+    // Track each matched keyword
+    for (const kw of keywords) {
+        let tracker = keywordTrackerMap.get(kw);
+        if (!tracker) {
+            tracker = {
+                keyword: kw,
+                firstSeenAt: now,
+                articleBuffer: [],
+                escalated: false,
+            };
+            keywordTrackerMap.set(kw, tracker);
+        }
+
+        // Add article to buffer (dedup by id)
+        if (!tracker.articleBuffer.some(a => a.id === article.id)) {
+            tracker.articleBuffer.push(article);
+        }
+
+        // Check escalation: persistence >= threshold AND buffer >= minArticles
+        const persisted = (now - tracker.firstSeenAt) >= thresholdMs;
+        const sufficient = tracker.articleBuffer.length >= minArticles;
+
+        if (persisted && sufficient && !tracker.escalated) {
+            tracker.escalated = true;
+            console.log(
+                `[KeywordTracker] 🚨 ESCALATION: "${kw}" persisted ${Math.round((now - tracker.firstSeenAt) / 60000)}min with ${tracker.articleBuffer.length} articles → sending to LLM`
+            );
+            // Flush all buffered articles for this keyword to batch
+            for (const buffered of tracker.articleBuffer) {
+                enqueueToBatch(buffered);
+            }
+            return true; // escalated
+        }
+
+        if (tracker.escalated) {
+            // Already escalated — new articles in this cluster go directly to LLM
+            return true;
+        }
+    }
+
+    // Not yet escalated — hold in buffer, show in feed without LLM
+    _stats.droppedByLocalFilter++; // count as locally filtered (saved from LLM)
+    return false;
+}
+
+// Garbage collect old trackers (> 2h since last seen)
+function gcKeywordTrackers() {
+    const now = Date.now();
+    const GC_THRESHOLD = 2 * 60 * 60 * 1000; // 2 hours
+    for (const [kw, tracker] of keywordTrackerMap) {
+        if (now - tracker.firstSeenAt > GC_THRESHOLD) {
+            keywordTrackerMap.delete(kw);
+        }
+    }
+}
+
+/** Export for UI display: current tracker state */
+export function getKeywordTrackerState(): Array<{
+    keyword: string;
+    firstSeenAt: number;
+    articleCount: number;
+    escalated: boolean;
+    persistedMinutes: number;
+}> {
+    const now = Date.now();
+    return Array.from(keywordTrackerMap.values()).map(t => ({
+        keyword: t.keyword,
+        firstSeenAt: t.firstSeenAt,
+        articleCount: t.articleBuffer.length,
+        escalated: t.escalated,
+        persistedMinutes: Math.round((now - t.firstSeenAt) / 60000),
+    }));
+}
+
+// ============================================================
 // TIER 3: MICRO-BATCH QUEUE (3-5 articles → 1 API call)
 // ============================================================
 
@@ -194,6 +360,8 @@ export function setBatchEvaluationHandler(handler: BatchEvaluationCallback) {
 }
 
 function enqueueToBatch(article: IntelArticle) {
+    // Skip if already in queue
+    if (evaluationQueue.some(a => a.id === article.id)) return;
     evaluationQueue.push(article);
     _stats.sentToAIP++;
 
@@ -234,7 +402,7 @@ async function flushBatch() {
 }
 
 // ============================================================
-// MULTI-TIER PIPELINE: Fetch → Filter → Dedup → Batch
+// MULTI-TIER PIPELINE: Fetch → Filter → Dedup → Persistence Gate → Batch
 // ============================================================
 
 export async function fetchAndProcess(
@@ -246,6 +414,9 @@ export async function fetchAndProcess(
 
     const passed: IntelArticle[] = [];
     const dropped: IntelArticle[] = [];
+
+    // GC old keyword trackers periodically
+    gcKeywordTrackers();
 
     for (const article of rawArticles) {
         // TIER 1: Local keyword/ontology filter
@@ -260,9 +431,18 @@ export async function fetchAndProcess(
             continue; // silently skip duplicates
         }
 
-        // Survived all local tiers — queue for TIER 3 (LLM batch)
-        passed.push(article);
-        enqueueToBatch(article);
+        // TIER 2.5: Persistence Gate (regex-only, $0)
+        // Only crisis articles that persist ≥30min with ≥3 hits escalate to LLM
+        const shouldEscalate = persistenceGate(article);
+
+        if (shouldEscalate) {
+            // Escalated → queue for TIER 3 (LLM batch)
+            passed.push(article);
+            // enqueueToBatch already called inside persistenceGate
+        } else {
+            // Not escalated → show in feed silently, no LLM cost
+            passed.push({ ...article, evaluated: false });
+        }
     }
 
     return { passed, dropped };
@@ -332,7 +512,7 @@ export function startPolling(
     onNewArticles: (articles: IntelArticle[]) => void,
     enabledSources?: string[],
     keywords?: string[],
-    intervalMs: number = 15000,
+    intervalMs: number = 600_000, // 10-minute batch cycle
 ) {
     stopPolling();
 
@@ -455,6 +635,158 @@ async function fetchDirectAPI(url: string): Promise<IntelArticle[]> {
             });
     } catch (err) {
         console.warn(`[NewsService] Direct API fetch failed:`, err);
+        return [];
+    }
+}
+
+// ============================================================
+// HISTORICAL BACKFILL — Gemini Search Grounding
+// Runs ONCE on first load to populate the feed with real
+// maritime intelligence events from 2026-03-01 to present.
+// Cached in localStorage with 24h TTL.
+// ============================================================
+
+const BACKFILL_CACHE_KEY = 'sidecar_backfill_cache';
+const BACKFILL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface BackfillCache {
+    articles: IntelArticle[];
+    timestamp: number;
+}
+
+function getBackfillCache(): IntelArticle[] | null {
+    try {
+        const raw = localStorage.getItem(BACKFILL_CACHE_KEY);
+        if (!raw) return null;
+        const cache: BackfillCache = JSON.parse(raw);
+        if (Date.now() - cache.timestamp > BACKFILL_TTL_MS) {
+            localStorage.removeItem(BACKFILL_CACHE_KEY);
+            return null;
+        }
+        return cache.articles;
+    } catch {
+        return null;
+    }
+}
+
+function setBackfillCache(articles: IntelArticle[]) {
+    try {
+        const cache: BackfillCache = { articles, timestamp: Date.now() };
+        localStorage.setItem(BACKFILL_CACHE_KEY, JSON.stringify(cache));
+    } catch { /* storage full, ignore */ }
+}
+
+/**
+ * Bootstrap the intelligence feed with real historical data.
+ * Uses Gemini Search Grounding to find actual maritime/geopolitical events
+ * from 2026-03-01 to present date. Returns cached results if available.
+ */
+export async function bootstrapHistoricalData(): Promise<IntelArticle[]> {
+    // Check cache first
+    const cached = getBackfillCache();
+    if (cached && cached.length > 0) {
+        console.log('[NewsService] Using cached backfill data:', cached.length, 'articles');
+        return cached;
+    }
+
+    const apiKey = await getGeminiApiKey();
+    if (!apiKey) {
+        console.warn('[NewsService] No API key for backfill');
+        return [];
+    }
+
+    const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-11'
+
+    try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey });
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                role: 'user',
+                parts: [{
+                    text: `You are a maritime intelligence analyst. Search for REAL news events from 2026-03-01 to ${today} related to:
+- Strait of Hormuz tensions, Middle East geopolitical risks
+- Oil price movements (Brent crude)  
+- Maritime security incidents (UKMTO warnings, piracy, drone attacks on vessels)
+- P&I Club / War Risk Premium insurance changes
+- Shipping route disruptions, Cape of Good Hope rerouting
+- Port congestion, bunker fuel price spikes
+- Red Sea/Houthi/Gulf of Aden shipping threats
+- Any IMO, MSCHOA, or naval force advisories
+
+Find 10-15 REAL events that actually happened. For each event, return:
+- title: News headline (English)
+- titleKo: Korean translation of the headline
+- description: 2-3 sentence summary of the event
+- source: Original news source (e.g. "Reuters", "Bloomberg", "Lloyd's List", "UKMTO")
+- publishedAt: Actual date of the event in ISO format (YYYY-MM-DDTHH:mm:ssZ)
+- url: Source URL if available
+- category: "OSINT" | "OFFICIAL_CIRCULAR" | "SECURITY_ALERT"
+- refNumber: Reference number if it's an official document (null otherwise)
+- impactScore: 50-100 based on actual significance to global shipping
+- riskLevel: "Low" | "Medium" | "High" | "Critical"
+- insight: One-line actionable insight in Korean (한국어)
+- ontologyTags: Array of 2-4 relevant keywords
+
+ORDER events chronologically (oldest first). Include events from different dates to show a timeline.
+If you cannot find events from 2026, use the most recent real maritime security events you can find.
+
+Return ONLY a JSON array. No other text.` }],
+            }],
+            config: {
+                tools: [{ googleSearch: {} }],
+            },
+        });
+
+        const text = response.text || '';
+        let jsonStr = text.trim();
+        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+        jsonStr = jsonStr.trim();
+
+        if (!jsonStr || jsonStr === '[]') return [];
+
+        const parsed = JSON.parse(jsonStr);
+        if (!Array.isArray(parsed)) return [];
+
+        const articles: IntelArticle[] = parsed.map((item: any, i: number) => {
+            const category = (['OSINT', 'OFFICIAL_CIRCULAR', 'SECURITY_ALERT'].includes(item.category))
+                ? item.category as IntelArticle['category']
+                : 'OSINT' as const;
+
+            return {
+                id: generateArticleId(item.title || `backfill-${i}`, item.source || 'Backfill'),
+                title: item.titleKo || item.title || 'Maritime Intelligence',
+                description: item.description || '',
+                url: item.url || '#',
+                source: item.source || 'Intelligence',
+                sourceBadge: getSourceBadge(item.source || ''),
+                publishedAt: item.publishedAt || new Date(2026, 2, 1 + i).toISOString(),
+                fetchedAt: new Date().toISOString(),
+                evaluated: true,
+                dropped: false,
+                impactScore: item.impactScore ?? 70,
+                riskLevel: (item.riskLevel || 'Medium') as IntelArticle['riskLevel'],
+                aiInsight: item.insight || undefined,
+                ontologyTags: item.ontologyTags || [],
+                category,
+                refNumber: item.refNumber || undefined,
+            };
+        });
+
+        // Sort newest first for display
+        articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+        // Cache results
+        setBackfillCache(articles);
+        console.log('[NewsService] Backfill complete:', articles.length, 'historical articles');
+
+        return articles;
+    } catch (err) {
+        console.warn('[NewsService] Backfill failed:', err);
         return [];
     }
 }

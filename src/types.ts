@@ -132,6 +132,11 @@ export interface AppSettings {
   language: Language;
   osintSources: string[];
   osintKeywords: string[];
+  // Persistence Tracker thresholds
+  persistenceThresholdMinutes: number;  // default 30
+  persistenceMinArticles: number;       // default 3
+  crisisKeywords: string[];             // custom crisis regex terms
+  pollingIntervalMinutes: number;       // default 10
 }
 
 // ============================================================
@@ -264,4 +269,28 @@ export interface OntologyAction {
   payload: Record<string, unknown>;
   timestamp: string;
   executedBy: string;   // 'system' | 'user' | 'ai'
+}
+
+// ============================================================
+// BEVI (Business Environment Volatility Index)
+// ============================================================
+
+/** Single data point in the BEVI time-series history */
+export interface BEVIHistoryEntry {
+  timestamp: string;
+  value: number;
+}
+
+/** Derived BEVI state — auto-calculated from ontology + intel articles */
+export interface BEVIState {
+  value: number;                       // 0-100 composite score
+  previousValue: number;               // prior value for trend calc
+  trend: 'up' | 'down' | 'stable';    // direction
+  delta: number;                       // signed change (new - old)
+  topFactor: string;                   // e.g. "견인 요인: 유가 급등"
+  macroRiskAvg: number;                // component 1 raw avg (40%)
+  assetRiskAvg: number;                // component 2 raw avg (30%)
+  intelShockAvg: number;               // component 3 raw avg (30%)
+  history: BEVIHistoryEntry[];         // max 50 entries
+  lastCalculatedAt: string;
 }

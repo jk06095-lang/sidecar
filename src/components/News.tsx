@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Filter, AlertTriangle, Newspaper, Search, Folder, FolderOpen, FileText,
     ChevronRight, Tag, Bookmark, ShieldAlert, GitBranch, ChevronDown,
-    Radio, Zap, Hash, RefreshCw, Loader2, Shield, Landmark, Globe
+    Radio, Zap, Hash, RefreshCw, Loader2, Shield, Landmark, Globe, Clock, Timer
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
@@ -20,6 +20,7 @@ export default function News() {
     const [showSkeletons, setShowSkeletons] = useState(true);
     const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
     const [activeTab, setActiveTab] = useState<FeedTab>('osint');
+    const [countdownSeconds, setCountdownSeconds] = useState(600); // 10 min
 
     // Ontology store for tag navigation
     const objects = useOntologyStore(s => s.objects);
@@ -46,11 +47,23 @@ export default function News() {
         } catch (e) { }
     };
 
-    // Keep polling to catch changes made inside the widget
+    // Keep polling to catch changes made inside the widget (10s interval)
     useEffect(() => {
-        const interval = setInterval(handleBookmarkUpdate, 2000);
+        const interval = setInterval(handleBookmarkUpdate, 10000);
         return () => clearInterval(interval);
     }, []);
+
+    // Countdown timer callback from GlobalNewsWidget
+    const handleCountdownUpdate = useCallback((seconds: number) => {
+        setCountdownSeconds(seconds);
+    }, []);
+
+    // Format countdown MM:SS
+    const formatCountdown = (totalSeconds: number): string => {
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    };
 
     const filteredData = scrapedData.filter(d =>
         (d.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -69,13 +82,11 @@ export default function News() {
 
     // Handle ontology tag clicks from the news widget
     const handleTagClick = useCallback((tag: string) => {
-        // Try to find matching ontology object
         const matchingObj = objects.find(o =>
             o.title.toLowerCase().includes(tag.toLowerCase()) ||
             tag.toLowerCase().includes(o.title.toLowerCase())
         );
         if (matchingObj) {
-            // Set as selected doc in dossier view
             setSelectedDoc({
                 id: matchingObj.id,
                 title: matchingObj.title,
@@ -227,12 +238,22 @@ export default function News() {
                             </div>
                         </div>
                     </div>
-                    <p className="text-xs text-slate-400">
-                        다중 소스 RSS 수집 → 3-Tier 퍼널 필터 → AIP 시그널 평가 → 액션 시그널 추출
+
+                    {/* Bloomberg-style Countdown Timer */}
+                    <div className="flex items-center gap-2 px-3 py-2.5 mb-3 rounded-lg bg-slate-800/50 border border-slate-700/40">
+                        <Timer size={14} className="text-amber-400 shrink-0" />
+                        <span className="text-[11px] text-slate-400 font-mono">Next Intel Batch in:</span>
+                        <span className="text-[15px] font-mono font-bold text-amber-300 tracking-widest tabular-nums ml-auto">
+                            ⏳ {formatCountdown(countdownSeconds)}
+                        </span>
+                    </div>
+
+                    <p className="text-xs text-slate-400 mb-2">
+                        10분 배치 사이클: RSS 수집 → 3-Tier 퍼널 필터 → AIP 시그널 평가 → 온톨로지 연동
                     </p>
 
                     {/* Two-Track Tab Navigation */}
-                    <div className="mt-3 flex rounded-lg bg-slate-800/40 border border-slate-700/50 p-0.5">
+                    <div className="mt-2 flex rounded-lg bg-slate-800/40 border border-slate-700/50 p-0.5">
                         <button
                             onClick={() => setActiveTab('osint')}
                             className={cn(
@@ -263,7 +284,7 @@ export default function News() {
                     <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/20 border border-emerald-800/20">
                         <Shield size={14} className="text-emerald-500 shrink-0" />
                         <span className="text-[10px] text-emerald-400/90 font-mono leading-relaxed">
-                            ⚡ FinOps Shield Active: {finOpsStats.droppedByLocalFilter + finOpsStats.droppedByDedup} articles filtered locally ➔ {finOpsStats.sentToAIP} critical signals analyzed via AIP ({finOpsStats.apiCallCount} batch calls, ~{finOpsStats.costSavingsPercent}% cost saved)
+                            ⚡ FinOps Shield: {finOpsStats.droppedByLocalFilter + finOpsStats.droppedByDedup} filtered locally → {finOpsStats.sentToAIP} via AIP ({finOpsStats.apiCallCount} batch, ~{finOpsStats.costSavingsPercent}% saved)
                         </span>
                     </div>
                 </div>
@@ -287,12 +308,17 @@ export default function News() {
 
                 {/* The global news widget */}
                 <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                    <GlobalNewsWidget onTagClick={handleTagClick} onStatsUpdate={setFinOpsStats} activeTab={activeTab} />
+                    <GlobalNewsWidget
+                        onTagClick={handleTagClick}
+                        onStatsUpdate={setFinOpsStats}
+                        activeTab={activeTab}
+                        onCountdownUpdate={handleCountdownUpdate}
+                    />
                 </div>
 
                 <div className="mt-4 p-3.5 rounded-xl border border-amber-900/30 bg-amber-950/20 text-xs text-amber-200/80 leading-relaxed shadow-lg">
                     <AlertTriangle size={14} className="text-amber-500 mb-1.5 inline-block mr-1.5" />
-                    <strong>3-Tier Intelligence Funnel:</strong> Tier 1 로컬 키워드/온톨로지 필터($0) → Tier 2 중복 캐시($0) → Tier 3 마이크로배치 5건/1호출(gemini-flash) → Impact ≥50 시그널만 표시. Pro 모델은 심층 브리핑 요청 시에만 작동.
+                    <strong>10-Min Batch Intelligence Cycle:</strong> Tier 1 로컬 키워드/온톨로지 필터($0) → Tier 2 중복 캐시($0) → Tier 3 마이크로배치 5건/1호출(gemini-flash) → Impact ≥50 시그널만 표시. 10분 주기로 API 비용을 90% 이상 절감.
                 </div>
             </div>
         </div>

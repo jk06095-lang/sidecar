@@ -1,10 +1,15 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles } from 'lucide-react';
+import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
-import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, type FinOpsStats } from '../../services/newsService';
-import { evaluateNewsSignals } from '../../services/geminiService';
+import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, type FinOpsStats } from '../../services/newsService';
+import { evaluateNewsSignals, triageWithFlash, escalateWithPro } from '../../services/geminiService';
 import { useOntologyStore } from '../../store/ontologyStore';
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const POLL_INTERVAL_MS = 600_000; // 10-minute batch cycle
 
 const RISK_COLORS: Record<string, string> = {
     Critical: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
@@ -17,68 +22,153 @@ interface GlobalNewsWidgetProps {
     onTagClick?: (tag: string) => void;
     onStatsUpdate?: (stats: FinOpsStats) => void;
     activeTab?: 'osint' | 'official';
+    onCountdownUpdate?: (secondsRemaining: number) => void;
 }
 
-export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab = 'osint' }: GlobalNewsWidgetProps) {
+export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab = 'osint', onCountdownUpdate }: GlobalNewsWidgetProps) {
     const [articles, setArticles] = useState<IntelArticle[]>([]);
     const [officialArticles, setOfficialArticles] = useState<IntelArticle[]>([]);
     const [loading, setLoading] = useState(true);
     const [officialLoading, setOfficialLoading] = useState(false);
+    const [backfilling, setBackfilling] = useState(false);
     const [error, setError] = useState(false);
     const [stats, setStats] = useState<FinOpsStats>(getFinOpsStats());
     const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     const initialized = useRef(false);
     const officialInitialized = useRef(false);
+    const nextFetchTimeRef = useRef<number>(Date.now() + POLL_INTERVAL_MS);
 
     // Ontology store for write-back
     const updateObjectProperty = useOntologyStore(s => s.updateObjectProperty);
     const triggerRippleEffect = useOntologyStore(s => s.triggerRippleEffect);
+    const addIntelArticles = useOntologyStore(s => s.addIntelArticles);
 
     // Read settings
     const getSettings = (): AppSettings => {
         try {
             return JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
-        } catch { return { apiKey: '', theme: 'dark', language: 'ko', osintSources: [], osintKeywords: [] }; }
+        } catch { return { apiKey: '', theme: 'dark', language: 'ko', osintSources: [], osintKeywords: [], persistenceThresholdMinutes: 30, persistenceMinArticles: 3, crisisKeywords: [], pollingIntervalMinutes: 10 }; }
     };
 
     // ============================================================
     // TIER 3 HANDLER: Called by newsService when batch is ready
     // ============================================================
+    // TWO-GATE ESCALATION PIPELINE
+    // Gate 1: Flash triage (ultra-low cost) → Gate 2: Pro (only if critical)
+    // ============================================================
+    const ontologyObjects = useOntologyStore(s => s.objects);
+    const ontologyLinks = useOntologyStore(s => s.links);
+
     const handleBatchEvaluation = useCallback(async (batch: IntelArticle[]) => {
         const settings = getSettings();
         if (!settings.apiKey || batch.length === 0) return;
 
         try {
-            const evaluations = await evaluateNewsSignals(
+            // ── GATE 1: Flash Triage ──
+            console.log(`[Gate1] 🔍 Flash triage: ${batch.length} articles`);
+            const triageResult = await triageWithFlash(
                 settings.apiKey,
-                batch.map(a => ({ id: a.id, title: a.title, description: a.description, source: a.source }))
+                batch.map(a => ({
+                    title: a.title,
+                    description: a.description,
+                    source: a.source,
+                    publishedAt: a.publishedAt,
+                }))
             );
 
+            console.log(`[Gate1] Summary: ${triageResult.summary}`);
+            console.log(`[Gate1] isCritical: ${triageResult.isCritical}`);
+
+            // Mark all batch articles as evaluated with Flash summary
             setArticles(prev => prev.map(article => {
-                const evaluation = evaluations.find(e => e.articleId === article.id);
-                if (!evaluation) return article;
+                if (!batch.find(b => b.id === article.id)) return article;
                 return {
                     ...article,
-                    impactScore: evaluation.impactScore,
-                    riskLevel: evaluation.riskLevel,
-                    aiInsight: evaluation.insight,
-                    ontologyTags: evaluation.ontologyTags,
+                    aiInsight: triageResult.summary,
                     evaluated: true,
-                    dropped: evaluation.dropped,
+                    riskLevel: triageResult.isCritical ? 'Critical' : 'Medium',
+                    impactScore: triageResult.isCritical ? 90 : 60,
                 };
             }));
+            // Push evaluated articles to global store for BEVI
+            addIntelArticles(batch.map(a => ({
+                ...a,
+                evaluated: true,
+                impactScore: triageResult.isCritical ? 90 : 60,
+            })));
+
+            // ── GATE 2: Pro Escalation (only if critical) ──
+            if (triageResult.isCritical) {
+                console.log('[Gate2] 🚨 CRITICAL → Escalating to Pro for ontology update');
+
+                const proResult = await escalateWithPro(
+                    settings.apiKey,
+                    triageResult.summary,
+                    { objects: ontologyObjects, links: ontologyLinks },
+                );
+
+                console.log(`[Gate2] Pro briefing received (${proResult.briefingText.length} chars)`);
+                console.log(`[Gate2] Ontology updates: ${proResult.ontologyUpdates.length} nodes`);
+                console.log(`[Gate2] Risk level: ${proResult.riskLevel}`);
+
+                // Write ontology updates to store
+                for (const update of proResult.ontologyUpdates) {
+                    try {
+                        updateObjectProperty(update.nodeId, update.propertyKey, update.newValue as string | number | boolean);
+                        console.log(`  ✅ ${update.nodeTitle}: ${update.propertyKey} → ${update.newValue} (${update.reason})`);
+                    } catch (err) {
+                        console.warn(`  ❌ Failed to update ${update.nodeId}.${update.propertyKey}:`, err);
+                    }
+                }
+
+                // Store briefing text for scenario panel
+                localStorage.setItem('sidecar_crisis_briefing', JSON.stringify({
+                    text: proResult.briefingText,
+                    riskLevel: proResult.riskLevel,
+                    impactSummary: proResult.impactSummary,
+                    timestamp: new Date().toISOString(),
+                    updatedNodes: proResult.ontologyUpdates.length,
+                }));
+
+                // Update article risk levels from Pro
+                setArticles(prev => prev.map(article => {
+                    if (!batch.find(b => b.id === article.id)) return article;
+                    return {
+                        ...article,
+                        riskLevel: proResult.riskLevel as 'Medium' | 'High' | 'Critical',
+                        aiInsight: proResult.impactSummary,
+                        impactScore: proResult.riskLevel === 'Critical' ? 95 : 85,
+                    };
+                }));
+            } else {
+                console.log('[Gate2] ⏸️ Not critical — skipping Pro. Cost saved.');
+            }
 
             const newStats = getFinOpsStats();
             setStats(newStats);
             onStatsUpdate?.(newStats);
         } catch (err) {
-            console.warn('[GlobalNewsWidget] Batch evaluation error:', err);
+            console.warn('[GlobalNewsWidget] Two-gate evaluation error:', err);
         }
-    }, [onStatsUpdate]);
+    }, [onStatsUpdate, updateObjectProperty, ontologyObjects, ontologyLinks, addIntelArticles]);
 
     useEffect(() => {
         setBatchEvaluationHandler(handleBatchEvaluation);
     }, [handleBatchEvaluation]);
+
+    // ============================================================
+    // COUNTDOWN TIMER — 1-second tick for parent component
+    // ============================================================
+    useEffect(() => {
+        countdownTimer.current = setInterval(() => {
+            const remaining = Math.max(0, Math.floor((nextFetchTimeRef.current - Date.now()) / 1000));
+            onCountdownUpdate?.(remaining);
+        }, 1000);
+        return () => {
+            if (countdownTimer.current) clearInterval(countdownTimer.current);
+        };
+    }, [onCountdownUpdate]);
 
     // Fetch OSINT articles
     const fetchAndMerge = useCallback(async () => {
@@ -93,6 +183,8 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     if (truly_new.length === 0) return prev;
                     return [...truly_new, ...prev].slice(0, 50);
                 });
+                // Push to global store for BEVI
+                addIntelArticles(passed);
             }
 
             const newStats = getFinOpsStats();
@@ -100,12 +192,15 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             onStatsUpdate?.(newStats);
             setLoading(false);
             setError(false);
+
+            // Reset countdown
+            nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
         } catch (err) {
             console.error('[GlobalNewsWidget] Fetch error:', err);
             setError(true);
             setLoading(false);
         }
-    }, [onStatsUpdate]);
+    }, [onStatsUpdate, addIntelArticles]);
 
     // Fetch official sources (KP&I + UKMTO)
     const fetchOfficial = useCallback(async () => {
@@ -129,11 +224,41 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         }
     }, []);
 
+    // ============================================================
+    // INIT: Backfill → then start 10-min polling
+    // ============================================================
     useEffect(() => {
         if (initialized.current) return;
         initialized.current = true;
-        fetchAndMerge();
-        pollTimer.current = setInterval(fetchAndMerge, 60000);
+
+        (async () => {
+            // Step 1: Bootstrap historical data
+            setBackfilling(true);
+            try {
+                const historical = await bootstrapHistoricalData();
+                if (historical.length > 0) {
+                    setArticles(prev => {
+                        const existing = new Set(prev.map(a => a.id));
+                        const newItems = historical.filter(a => !existing.has(a.id));
+                        return [...newItems, ...prev];
+                    });
+                    // Push historical to global store for BEVI
+                    addIntelArticles(historical);
+                }
+            } catch (err) {
+                console.warn('[GlobalNewsWidget] Backfill error:', err);
+            } finally {
+                setBackfilling(false);
+            }
+
+            // Step 2: First live fetch
+            await fetchAndMerge();
+
+            // Step 3: Start 10-minute polling
+            nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
+            pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
+        })();
+
         return () => {
             if (pollTimer.current) clearInterval(pollTimer.current);
         };
@@ -177,9 +302,21 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         ? articles.filter(a => !a.dropped)
         : officialArticles;
 
-    const isLoading = activeTab === 'osint' ? loading : officialLoading;
+    const isLoading = activeTab === 'osint' ? (loading && !backfilling) : officialLoading;
 
-    if (isLoading) {
+    if (backfilling && articles.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full text-cyan-500 gap-3 py-10 min-h-[200px]">
+                <Loader2 className="animate-spin" size={24} />
+                <span className="text-xs font-mono text-center leading-relaxed">
+                    📡 Historical Intelligence Backfill...<br />
+                    <span className="text-slate-500">2026-03-01 ~ 현재까지 데이터 수집 중</span>
+                </span>
+            </div>
+        );
+    }
+
+    if (isLoading && visibleArticles.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-cyan-500 gap-3 py-10 min-h-[200px]">
                 <Loader2 className="animate-spin" size={24} />
@@ -238,7 +375,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 <div className="px-3 py-1.5 border-b border-slate-800/30 bg-emerald-950/10 flex items-center gap-1.5 shrink-0">
                     <Shield size={10} className="text-emerald-500 shrink-0" />
                     <span className="text-[9px] text-emerald-400/80 font-mono leading-tight truncate">
-                        ⚡ FinOps Shield Active: {stats.droppedByLocalFilter + stats.droppedByDedup} filtered locally ➔ {stats.sentToAIP} signals via AIP ({stats.apiCallCount} calls, ~{stats.costSavingsPercent}% cost saved)
+                        ⚡ FinOps Shield Active: {stats.droppedByLocalFilter + stats.droppedByDedup} filtered locally → {stats.sentToAIP} signals via AIP ({stats.apiCallCount} calls, ~{stats.costSavingsPercent}% cost saved)
                     </span>
                 </div>
             )}
@@ -257,7 +394,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 <div className="sticky top-0 h-4 bg-gradient-to-b from-slate-900/80 to-transparent z-10 w-full pointer-events-none" />
 
                 <div className="flex flex-col flex-1 pb-4">
-                    {visibleArticles.length === 0 && !isLoading && (
+                    {visibleArticles.length === 0 && !isLoading && !backfilling && (
                         <div className="text-center text-xs text-slate-500 py-10 font-mono">
                             {activeTab === 'osint'
                                 ? '수집 중... 잠시 후 피드가 표시됩니다.'
@@ -290,7 +427,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 }
 
 // ============================================================
-// OSINT CARD — Standard news article card (unchanged design)
+// OSINT CARD — Standard news article card
 // ============================================================
 function OSINTCard({ article, onBookmark, onTagClick }: {
     article: IntelArticle;
@@ -351,8 +488,8 @@ function OSINTCard({ article, onBookmark, onTagClick }: {
                             <Loader2 size={8} className="animate-spin" /> evaluating
                         </span>
                     )}
-                    <span className="text-[10px] text-slate-600 ml-auto shrink-0">
-                        {formatTimeAgo(article.publishedAt)}
+                    <span className="text-[10px] text-slate-600 ml-auto shrink-0 font-mono">
+                        {formatSmartTimestamp(article.publishedAt)}
                     </span>
                 </div>
 
@@ -460,8 +597,8 @@ function OfficialCard({ article, onApply, onAcknowledge, onBookmark, onTagClick 
                 )}>
                     {article.riskLevel || 'HIGH'}
                 </span>
-                <span className="text-[10px] text-slate-600 ml-auto shrink-0">
-                    {formatTimeAgo(article.publishedAt)}
+                <span className="text-[10px] text-slate-600 ml-auto shrink-0 font-mono">
+                    {formatSmartTimestamp(article.publishedAt)}
                 </span>
             </div>
 
@@ -559,18 +696,40 @@ function OfficialCard({ article, onApply, onAcknowledge, onBookmark, onTagClick 
     );
 }
 
-function formatTimeAgo(dateStr: string): string {
+// ============================================================
+// TIMESTAMP FORMATTING
+// ============================================================
+
+/**
+ * Smart timestamp: shows "2026-03-01 14:30 KST" for old articles,
+ * relative time ("3h ago") for recent ones.
+ */
+function formatSmartTimestamp(dateStr: string): string {
     try {
         const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return 'Recently';
+
         const now = new Date();
-        const diff = now.getTime() - date.getTime();
-        const mins = Math.floor(diff / 60000);
-        if (mins < 1) return 'Just now';
-        if (mins < 60) return `${mins}m ago`;
-        const hours = Math.floor(mins / 60);
-        if (hours < 24) return `${hours}h ago`;
-        const days = Math.floor(hours / 24);
-        return `${days}d ago`;
+        const diffMs = now.getTime() - date.getTime();
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        // For articles older than 24 hours: show absolute KST timestamp
+        if (diffHours > 24) {
+            const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000); // UTC→KST
+            const year = kst.getUTCFullYear();
+            const month = String(kst.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(kst.getUTCDate()).padStart(2, '0');
+            const hours = String(kst.getUTCHours()).padStart(2, '0');
+            const mins = String(kst.getUTCMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day} ${hours}:${mins} KST`;
+        }
+
+        // For recent articles: relative time
+        const diffMins = Math.floor(diffMs / 60000);
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        const hours = Math.floor(diffMins / 60);
+        return `${hours}h ago`;
     } catch {
         return 'Recently';
     }

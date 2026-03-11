@@ -10,6 +10,9 @@ import type {
     OntologyLink,
     OntologyAction,
     OntologyObjectType,
+    IntelArticle,
+    BEVIState,
+    BEVIHistoryEntry,
 } from '../types';
 import { computeScenarioBranch } from '../lib/utils';
 import {
@@ -95,6 +98,137 @@ function calculateDynamicFleetData(params: SimulationParams, baseFleet: FleetVes
         return { ...vessel, riskLevel };
     });
 }
+
+// ============================================================
+// BEVI CALCULATION ENGINE
+// ============================================================
+
+const BEVI_HISTORY_MAX = 50;
+const BEVI_TREND_THRESHOLD = 1; // ±1 point = stable
+
+/** Macro/Geo risk types — BEVI component 1 (weight 40%) */
+const MACRO_TYPES: Set<string> = new Set(['RiskFactor', 'Commodity', 'Insurance', 'MacroEvent']);
+/** Asset/Supply chain types — BEVI component 2 (weight 30%) */
+const ASSET_TYPES: Set<string> = new Set(['Port', 'Vessel']);
+
+interface BEVIComponentResult {
+    macroRiskAvg: number;
+    assetRiskAvg: number;
+    intelShockAvg: number;
+    topFactor: string;
+    value: number;
+}
+
+function calculateBEVIComponents(
+    objects: OntologyObject[],
+    intelArticles: IntelArticle[],
+): BEVIComponentResult {
+    // ── Component 1: Macro/Geo Risk (40%) ──
+    const macroNodes = objects.filter(o =>
+        o.metadata.status === 'active' && MACRO_TYPES.has(o.type),
+    );
+    const macroScores = macroNodes
+        .map(o => Number(o.properties.riskScore) || 0)
+        .filter(s => s > 0);
+    const macroRiskAvg = macroScores.length > 0
+        ? macroScores.reduce((a, b) => a + b, 0) / macroScores.length
+        : 0;
+
+    // ── Component 2: Asset/Supply Chain Risk (30%) ──
+    const assetNodes = objects.filter(o =>
+        o.metadata.status === 'active' && ASSET_TYPES.has(o.type),
+    );
+    const assetScores = assetNodes
+        .map(o => Number(o.properties.riskScore) || 0)
+        .filter(s => s > 0);
+    const assetRiskAvg = assetScores.length > 0
+        ? assetScores.reduce((a, b) => a + b, 0) / assetScores.length
+        : 0;
+
+    // ── Component 3: Real-time Intelligence Shock (30%) ──
+    const evaluatedArticles = intelArticles.filter(
+        a => a.evaluated && !a.dropped && typeof a.impactScore === 'number',
+    );
+    const intelScores = evaluatedArticles.map(a => a.impactScore!);
+    const intelShockAvg = intelScores.length > 0
+        ? intelScores.reduce((a, b) => a + b, 0) / intelScores.length
+        : 0;
+
+    // ── BEVI = Weighted Average ──
+    const value = Math.round(
+        macroRiskAvg * 0.4 +
+        assetRiskAvg * 0.3 +
+        intelShockAvg * 0.3,
+    );
+    const clampedValue = Math.max(0, Math.min(100, value));
+
+    // ── Top Factor ──
+    let topFactor = '데이터 수집 중...';
+    const components = [
+        { label: '거시/지정학 리스크', avg: macroRiskAvg },
+        { label: '자산/공급망 리스크', avg: assetRiskAvg },
+        { label: '실시간 인텔리전스', avg: intelShockAvg },
+    ];
+    const top = components.reduce((a, b) => (a.avg >= b.avg ? a : b));
+
+    // Find the specific node/article with highest score in that pillar
+    if (top.label === '거시/지정학 리스크' && macroNodes.length > 0) {
+        const worst = macroNodes.reduce((a, b) =>
+            (Number(a.properties.riskScore) || 0) >= (Number(b.properties.riskScore) || 0) ? a : b,
+        );
+        topFactor = `견인 요인: ${worst.title} (${worst.properties.riskScore}점)`;
+    } else if (top.label === '자산/공급망 리스크' && assetNodes.length > 0) {
+        const worst = assetNodes.reduce((a, b) =>
+            (Number(a.properties.riskScore) || 0) >= (Number(b.properties.riskScore) || 0) ? a : b,
+        );
+        topFactor = `견인 요인: ${worst.title} (${worst.properties.riskScore}점)`;
+    } else if (top.label === '실시간 인텔리전스' && evaluatedArticles.length > 0) {
+        const worst = evaluatedArticles.reduce((a, b) =>
+            (a.impactScore || 0) >= (b.impactScore || 0) ? a : b,
+        );
+        topFactor = `견인 요인: ${worst.title.slice(0, 40)}… (⚡${worst.impactScore})`;
+    }
+
+    return { macroRiskAvg: Math.round(macroRiskAvg * 10) / 10, assetRiskAvg: Math.round(assetRiskAvg * 10) / 10, intelShockAvg: Math.round(intelShockAvg * 10) / 10, topFactor, value: clampedValue };
+}
+
+function deriveNewBEVI(prev: BEVIState, objects: OntologyObject[], intelArticles: IntelArticle[]): BEVIState {
+    const { macroRiskAvg, assetRiskAvg, intelShockAvg, topFactor, value } = calculateBEVIComponents(objects, intelArticles);
+    const delta = value - prev.value;
+    const trend: BEVIState['trend'] =
+        delta > BEVI_TREND_THRESHOLD ? 'up' :
+            delta < -BEVI_TREND_THRESHOLD ? 'down' : 'stable';
+
+    const now = new Date().toISOString();
+    const newEntry: BEVIHistoryEntry = { timestamp: now, value };
+    const history = [...prev.history, newEntry].slice(-BEVI_HISTORY_MAX);
+
+    return {
+        value,
+        previousValue: prev.value,
+        trend,
+        delta,
+        topFactor,
+        macroRiskAvg,
+        assetRiskAvg,
+        intelShockAvg,
+        history,
+        lastCalculatedAt: now,
+    };
+}
+
+const INITIAL_BEVI: BEVIState = {
+    value: 0,
+    previousValue: 0,
+    trend: 'stable',
+    delta: 0,
+    topFactor: '초기화 중...',
+    macroRiskAvg: 0,
+    assetRiskAvg: 0,
+    intelShockAvg: 0,
+    history: [],
+    lastCalculatedAt: new Date().toISOString(),
+};
 
 // ============================================================
 // ONTOLOGY → LEGACY MAPPERS (backward-compat selectors)
@@ -189,6 +323,10 @@ interface OntologyState {
     links: OntologyLink[];
     actionLog: OntologyAction[];
 
+    // ---- BEVI (Business Environment Volatility Index) ----
+    bevi: BEVIState;
+    intelArticles: IntelArticle[];
+
     // ---- Application State ----
     scenarios: Scenario[];
     activeScenarioId: string;
@@ -216,6 +354,10 @@ interface OntologyState {
     addLink: (link: OntologyLink) => void;
     removeLink: (id: string) => void;
     executeAction: (action: OntologyAction) => void;
+
+    // ---- BEVI Actions ----
+    addIntelArticles: (articles: IntelArticle[]) => void;
+    recalculateBEVI: () => void;
 
     // ---- Application Actions ----
     setActiveScenario: (id: string) => void;
@@ -252,6 +394,9 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
     // Fleet is built purely from ontology vessels — no legacy FLEET_DATA merge needed
     const initialMergedFleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
 
+    // Compute initial BEVI from mock ontology objects
+    const initialBEVI = deriveNewBEVI(INITIAL_BEVI, ONTOLOGY_OBJECTS, []);
+
     return {
         // ---- Graph Data ----
         objects: [...ONTOLOGY_OBJECTS],
@@ -260,6 +405,10 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         scenarioBranch: null,
         highlightedNodeIds: [],
 
+        // ---- BEVI ----
+        bevi: initialBEVI,
+        intelArticles: [],
+
         // ---- Application State ----
         scenarios: [...BASE_SCENARIOS],
         activeScenarioId: 'realtime',
@@ -267,24 +416,33 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         dynamicChartData: calculateDynamicChartData(initialParams),
         dynamicFleetData: calculateDynamicFleetData(initialParams, initialMergedFleet),
 
-        // ---- Graph Actions ----
-        addObject: (obj) =>
-            set((state) => ({ objects: [...state.objects, obj] })),
+        // ---- Graph Actions (with BEVI recalc) ----
+        addObject: (obj) => {
+            set((state) => ({ objects: [...state.objects, obj] }));
+            setTimeout(() => get().recalculateBEVI(), 0);
+        },
 
-        removeObject: (id) =>
+        removeObject: (id) => {
             set((state) => ({
                 objects: state.objects.filter((o) => o.id !== id),
                 links: state.links.filter((l) => l.sourceId !== id && l.targetId !== id),
-            })),
+            }));
+            setTimeout(() => get().recalculateBEVI(), 0);
+        },
 
-        updateObjectProperty: (id, key, value) =>
+        updateObjectProperty: (id, key, value) => {
             set((state) => ({
                 objects: state.objects.map((o) =>
                     o.id === id
                         ? { ...o, properties: { ...o.properties, [key]: value }, metadata: { ...o.metadata, updatedAt: new Date().toISOString() } }
                         : o,
                 ),
-            })),
+            }));
+            // Recalc BEVI if riskScore changed
+            if (key === 'riskScore' || key === 'impactValue' || key === 'congestionPct') {
+                setTimeout(() => get().recalculateBEVI(), 0);
+            }
+        },
 
         addLink: (link) =>
             set((state) => ({ links: [...state.links, link] })),
@@ -292,7 +450,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         removeLink: (id) =>
             set((state) => ({ links: state.links.filter((l) => l.id !== id) })),
 
-        executeAction: (action) =>
+        executeAction: (action) => {
             set((state) => {
                 const newLog = [...state.actionLog, action];
                 let newObjects = state.objects;
@@ -331,7 +489,31 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 }
 
                 return { actionLog: newLog, objects: newObjects };
-            }),
+            });
+            setTimeout(() => get().recalculateBEVI(), 0);
+        },
+
+        // ---- BEVI Actions ----
+        addIntelArticles: (articles) => {
+            set((state) => {
+                const existingIds = new Set(state.intelArticles.map(a => a.id));
+                const newArticles = articles.filter(a => !existingIds.has(a.id));
+                if (newArticles.length === 0) return {};
+                const merged = [...newArticles, ...state.intelArticles].slice(0, 100);
+                return { intelArticles: merged };
+            });
+            setTimeout(() => get().recalculateBEVI(), 0);
+        },
+
+        recalculateBEVI: () => {
+            const state = get();
+            const newBevi = deriveNewBEVI(state.bevi, state.objects, state.intelArticles);
+            // Only update if value actually changed (avoids infinite loops)
+            if (newBevi.value !== state.bevi.value || newBevi.topFactor !== state.bevi.topFactor) {
+                console.log(`[BEVI] 📊 ${state.bevi.value} → ${newBevi.value} (Δ${newBevi.delta > 0 ? '+' : ''}${newBevi.delta}) | ${newBevi.topFactor}`);
+                set({ bevi: newBevi });
+            }
+        },
 
         // ---- Application Actions ----
         setActiveScenario: (id) => {
@@ -513,3 +695,4 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             get().links.filter((l) => l.sourceId === objectId || l.targetId === objectId),
     };
 });
+

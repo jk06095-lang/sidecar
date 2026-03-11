@@ -406,4 +406,157 @@ ${JSON.stringify(articlesJSON, null, 2)}`;
     }
 }
 
+// ============================================================
+// GATE 1: FLASH TRIAGE — Ultra-low-cost summary + criticality
+// Called when Persistence Tracker escalates (keyword persists ≥30min)
+// Model: gemini-2.5-flash (cheapest, fastest)
+// ============================================================
 
+export interface FlashTriageResult {
+    summary: string;       // 3-sentence summary of the crisis
+    isCritical: boolean;   // True if full ontology/scenario re-evaluation needed
+}
+
+export async function triageWithFlash(
+    apiKey: string,
+    articles: { title: string; description: string; source: string; publishedAt: string }[],
+): Promise<FlashTriageResult> {
+    const ai = new GoogleGenAI({ apiKey });
+
+    const articleBlock = articles.map((a, i) =>
+        `[${i + 1}] ${a.source} | ${a.publishedAt}\n제목: ${a.title}\n내용: ${a.description}`
+    ).join('\n\n');
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{
+            role: 'user',
+            parts: [{
+                text: `너는 1차 정보 분석관이다. 이 30분간 누적된 갈등 데이터를 3문장으로 요약하고, 이것이 전사 공급망 및 온톨로지 시나리오를 전면 수정해야 할 '핵심 사태(Critical Escalation)'인지 True/False로 판단하라.
+
+판단 기준:
+- 물리적 충돌(미사일, 공격, 나포)이 실제 발생했거나 임박한 경우 → Critical
+- 국제기구(UKMTO, IMO)가 공식 경고를 발령한 경우 → Critical
+- 유가/보험료가 10% 이상 급등한 경우 → Critical
+- 단순 긴장 고조, 성명 발표, 정치적 수사 → Not Critical
+
+최근 30분간 수집된 기사:
+${articleBlock}
+
+JSON 응답만 반환하라:
+{ "summary": "3문장 요약...", "isCritical": true/false }` }],
+        }],
+    });
+
+    const text = response.text || '';
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+    else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+    if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+    jsonStr = jsonStr.trim();
+
+    try {
+        const parsed = JSON.parse(jsonStr);
+        return {
+            summary: parsed.summary || 'Unable to parse summary',
+            isCritical: parsed.isCritical === true,
+        };
+    } catch {
+        console.warn('[GeminiService] Flash triage parse error, raw:', text);
+        return { summary: text.slice(0, 200), isCritical: false };
+    }
+}
+
+
+// ============================================================
+// GATE 2: PRO ESCALATION — Full ontology + scenario update
+// Called ONLY when Flash returns isCritical: true
+// Model: gemini-2.5-pro (most capable)
+// ============================================================
+
+export interface ProEscalationResult {
+    briefingText: string;                    // Full situation briefing (Korean)
+    ontologyUpdates: Array<{
+        nodeId: string;                      // e.g. 'insurance-war-risk', 'commodity-brent'
+        nodeTitle: string;                   // human label
+        propertyKey: string;                 // e.g. 'riskScore', 'currentPrice'
+        newValue: string | number | boolean;
+        reason: string;                      // why this node is affected
+    }>;
+    riskLevel: 'Medium' | 'High' | 'Critical';
+    impactSummary: string;                   // 1-line Korean summary for UI toast
+}
+
+export async function escalateWithPro(
+    apiKey: string,
+    flashSummary: string,
+    ontologyState: { objects: OntologyObject[]; links: OntologyLink[] },
+): Promise<ProEscalationResult> {
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Compact ontology JSON — only relevant fields
+    const compactObjects = ontologyState.objects.map(o => ({
+        id: o.id,
+        type: o.type,
+        title: o.title,
+        properties: o.properties,
+    }));
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: [{
+            role: 'user',
+            parts: [{
+                text: `너는 최고 작전 통제관이다. 1차 분석관이 요약한 '핵심 사태'를 바탕으로 다음을 수행하라:
+
+## 1차 요약 (Flash 분석관 보고):
+${flashSummary}
+
+## 현재 온톨로지 전역 상태:
+${JSON.stringify(compactObjects, null, 2)}
+
+## 지시사항:
+1. '현재 상황 묘사 브리핑' 텍스트를 한국어로 작성하라. (5-8문장, 위기 상황의 전개, 영향, 전망 포함)
+2. 타격받는 온톨로지 노드와 변경되어야 할 수치를 도출하라.
+   - 가능한 nodeId: ${compactObjects.map(o => `"${o.id}"`).join(', ')}
+   - 각 노드의 어떤 propertyKey를 어떤 값으로 변경해야 하는지, 그리고 이유를 작성
+3. 전체적인 위험 수준을 Medium/High/Critical로 판단
+4. 1줄 한국어 요약 (UI 토스트용)
+
+JSON 응답만 반환:
+{
+  "briefingText": "한국어 브리핑...",
+  "ontologyUpdates": [
+    { "nodeId": "...", "nodeTitle": "...", "propertyKey": "...", "newValue": ..., "reason": "..." }
+  ],
+  "riskLevel": "Critical",
+  "impactSummary": "1줄 요약..."
+}` }],
+        }],
+    });
+
+    const text = response.text || '';
+    let jsonStr = text.trim();
+    if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+    else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+    if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+    jsonStr = jsonStr.trim();
+
+    try {
+        const parsed = JSON.parse(jsonStr);
+        return {
+            briefingText: parsed.briefingText || flashSummary,
+            ontologyUpdates: Array.isArray(parsed.ontologyUpdates) ? parsed.ontologyUpdates : [],
+            riskLevel: (['Medium', 'High', 'Critical'].includes(parsed.riskLevel)) ? parsed.riskLevel : 'High',
+            impactSummary: parsed.impactSummary || '위기 사태 업데이트 완료',
+        };
+    } catch {
+        console.warn('[GeminiService] Pro escalation parse error, raw:', text);
+        return {
+            briefingText: flashSummary,
+            ontologyUpdates: [],
+            riskLevel: 'High',
+            impactSummary: 'Pro 분석 응답 파싱 실패',
+        };
+    }
+}

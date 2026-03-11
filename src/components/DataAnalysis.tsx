@@ -1,12 +1,14 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
     TrendingUp, Plus, X, BarChart3, LineChart, Hash, Table2, Filter as FilterIcon,
     Calculator, Save, Trash2, ChevronDown, Sparkles, ArrowRight, GripVertical, Eye,
-    GitBranch, TrendingDown, AlertTriangle, Zap, CandlestickChart
+    GitBranch, TrendingDown, AlertTriangle, Zap, CandlestickChart, ShieldAlert, Terminal, Loader2
 } from 'lucide-react';
 import { cn, computeObjectDeltas, computeBranchMetrics } from '../lib/utils';
 import type { SimulationParams, ChartDataPoint, FleetVessel } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
+import { fetchAndProcess } from '../services/newsService';
+import { escalateWithPro } from '../services/geminiService';
 import TradingViewWidget from './widgets/TradingViewWidget';
 
 // ============================================================
@@ -115,6 +117,103 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
 
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [activeTab, setActiveTab] = useState<'analytics' | 'market'>('analytics');
+
+    // ============================================================
+    // FORCE INTELLIGENCE SYNC — Manual Override
+    // ============================================================
+    const updateObjectProperty = useOntologyStore(s => s.updateObjectProperty);
+    const triggerRippleEffect = useOntologyStore(s => s.triggerRippleEffect);
+    const ontologyLinks = useOntologyStore(s => s.links);
+    const [forceSyncing, setForceSyncing] = useState(false);
+    const [terminalLog, setTerminalLog] = useState<string[]>([]);
+    const terminalRef = useRef<HTMLDivElement>(null);
+
+    const appendLog = useCallback((line: string) => {
+        setTerminalLog(prev => [...prev, `[${new Date().toLocaleTimeString('ko-KR')}] ${line}`]);
+        setTimeout(() => terminalRef.current?.scrollTo({ top: terminalRef.current.scrollHeight, behavior: 'smooth' }), 50);
+    }, []);
+
+    const handleForceSync = useCallback(async () => {
+        if (forceSyncing) return;
+        setForceSyncing(true);
+        setTerminalLog([]);
+
+        try {
+            // Read API key
+            let apiKey = '';
+            try {
+                const s = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
+                apiKey = s.apiKey || '';
+            } catch { /* ignore */ }
+
+            if (!apiKey) {
+                appendLog('❌ ERROR: API Key가 설정되지 않았습니다. 설정 > API 연동에서 키를 입력하세요.');
+                setForceSyncing(false);
+                return;
+            }
+
+            // Step 1: Force Crawl
+            appendLog('[1/3] 수동 크롤링 개시: 1티어 매체 인텔리전스 DB 수집 중...');
+            await new Promise(r => setTimeout(r, 400));
+            const { passed } = await fetchAndProcess();
+            appendLog(`      ✅ ${passed.length}건 기사 수집 완료`);
+
+            // Step 2: Direct Pro Call (bypass Flash gate)
+            appendLog('[2/3] ⚡ 자동 대기 무시: Pro AI Agent 다이렉트 호출 중...');
+            appendLog('      → 30분 지속성 임계치 및 Flash 1차 관문 우회 (Manual Override)');
+            await new Promise(r => setTimeout(r, 300));
+
+            const articleSummary = passed.slice(0, 15).map((a, i) =>
+                `[${i + 1}] ${a.source} — ${a.title}`
+            ).join('\n');
+
+            const proResult = await escalateWithPro(
+                apiKey,
+                `[MANUAL OVERRIDE — Force Intelligence Sync]\n최신 수집 기사 ${passed.length}건:\n${articleSummary}`,
+                { objects, links: ontologyLinks },
+            );
+
+            appendLog(`      ✅ Pro 분석 완료: ${proResult.ontologyUpdates.length}개 노드 업데이트 도출`);
+            appendLog(`      위험 수준: ${proResult.riskLevel}`);
+
+            // Step 3: Apply Ontology Updates
+            appendLog('[3/3] 🚨 전사적 시나리오 파급효과 재계산 및 온톨로지 업데이트 중... ⏳');
+            await new Promise(r => setTimeout(r, 200));
+
+            for (const update of proResult.ontologyUpdates) {
+                try {
+                    updateObjectProperty(update.nodeId, update.propertyKey, update.newValue as string | number | boolean);
+                    appendLog(`      ✅ ${update.nodeTitle}: ${update.propertyKey} → ${update.newValue}`);
+
+                    // Trigger ripple effect for visual feedback
+                    triggerRippleEffect(update.nodeId);
+                } catch {
+                    appendLog(`      ⚠️ ${update.nodeId} 업데이트 실패 (노드 미존재)`);
+                }
+            }
+
+            // Store briefing
+            localStorage.setItem('sidecar_crisis_briefing', JSON.stringify({
+                text: proResult.briefingText,
+                riskLevel: proResult.riskLevel,
+                impactSummary: proResult.impactSummary,
+                timestamp: new Date().toISOString(),
+                updatedNodes: proResult.ontologyUpdates.length,
+                source: 'MANUAL_OVERRIDE',
+            }));
+
+            appendLog('');
+            appendLog('═══════════════════════════════════════════════════════');
+            appendLog(`🎯 FORCE SYNC COMPLETE — ${proResult.ontologyUpdates.length}개 노드 갱신, 위험 수준: ${proResult.riskLevel}`);
+            appendLog(`📋 ${proResult.impactSummary}`);
+            appendLog('═══════════════════════════════════════════════════════');
+
+        } catch (err) {
+            appendLog(`❌ FORCE SYNC ERROR: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            setForceSyncing(false);
+        }
+    }, [forceSyncing, objects, ontologyLinks, updateObjectProperty, triggerRippleEffect, appendLog]);
 
     const saveCards = useCallback((newCards: AnalysisCard[]) => {
         setCards(newCards);
@@ -473,6 +572,84 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
                     </div>
                 </div>
             </div>
+
+            {/* ============================================================ */}
+            {/* FORCE INTELLIGENCE SYNC — Manual Override Panel               */}
+            {/* ============================================================ */}
+            {activeTab === 'analytics' && (
+                <div className="px-6 pt-4 pb-2 shrink-0">
+                    <div className="bg-gradient-to-r from-slate-900/90 via-red-950/10 to-slate-900/90 border border-slate-800/60 rounded-2xl p-4">
+                        <div className="flex items-center gap-4">
+                            <button
+                                onClick={handleForceSync}
+                                disabled={forceSyncing}
+                                className={cn(
+                                    "group relative flex items-center gap-3 px-6 py-3 rounded-xl text-sm font-bold transition-all duration-300 shrink-0",
+                                    forceSyncing
+                                        ? "bg-amber-900/30 text-amber-500/70 border border-amber-700/30 cursor-wait"
+                                        : "bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 text-white border border-red-500/30 shadow-lg shadow-red-900/30 hover:shadow-red-900/50 hover:shadow-xl cursor-pointer"
+                                )}
+                            >
+                                {/* Tactical glow */}
+                                <div className={cn(
+                                    "absolute inset-0 rounded-xl transition-opacity duration-500",
+                                    forceSyncing ? "opacity-0" : "opacity-0 group-hover:opacity-100"
+                                )} style={{ boxShadow: '0 0 20px 4px rgba(239, 68, 68, 0.3), 0 0 40px 8px rgba(239, 68, 68, 0.1)' }} />
+
+                                {forceSyncing ? (
+                                    <Loader2 size={18} className="animate-spin" />
+                                ) : (
+                                    <Zap size={18} className="group-hover:animate-pulse" />
+                                )}
+                                <span className="relative z-10">
+                                    {forceSyncing ? '인텔리전스 동기화 중...' : 'Force Intelligence Sync & Update'}
+                                </span>
+                                {!forceSyncing && (
+                                    <ShieldAlert size={16} className="relative z-10 opacity-70 group-hover:opacity-100 transition-opacity" />
+                                )}
+                            </button>
+                            <div className="text-xs text-slate-500 leading-relaxed">
+                                <span className="text-slate-400 font-semibold">Manual Override</span> — 30분 지속성 게이트 및 Flash 1차 관문을 우회하여 즉시 Pro AI로 전사 시나리오를 재분석합니다.
+                            </div>
+                        </div>
+
+                        {/* Terminal Log */}
+                        {terminalLog.length > 0 && (
+                            <div
+                                ref={terminalRef}
+                                className="mt-3 bg-black/80 border border-slate-800/50 rounded-xl p-4 max-h-[200px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed"
+                            >
+                                {terminalLog.map((line, i) => (
+                                    <div
+                                        key={i}
+                                        className={cn(
+                                            "whitespace-pre-wrap",
+                                            line.includes('ERROR') ? 'text-red-400'
+                                                : line.includes('═══') ? 'text-amber-400 font-bold'
+                                                    : line.includes('🎯') ? 'text-emerald-400 font-bold'
+                                                        : line.includes('📋') ? 'text-cyan-400'
+                                                            : line.includes('✅') ? 'text-emerald-500'
+                                                                : line.includes('⚠️') ? 'text-amber-500'
+                                                                    : line.includes('⚡') ? 'text-amber-400'
+                                                                        : line.includes('🚨') ? 'text-rose-400'
+                                                                            : line.includes('[') ? 'text-slate-400'
+                                                                                : 'text-slate-500'
+                                        )}
+                                    >
+                                        {line || '\u00A0'}
+                                    </div>
+                                ))}
+                                {forceSyncing && (
+                                    <div className="flex items-center gap-2 text-amber-400 mt-1">
+                                        <div className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+                                        <span className="animate-pulse">처리 중...</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* TAB: Market Terminal */}
             {activeTab === 'market' ? (

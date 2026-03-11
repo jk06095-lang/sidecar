@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Bar,
 } from 'recharts';
@@ -17,6 +17,8 @@ import CurrencyWidget from './widgets/CurrencyWidget';
 import OilPriceWidget from './widgets/OilPriceWidget';
 import GeopoliticalRiskWidget from './widgets/GeopoliticalRiskWidget';
 import PortCongestionWidget from './widgets/PortCongestionWidget';
+import MarineTelemetryWidget from './widgets/MarineTelemetryWidget';
+import DashboardGrid, { type GridWidgetItem } from './DashboardGrid';
 
 interface HomeProps {
   scenarios: Scenario[];
@@ -70,22 +72,33 @@ export default function Home({
   // Widget visibility — persisted to localStorage
   const [widgetVisibility, setWidgetVisibility] = useState<Record<string, boolean>>(() => {
     try {
-      const saved = localStorage.getItem('sidecar_widget_layout');
+      const saved = localStorage.getItem('sidecar_widget_visibility');
       return saved ? JSON.parse(saved) : {
         fleetMap: true,
         fleet: true,
         hormuzWeather: true,
+        singaporeTelemetry: true,
+        suezTelemetry: true,
+        malaccaTelemetry: true,
         globalNews: true,
         currency: true,
         oilPrice: true,
         geopoliticalRisk: true,
         portCongestion: true,
+        brokerReports: true,
       };
-    } catch { return { fleetMap: true, fleet: true, hormuzWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
+    } catch {
+      return {
+        fleetMap: true, fleet: true, hormuzWeather: true,
+        singaporeTelemetry: true, suezTelemetry: true, malaccaTelemetry: true,
+        globalNews: true, currency: true, oilPrice: true,
+        geopoliticalRisk: true, portCongestion: true, brokerReports: true,
+      };
+    }
   });
 
   useEffect(() => {
-    localStorage.setItem('sidecar_widget_layout', JSON.stringify(widgetVisibility));
+    localStorage.setItem('sidecar_widget_visibility', JSON.stringify(widgetVisibility));
   }, [widgetVisibility]);
 
   const toggleWidget = (id: string) => {
@@ -93,14 +106,18 @@ export default function Home({
   };
 
   const WIDGET_CATALOG = [
-    { id: 'fleetMap', name: 'Fleet Tracker', icon: '🗯️', category: 'Core', desc: '위성지도 기반 선대 실시간 위치 추적' },
+    { id: 'fleetMap', name: 'Fleet Tracker', icon: '🗺️', category: 'Core', desc: '위성지도 기반 선대 실시간 위치 추적' },
     { id: 'fleet', name: 'Fleet Status', icon: '🚢', category: 'Core', desc: '선대 현황 및 리스크 상태' },
-    { id: 'hormuzWeather', name: 'Hormuz Telemetry', icon: '🌊', category: 'Environment', desc: 'Open-Meteo Marine API 실시간 해양 기상' },
+    { id: 'hormuzWeather', name: 'Hormuz Telemetry', icon: '🌊', category: 'Environment', desc: 'Open-Meteo Marine API · Hormuz 해협' },
+    { id: 'singaporeTelemetry', name: 'Singapore Telemetry', icon: '🟢', category: 'Environment', desc: 'Open-Meteo Marine API · Singapore 해협' },
+    { id: 'suezTelemetry', name: 'Suez Telemetry', icon: '🟡', category: 'Environment', desc: 'Open-Meteo Marine API · Suez 운하' },
+    { id: 'malaccaTelemetry', name: 'Malacca Telemetry', icon: '🟣', category: 'Environment', desc: 'Open-Meteo Marine API · Malacca 해협' },
     { id: 'globalNews', name: 'Global News Intel', icon: '📡', category: 'Intelligence', desc: '글로벌 경제 뉴스 피드' },
     { id: 'currency', name: 'FX Rates', icon: '💱', category: 'Market', desc: 'Frankfurter API 실시간 환율' },
     { id: 'oilPrice', name: 'Bunker Price', icon: '⛽', category: 'Market', desc: 'VLSFO/Brent 유가 시뮬레이션 추이' },
     { id: 'geopoliticalRisk', name: 'Geopolitical Risk', icon: '🛡️', category: 'Analytics', desc: '지정학적 리스크 매트릭스 레이더 차트' },
     { id: 'portCongestion', name: 'Port Congestion', icon: '⚓', category: 'Operations', desc: '주요 항만 혼잡도 시뮬레이션' },
+    { id: 'brokerReports', name: 'Asset Valuation', icon: '📈', category: 'Market', desc: '자산 밸류에이션 리포트' },
   ];
 
   const handleSliderChange = (key: keyof SimulationParams, value: number) => {
@@ -122,6 +139,121 @@ export default function Home({
     : 0;
 
   const isCrisis = simulationParams.newsSentimentScore > 70;
+
+  // Build grid widget items
+  const gridWidgets: GridWidgetItem[] = useMemo(() => [
+    {
+      id: 'fleetMap',
+      title: 'Fleet Tracker',
+      visible: widgetVisibility.fleetMap ?? true,
+      defaultLayout: { i: 'fleetMap', x: 0, y: 0, w: 8, h: 4, minW: 4, minH: 3 },
+      component: <FleetMapWidget vessels={dynamicFleetData} />,
+    },
+    {
+      id: 'fleet',
+      title: 'Fleet Status — 선대 현황',
+      visible: widgetVisibility.fleet ?? true,
+      defaultLayout: { i: 'fleet', x: 0, y: 4, w: 8, h: 3, minW: 4, minH: 2 },
+      component: <FleetStatusWidget fleetData={dynamicFleetData} />,
+    },
+    {
+      id: 'hormuzWeather',
+      title: 'Strait of Hormuz Telemetry',
+      visible: widgetVisibility.hormuzWeather ?? true,
+      defaultLayout: { i: 'hormuzWeather', x: 0, y: 7, w: 4, h: 3, minW: 3, minH: 2 },
+      component: <HormuzWeatherWidget />,
+    },
+    {
+      id: 'singaporeTelemetry',
+      title: 'Singapore Strait Telemetry',
+      visible: widgetVisibility.singaporeTelemetry ?? true,
+      defaultLayout: { i: 'singaporeTelemetry', x: 4, y: 7, w: 4, h: 3, minW: 3, minH: 2 },
+      component: <MarineTelemetryWidget portName="Singapore Strait" latitude={1.25} longitude={103.80} accentColor="#22c55e" />,
+    },
+    {
+      id: 'globalNews',
+      title: 'Global News Intelligence',
+      visible: widgetVisibility.globalNews ?? true,
+      defaultLayout: { i: 'globalNews', x: 0, y: 10, w: 8, h: 4, minW: 4, minH: 3 },
+      component: <GlobalNewsWidget />,
+    },
+    {
+      id: 'geopoliticalRisk',
+      title: 'Geopolitical Risk Matrix',
+      visible: widgetVisibility.geopoliticalRisk ?? true,
+      defaultLayout: { i: 'geopoliticalRisk', x: 0, y: 14, w: 4, h: 4, minW: 3, minH: 3 },
+      component: <GeopoliticalRiskWidget simulationParams={simulationParams} />,
+    },
+    {
+      id: 'portCongestion',
+      title: 'Port Congestion Index',
+      visible: widgetVisibility.portCongestion ?? true,
+      defaultLayout: { i: 'portCongestion', x: 4, y: 14, w: 4, h: 3, minW: 3, minH: 2 },
+      component: <PortCongestionWidget simulationParams={simulationParams} />,
+    },
+    {
+      id: 'brokerReports',
+      title: 'Asset Valuation',
+      visible: widgetVisibility.brokerReports ?? true,
+      defaultLayout: { i: 'brokerReports', x: 8, y: 0, w: 4, h: 5, minW: 3, minH: 3 },
+      component: (
+        <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl h-full overflow-auto custom-scrollbar">
+          <div className="flex items-center gap-2 px-5 pt-4 pb-3">
+            <TrendingUp size={14} className="text-cyan-400" />
+            <h3 className="text-sm font-semibold text-slate-200">Asset Valuation</h3>
+          </div>
+          <div className="px-5 pb-4 space-y-3">
+            {brokerReports.map((r, i) => (
+              <div key={i} className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] text-slate-500">{r.source} · {r.date}</span>
+                  <span className={cn(
+                    'text-xs font-mono font-semibold',
+                    r.wow_change_pct.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'
+                  )}>
+                    {r.wow_change_pct}%
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 font-medium">{r.asset_class}</p>
+                <p className="text-lg text-cyan-400 font-mono font-bold mt-0.5">
+                  ${r.current_price_mil_usd}M
+                </p>
+                <p className="text-[10px] text-slate-500 mt-1">{r.market_sentiment}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'currency',
+      title: 'FX Rates',
+      visible: widgetVisibility.currency ?? true,
+      defaultLayout: { i: 'currency', x: 8, y: 5, w: 4, h: 4, minW: 3, minH: 3 },
+      component: <CurrencyWidget />,
+    },
+    {
+      id: 'oilPrice',
+      title: 'Bunker Price',
+      visible: widgetVisibility.oilPrice ?? true,
+      defaultLayout: { i: 'oilPrice', x: 8, y: 9, w: 4, h: 3, minW: 3, minH: 2 },
+      component: <OilPriceWidget simulationParams={simulationParams} />,
+    },
+    {
+      id: 'suezTelemetry',
+      title: 'Suez Canal Telemetry',
+      visible: widgetVisibility.suezTelemetry ?? true,
+      defaultLayout: { i: 'suezTelemetry', x: 8, y: 12, w: 4, h: 3, minW: 3, minH: 2 },
+      component: <MarineTelemetryWidget portName="Suez Canal" latitude={30.58} longitude={32.27} accentColor="#f59e0b" />,
+    },
+    {
+      id: 'malaccaTelemetry',
+      title: 'Malacca Strait Telemetry',
+      visible: widgetVisibility.malaccaTelemetry ?? true,
+      defaultLayout: { i: 'malaccaTelemetry', x: 8, y: 15, w: 4, h: 3, minW: 3, minH: 2 },
+      component: <MarineTelemetryWidget portName="Malacca Strait" latitude={2.50} longitude={101.80} accentColor="#a855f7" />,
+    },
+  ], [widgetVisibility, dynamicFleetData, simulationParams, brokerReports]);
 
   return (
     <div className="flex h-full bg-slate-950">
@@ -233,7 +365,7 @@ export default function Home({
                       tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }}
                       domain={[0, 100]}
                     />
-                    <Tooltip content={<CustomTooltip />} />
+                    <Tooltip content={<CustomTooltip />} wrapperStyle={{ zIndex: 99999 }} />
                     <Area
                       yAxisId="ws"
                       type="monotone"
@@ -341,83 +473,8 @@ export default function Home({
               </div>
             )}
 
-            {/* Bottom Grid: Platform Widgets */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-              {/* Live Environment Widgets */}
-              <div className="xl:col-span-2 flex flex-col gap-4">
-                {widgetVisibility.fleetMap && (
-                  <FleetMapWidget vessels={dynamicFleetData} />
-                )}
-                {widgetVisibility.fleet && (
-                  <div className="min-h-[200px]">
-                    <FleetStatusWidget fleetData={dynamicFleetData} />
-                  </div>
-                )}
-                {widgetVisibility.hormuzWeather && (
-                  <div className="h-[240px]">
-                    <HormuzWeatherWidget />
-                  </div>
-                )}
-                {widgetVisibility.globalNews && (
-                  <div className="h-[320px]">
-                    <GlobalNewsWidget />
-                  </div>
-                )}
-                {widgetVisibility.geopoliticalRisk && (
-                  <div className="h-[340px]">
-                    <GeopoliticalRiskWidget simulationParams={simulationParams} />
-                  </div>
-                )}
-                {widgetVisibility.portCongestion && (
-                  <div className="h-[260px]">
-                    <PortCongestionWidget simulationParams={simulationParams} />
-                  </div>
-                )}
-              </div>
-
-              {/* Right Column */}
-              <div className="flex flex-col gap-4">
-                {/* Broker Reports (always visible) */}
-                <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl">
-                  <div className="flex items-center gap-2 px-5 pt-4 pb-3">
-                    <TrendingUp size={14} className="text-cyan-400" />
-                    <h3 className="text-sm font-semibold text-slate-200">Asset Valuation</h3>
-                  </div>
-                  <div className="px-5 pb-4 space-y-3">
-                    {brokerReports.map((r, i) => (
-                      <div key={i} className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[10px] text-slate-500">{r.source} · {r.date}</span>
-                          <span className={cn(
-                            'text-xs font-mono font-semibold',
-                            r.wow_change_pct.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'
-                          )}>
-                            {r.wow_change_pct}%
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-300 font-medium">{r.asset_class}</p>
-                        <p className="text-lg text-cyan-400 font-mono font-bold mt-0.5">
-                          ${r.current_price_mil_usd}M
-                        </p>
-                        <p className="text-[10px] text-slate-500 mt-1">{r.market_sentiment}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {widgetVisibility.currency && (
-                  <div className="h-[320px]">
-                    <CurrencyWidget />
-                  </div>
-                )}
-
-                {widgetVisibility.oilPrice && (
-                  <div className="h-[280px]">
-                    <OilPriceWidget simulationParams={simulationParams} />
-                  </div>
-                )}
-              </div>
-            </div>
+            {/* ===== DRAGGABLE GRID WIDGETS ===== */}
+            <DashboardGrid widgets={gridWidgets} />
 
             {/* User Custom Widgets from Data Analysis */}
             {(() => {

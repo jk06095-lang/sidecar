@@ -5,13 +5,26 @@
  * Persists user layout to localStorage.
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import ReactGridLayout from 'react-grid-layout';
+import GridLayoutRaw from 'react-grid-layout';
+const GridLayout = GridLayoutRaw as any;
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Lock, Unlock, GripVertical, RotateCcw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-type LayoutItem = ReactGridLayout.Layout;
+// Layout item shape matching react-grid-layout
+interface LayoutItem {
+    i: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    minW?: number;
+    minH?: number;
+    maxW?: number;
+    maxH?: number;
+    static?: boolean;
+}
 
 const STORAGE_KEY = 'sidecar_grid_layout';
 const COLS = 12;
@@ -47,12 +60,14 @@ function saveLayout(layout: LayoutItem[]) {
 export default function DashboardGrid({ widgets }: DashboardGridProps) {
     const [isEditMode, setIsEditMode] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
-    const [containerWidth, setContainerWidth] = useState(1200);
+    const [containerWidth, setContainerWidth] = useState(0);
 
     // Measure container width
     useEffect(() => {
         const el = containerRef.current;
         if (!el) return;
+        // Set initial width
+        setContainerWidth(el.clientWidth);
         const observer = new ResizeObserver(entries => {
             for (const entry of entries) {
                 setContainerWidth(entry.contentRect.width);
@@ -146,9 +161,10 @@ export default function DashboardGrid({ widgets }: DashboardGridProps) {
                 isEditMode && 'dashboard-grid-edit-bg'
             )}>
                 {containerWidth > 0 && (
-                    <ReactGridLayout
+                    // @ts-ignore — react-grid-layout types miss ReactGridLayoutProps-specific props like cols
+                    <GridLayout
                         className="dashboard-grid-layout"
-                        layout={layout}
+                        layout={layout as any}
                         cols={COLS}
                         rowHeight={ROW_HEIGHT}
                         width={containerWidth}
@@ -156,7 +172,7 @@ export default function DashboardGrid({ widgets }: DashboardGridProps) {
                         isDraggable={isEditMode}
                         isResizable={isEditMode}
                         draggableHandle=".grid-drag-handle"
-                        onLayoutChange={handleLayoutChange}
+                        onLayoutChange={handleLayoutChange as any}
                         compactType="vertical"
                         useCSSTransforms={true}
                     >
@@ -185,7 +201,7 @@ export default function DashboardGrid({ widgets }: DashboardGridProps) {
                                 </div>
                             );
                         })}
-                    </ReactGridLayout>
+                    </GridLayout>
                 )}
             </div>
         </div>

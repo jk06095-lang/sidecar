@@ -101,7 +101,8 @@ export default function HormuzWeatherWidget() {
                         <XAxis dataKey="time" tick={{ fill: '#64748b', fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={30} />
                         <YAxis tick={{ fill: '#64748b', fontSize: 9 }} axisLine={false} tickLine={false} />
                         <Tooltip
-                            contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', fontSize: '12px', borderRadius: '8px' }}
+                            wrapperStyle={{ zIndex: 99999 }}
+                            contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', fontSize: '11px', borderRadius: '8px' }}
                             itemStyle={{ color: '#bae6fd' }}
                         />
                         <Area type="monotone" dataKey="wave" stroke="#0ea5e9" strokeWidth={2} fill="url(#waveGradient)" name="Wave Height (m)" isAnimationActive={true} />

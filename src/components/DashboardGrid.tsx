@@ -14,6 +14,7 @@ import {
 import { Lock, Unlock, GripVertical } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { SimulationParams, FleetVessel } from '../types';
+import { useOntologyStore } from '../store/ontologyStore';
 
 // Widget imports
 import FleetMapWidget from './widgets/FleetMapWidget';
@@ -74,6 +75,11 @@ const DEFAULT_LAYOUT: LayoutItem[] = [
 ];
 
 // ============================================================
+// LSEG MARKET DATA POLLING INTERVAL (60s)
+// ============================================================
+const LSEG_POLL_INTERVAL_MS = 60_000;
+
+// ============================================================
 // PROPS
 // ============================================================
 
@@ -92,6 +98,20 @@ export default function DashboardGrid({ widgetVisibility, simulationParams, dyna
     const containerRef = useRef<HTMLDivElement>(null);
     const containerWidth = useContainerWidth(containerRef);
     const [editMode, setEditMode] = useState(false);
+    const fetchAndBindMarketData = useOntologyStore(s => s.fetchAndBindMarketData);
+
+    // ---- LSEG Data Fetch on Mount + Polling ----
+    useEffect(() => {
+        // Initial fetch
+        fetchAndBindMarketData();
+
+        // Poll every 60s
+        const interval = setInterval(() => {
+            fetchAndBindMarketData();
+        }, LSEG_POLL_INTERVAL_MS);
+
+        return () => clearInterval(interval);
+    }, [fetchAndBindMarketData]);
 
     // ---- Layout persistence ----
     const [layouts, setLayouts] = useState<ResponsiveLayouts>(() => {

@@ -9,6 +9,7 @@
  * Only articles surviving all 3 tiers reach the LLM.
  */
 import type { IntelArticle } from '../types';
+import { lsegGet } from '../lib/lsegApiClient';
 
 // ============================================================
 // RSS FEED SOURCES — CORS-free via rss2json proxy
@@ -987,6 +988,73 @@ export async function fetchOfficialSources(): Promise<IntelArticle[]> {
     } catch (err) {
         console.warn('[NewsService] Official sources fetch failed:', err);
         return [...officialArticleCache];
+    }
+}
+
+// ============================================================
+// LSEG NEWS HEADLINES — Workspace API Integration
+// Fetches shipping/freight/oil/middle-east news from LSEG
+// Falls back gracefully to empty array (RSS pipeline still provides news)
+// ============================================================
+
+
+
+interface LSEGNewsItem {
+    headline?: string;
+    summary?: string;
+    timestamp?: string;
+    source?: string;
+    storyId?: string;
+}
+
+interface LSEGNewsResponse {
+    data?: LSEGNewsItem[];
+}
+
+/**
+ * Fetch LSEG news headlines related to maritime/shipping topics.
+ * Limited to 10-15 results to conserve API quota.
+ * Falls back to empty array if LSEG is unavailable.
+ */
+export async function fetchLSEGNewsHeadlines(): Promise<IntelArticle[]> {
+    try {
+        const response = await lsegGet<LSEGNewsResponse>(
+            '/api/news/headlines',
+            {
+                query: 'Shipping OR Freight OR Oil OR "Middle East" OR Maritime OR Tanker OR "Strait of Hormuz"',
+                count: 15,
+                sort: 'newest',
+            },
+            1800, // 30min cache for news
+        );
+
+        const items = response.data?.data || [];
+        if (items.length === 0) return [];
+
+        return items
+            .filter((item: LSEGNewsItem) => item.headline && item.headline.trim())
+            .slice(0, 15)
+            .map((item: LSEGNewsItem, i: number) => {
+                const id = generateArticleId(item.headline || `lseg-${i}`, 'LSEG Workspace');
+                return {
+                    id,
+                    title: item.headline || '',
+                    description: item.summary || '',
+                    url: item.storyId ? `lseg://story/${item.storyId}` : '#',
+                    source: item.source || 'LSEG Workspace',
+                    sourceBadge: '🔷',
+                    publishedAt: item.timestamp || new Date().toISOString(),
+                    fetchedAt: new Date().toISOString(),
+                    evaluated: true,
+                    dropped: false,
+                    impactScore: 60,
+                    riskLevel: 'Medium' as const,
+                    category: 'OSINT' as const,
+                } satisfies IntelArticle;
+            });
+    } catch (err) {
+        console.warn('[NewsService] LSEG news fetch failed (expected if Workspace not running):', err);
+        return [];
     }
 }
 

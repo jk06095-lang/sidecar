@@ -23,6 +23,10 @@ import {
     ONTOLOGY_OBJECTS,
     ONTOLOGY_LINKS,
 } from '../data/mockData';
+import { fetchMarketDataWithFallback, mapLSEGQuotesToScenarioParams, type MarketDataSource } from '../services/lsegMarketService';
+import type { MarketQuote } from '../services/marketDataService';
+import { scanHeadlinesForRisk } from '../lib/sentimentScanner';
+import { fetchLSEGNewsHeadlines } from '../services/newsService';
 
 // ============================================================
 // CALCULATION HELPERS (moved from App.tsx for centralization)
@@ -334,6 +338,12 @@ interface OntologyState {
     dynamicChartData: ChartDataPoint[];
     dynamicFleetData: FleetVessel[];
 
+    // ---- LSEG Data Source State ----
+    lsegDataSource: 'live' | 'demo';
+    lsegIsLoading: boolean;
+    lsegMarketQuotes: MarketQuote[];
+    newsRiskBoost: number;
+
     // ---- Scenario Branching ----
     scenarioBranch: {
         active: boolean;
@@ -368,6 +378,12 @@ interface OntologyState {
     deleteScenario: (id: string) => void;
     updateRealtimeScenarioParams: (params: SimulationParams) => void;
     recalculate: () => void;
+
+    // ---- LSEG Data Actions ----
+    setLsegDataSource: (source: 'live' | 'demo') => void;
+    setLsegIsLoading: (loading: boolean) => void;
+    fetchAndBindMarketData: () => Promise<void>;
+    setNewsRiskBoost: (boost: number) => void;
 
     // ---- Ripple Effect Actions ----
     triggerRippleEffect: (nodeId: string) => void;
@@ -415,6 +431,12 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         simulationParams: { ...initialParams },
         dynamicChartData: calculateDynamicChartData(initialParams),
         dynamicFleetData: calculateDynamicFleetData(initialParams, initialMergedFleet),
+
+        // ---- LSEG Data Source ----
+        lsegDataSource: 'demo' as const,
+        lsegIsLoading: false,
+        lsegMarketQuotes: [],
+        newsRiskBoost: 0,
 
         // ---- Graph Actions (with BEVI recalc) ----
         addObject: (obj) => {
@@ -566,6 +588,83 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             set((state) => ({
                 scenarios: state.scenarios.map((s) => (s.id === 'realtime' ? { ...s, params } : s)),
             })),
+
+        // ---- LSEG Data Actions ----
+        setLsegDataSource: (source) => set({ lsegDataSource: source }),
+        setLsegIsLoading: (loading) => set({ lsegIsLoading: loading }),
+        setNewsRiskBoost: (boost) => set({ newsRiskBoost: boost }),
+
+        fetchAndBindMarketData: async () => {
+            const store = get();
+            if (store.lsegIsLoading) return; // Prevent concurrent fetches
+            set({ lsegIsLoading: true });
+
+            try {
+                // Fetch market data (LSEG → Yahoo → Cache → Mock)
+                const result = await fetchMarketDataWithFallback();
+                const source: 'live' | 'demo' = result.source === 'lseg' ? 'live' : 'demo';
+
+                // Map quotes to scenario params and update realtime scenario
+                const scenarioUpdates = mapLSEGQuotesToScenarioParams(result.quotes);
+
+                // Fetch LSEG news headlines
+                let newsRiskBoost = 0;
+                try {
+                    const lsegNews = await fetchLSEGNewsHeadlines();
+                    if (lsegNews.length > 0) {
+                        // Merge into intel articles
+                        store.addIntelArticles(lsegNews);
+                        // Scan for risk keywords
+                        const headlines = lsegNews.map(a => a.title);
+                        const scanResult = scanHeadlinesForRisk(headlines);
+                        newsRiskBoost = scanResult.riskBoost;
+                    }
+                } catch { /* LSEG news is optional */ }
+
+                // Also scan existing intel articles for risk
+                const existingHeadlines = store.intelArticles.map(a => a.title);
+                if (existingHeadlines.length > 0 && newsRiskBoost === 0) {
+                    const existingScan = scanHeadlinesForRisk(existingHeadlines);
+                    newsRiskBoost = existingScan.riskBoost;
+                }
+
+                // Update store
+                set({
+                    lsegDataSource: source,
+                    lsegIsLoading: false,
+                    lsegMarketQuotes: result.quotes,
+                    newsRiskBoost,
+                });
+
+                // Update realtime scenario params if we're in realtime mode
+                if (store.activeScenarioId === 'realtime' && Object.keys(scenarioUpdates).length > 0) {
+                    const currentParams = store.simulationParams;
+                    const updatedParams = {
+                        ...currentParams,
+                        ...scenarioUpdates,
+                        // Blend news risk into sentiment score
+                        newsSentimentScore: Math.min(100,
+                            (currentParams.newsSentimentScore || 0) * 0.5 + newsRiskBoost * 0.5
+                        ),
+                    };
+                    store.updateRealtimeScenarioParams(updatedParams);
+                    store.setSimulationParams(updatedParams);
+                }
+
+                // Update ontology commodity objects with live prices
+                for (const quote of result.quotes) {
+                    if (quote.symbol === 'LCOc1' || quote.symbol === 'BZ=F') {
+                        store.updateObjectProperty('commodity-brent', 'basePrice', quote.price);
+                    }
+                    if (quote.symbol === 'KRW=' || quote.symbol === 'KRW=X') {
+                        store.updateObjectProperty('currency-krw', 'baseRate', quote.price);
+                    }
+                }
+            } catch (err) {
+                console.error('[OntologyStore] fetchAndBindMarketData failed:', err);
+                set({ lsegDataSource: 'demo', lsegIsLoading: false });
+            }
+        },
 
         recalculate: () => {
             const state = get();

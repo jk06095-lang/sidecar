@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
-import { Shield, AlertTriangle } from 'lucide-react';
+import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
+import { Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { SimulationParams } from '../../types';
+import { useOntologyStore } from '../../store/ontologyStore';
+import SkeletonLoader from './SkeletonLoader';
+import DataSourceBadge from './DataSourceBadge';
 
 interface GeopoliticalRiskWidgetProps {
     simulationParams: SimulationParams;
@@ -17,9 +20,15 @@ interface RiskScenario {
 
 export default function GeopoliticalRiskWidget({ simulationParams }: GeopoliticalRiskWidgetProps) {
     const { newsSentimentScore, awrpRate, vlsfoPrice } = simulationParams;
+    const lsegIsLoading = useOntologyStore(s => s.lsegIsLoading);
+    const lsegDataSource = useOntologyStore(s => s.lsegDataSource);
+    const newsRiskBoost = useOntologyStore(s => s.newsRiskBoost);
 
     const riskScenarios = useMemo<RiskScenario[]>(() => {
-        const sentimentFactor = newsSentimentScore / 100;
+        // Blend newsRiskBoost into sentiment factor for more dynamic risk response
+        const rawSentiment = newsSentimentScore / 100;
+        const boostedSentiment = Math.min(1, rawSentiment + (newsRiskBoost / 100) * 0.4);
+        const sentimentFactor = boostedSentiment;
         const awrpFactor = Math.min(awrpRate / 0.5, 1);
         const priceFactor = Math.min((vlsfoPrice - 300) / 1200, 1);
 
@@ -35,7 +44,7 @@ export default function GeopoliticalRiskWidget({ simulationParams }: Geopolitica
             { name: '자산가치 급변', probability: Math.round(sentimentFactor * 50 + priceFactor * 25), impact: 70, color: '#e11d48' },
             { name: '환율 리스크', probability: Math.round(sentimentFactor * 25 + priceFactor * 30), impact: 45, color: '#a855f7' },
         ];
-    }, [newsSentimentScore, awrpRate, vlsfoPrice]);
+    }, [newsSentimentScore, awrpRate, vlsfoPrice, newsRiskBoost]);
 
     const radarData = useMemo(() =>
         riskScenarios.slice(0, 8).map(s => ({
@@ -54,12 +63,25 @@ export default function GeopoliticalRiskWidget({ simulationParams }: Geopolitica
         return Math.round(avg);
     }, [riskScenarios]);
 
+    if (lsegIsLoading) {
+        return (
+            <div className="flex flex-col h-full bg-slate-900/40 rounded-lg border border-slate-700/30 overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50 bg-slate-800/20">
+                    <Shield size={14} className="text-rose-400" />
+                    <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-widest">Geopolitical Risk Matrix</h4>
+                </div>
+                <SkeletonLoader variant="chart" />
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col h-full bg-slate-900/40 rounded-lg border border-slate-700/30 overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50 bg-slate-800/20">
                 <Shield size={14} className="text-rose-400" />
                 <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-widest">Geopolitical Risk Matrix</h4>
                 <span className="ml-auto flex items-center gap-2">
+                    <DataSourceBadge source={lsegDataSource} />
                     <span className={cn(
                         'px-2 py-0.5 rounded text-[10px] font-bold font-mono',
                         overallRisk > 60 ? 'bg-rose-500/20 text-rose-400' :
@@ -67,7 +89,11 @@ export default function GeopoliticalRiskWidget({ simulationParams }: Geopolitica
                     )}>
                         RISK: {overallRisk}%
                     </span>
-                    <span className="px-1.5 py-0.5 rounded text-[9px] bg-slate-800 text-slate-400 font-mono">SIM</span>
+                    {newsRiskBoost > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-rose-500/10 text-rose-400 font-mono border border-rose-500/20">
+                            NEWS +{newsRiskBoost}
+                        </span>
+                    )}
                 </span>
             </div>
 
@@ -122,7 +148,10 @@ export default function GeopoliticalRiskWidget({ simulationParams }: Geopolitica
             <div className="px-4 py-2 border-t border-slate-800/50 flex items-center gap-3 text-[10px] text-slate-500">
                 <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-rose-500 rounded" /> 확률(P)</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-cyan-500 rounded" style={{ borderTop: '1px dashed #06b6d4' }} /> 영향도(I)</span>
-                <span className="ml-auto font-mono">Score = P × I / 100</span>
+                <span className="ml-auto font-mono">
+                    {/* TODO: Phase 5 — Gemini Pro simulation */}
+                    Score = P × I / 100
+                </span>
             </div>
         </div>
     );

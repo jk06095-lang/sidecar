@@ -5,8 +5,8 @@
  * Persists user layout to localStorage.
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import GridLayoutRaw from 'react-grid-layout';
-const GridLayout = GridLayoutRaw as any;
+import RGL from 'react-grid-layout';
+const GridLayout: React.FC<any> = RGL as any;
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Lock, Unlock, GripVertical, RotateCcw } from 'lucide-react';
@@ -161,7 +161,6 @@ export default function DashboardGrid({ widgets }: DashboardGridProps) {
                 isEditMode && 'dashboard-grid-edit-bg'
             )}>
                 {containerWidth > 0 && (
-                    // @ts-ignore — react-grid-layout types miss ReactGridLayoutProps-specific props like cols
                     <GridLayout
                         className="dashboard-grid-layout"
                         layout={layout as any}

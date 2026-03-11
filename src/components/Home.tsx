@@ -9,14 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario, SimulationParams, ChartDataPoint, FleetVessel, BrokerReport, InsuranceCircular } from '../types';
-import HormuzWeatherWidget from './widgets/HormuzWeatherWidget';
-import GlobalNewsWidget from './widgets/GlobalNewsWidget';
-import FleetStatusWidget from './widgets/FleetStatusWidget';
-import FleetMapWidget from './widgets/FleetMapWidget';
-import CurrencyWidget from './widgets/CurrencyWidget';
-import OilPriceWidget from './widgets/OilPriceWidget';
-import GeopoliticalRiskWidget from './widgets/GeopoliticalRiskWidget';
-import PortCongestionWidget from './widgets/PortCongestionWidget';
+import DashboardGrid from './DashboardGrid';
 
 interface HomeProps {
   scenarios: Scenario[];
@@ -30,6 +23,7 @@ interface HomeProps {
   onScenarioChange: (id: string) => void;
   onParamsChange: (params: SimulationParams) => void;
   onSaveScenario: (name: string) => void;
+  onNavigateTab?: (tab: string) => void;
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -75,13 +69,16 @@ export default function Home({
         fleetMap: true,
         fleet: true,
         hormuzWeather: true,
+        singaporeWeather: true,
+        busanWeather: true,
+        suezWeather: true,
         globalNews: true,
         currency: true,
         oilPrice: true,
         geopoliticalRisk: true,
         portCongestion: true,
       };
-    } catch { return { fleetMap: true, fleet: true, hormuzWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
+    } catch { return { fleetMap: true, fleet: true, hormuzWeather: true, singaporeWeather: true, busanWeather: true, suezWeather: true, globalNews: true, currency: true, oilPrice: true, geopoliticalRisk: true, portCongestion: true }; }
   });
 
   useEffect(() => {
@@ -93,9 +90,13 @@ export default function Home({
   };
 
   const WIDGET_CATALOG = [
-    { id: 'fleetMap', name: 'Fleet Tracker', icon: '🗯️', category: 'Core', desc: '위성지도 기반 선대 실시간 위치 추적' },
+    { id: 'bevi', name: 'Volatility Index', icon: '📈', category: 'Analytics', desc: 'BEVI 실시간 가변성 지수 모니터' },
+    { id: 'fleetMap', name: 'Fleet Tracker', icon: '🗺️', category: 'Core', desc: '위성지도 기반 선대 실시간 위치 추적' },
     { id: 'fleet', name: 'Fleet Status', icon: '🚢', category: 'Core', desc: '선대 현황 및 리스크 상태' },
-    { id: 'hormuzWeather', name: 'Hormuz Telemetry', icon: '🌊', category: 'Environment', desc: 'Open-Meteo Marine API 실시간 해양 기상' },
+    { id: 'hormuzWeather', name: 'Hormuz Telemetry', icon: '🌊', category: 'Environment', desc: '호르무즈 해협 실시간 해양 기상' },
+    { id: 'singaporeWeather', name: 'Singapore Telemetry', icon: '🌏', category: 'Environment', desc: '싱가포르 해협 실시간 해양 기상' },
+    { id: 'busanWeather', name: 'Busan Telemetry', icon: '🇰🇷', category: 'Environment', desc: '부산항 실시간 해양 기상' },
+    { id: 'suezWeather', name: 'Suez Telemetry', icon: '🏗️', category: 'Environment', desc: '수에즈 운하 실시간 해양 기상' },
     { id: 'globalNews', name: 'Global News Intel', icon: '📡', category: 'Intelligence', desc: '글로벌 경제 뉴스 피드' },
     { id: 'currency', name: 'FX Rates', icon: '💱', category: 'Market', desc: 'Frankfurter API 실시간 환율' },
     { id: 'oilPrice', name: 'Bunker Price', icon: '⛽', category: 'Market', desc: 'VLSFO/Brent 유가 시뮬레이션 추이' },
@@ -341,81 +342,39 @@ export default function Home({
               </div>
             )}
 
-            {/* Bottom Grid: Platform Widgets */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-              {/* Live Environment Widgets */}
-              <div className="xl:col-span-2 flex flex-col gap-4">
-                {widgetVisibility.fleetMap && (
-                  <FleetMapWidget vessels={dynamicFleetData} />
-                )}
-                {widgetVisibility.fleet && (
-                  <div className="min-h-[200px]">
-                    <FleetStatusWidget fleetData={dynamicFleetData} />
-                  </div>
-                )}
-                {widgetVisibility.hormuzWeather && (
-                  <div className="h-[240px]">
-                    <HormuzWeatherWidget />
-                  </div>
-                )}
-                {widgetVisibility.globalNews && (
-                  <div className="h-[320px]">
-                    <GlobalNewsWidget />
-                  </div>
-                )}
-                {widgetVisibility.geopoliticalRisk && (
-                  <div className="h-[340px]">
-                    <GeopoliticalRiskWidget simulationParams={simulationParams} />
-                  </div>
-                )}
-                {widgetVisibility.portCongestion && (
-                  <div className="h-[260px]">
-                    <PortCongestionWidget simulationParams={simulationParams} />
-                  </div>
-                )}
+            {/* Draggable/Resizable Widget Grid */}
+            <DashboardGrid
+              widgetVisibility={widgetVisibility}
+              simulationParams={simulationParams}
+              dynamicFleetData={dynamicFleetData}
+              onNavigateTab={onNavigateTab}
+            />
+
+            {/* Asset Valuation (always visible, outside grid) */}
+            <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl mt-4">
+              <div className="flex items-center gap-2 px-5 pt-4 pb-3">
+                <TrendingUp size={14} className="text-cyan-400" />
+                <h3 className="text-sm font-semibold text-slate-200">Asset Valuation</h3>
               </div>
-
-              {/* Right Column */}
-              <div className="flex flex-col gap-4">
-                {/* Broker Reports (always visible) */}
-                <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl">
-                  <div className="flex items-center gap-2 px-5 pt-4 pb-3">
-                    <TrendingUp size={14} className="text-cyan-400" />
-                    <h3 className="text-sm font-semibold text-slate-200">Asset Valuation</h3>
+              <div className="px-5 pb-4 space-y-3">
+                {brokerReports.map((r, i) => (
+                  <div key={i} className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] text-slate-500">{r.source} · {r.date}</span>
+                      <span className={cn(
+                        'text-xs font-mono font-semibold',
+                        r.wow_change_pct.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'
+                      )}>
+                        {r.wow_change_pct}%
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 font-medium">{r.asset_class}</p>
+                    <p className="text-lg text-cyan-400 font-mono font-bold mt-0.5">
+                      ${r.current_price_mil_usd}M
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-1">{r.market_sentiment}</p>
                   </div>
-                  <div className="px-5 pb-4 space-y-3">
-                    {brokerReports.map((r, i) => (
-                      <div key={i} className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[10px] text-slate-500">{r.source} · {r.date}</span>
-                          <span className={cn(
-                            'text-xs font-mono font-semibold',
-                            r.wow_change_pct.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'
-                          )}>
-                            {r.wow_change_pct}%
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-300 font-medium">{r.asset_class}</p>
-                        <p className="text-lg text-cyan-400 font-mono font-bold mt-0.5">
-                          ${r.current_price_mil_usd}M
-                        </p>
-                        <p className="text-[10px] text-slate-500 mt-1">{r.market_sentiment}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {widgetVisibility.currency && (
-                  <div className="h-[320px]">
-                    <CurrencyWidget />
-                  </div>
-                )}
-
-                {widgetVisibility.oilPrice && (
-                  <div className="h-[280px]">
-                    <OilPriceWidget simulationParams={simulationParams} />
-                  </div>
-                )}
+                ))}
               </div>
             </div>
 

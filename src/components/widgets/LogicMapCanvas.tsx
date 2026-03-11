@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Network, Plus, Trash2, Link as LinkIcon, Zap, Move, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Scenario } from '../../types';
+import { loadLogicMap as firestoreLoadLogicMap, saveLogicMap as firestoreSaveLogicMap } from '../../services/firestoreService';
 
 interface ProcessNode {
     id: string;
@@ -37,34 +38,28 @@ export default function LogicMapCanvas({ activeScenario }: LogicMapCanvasProps) 
     const draggingNodeRef = useRef<string | null>(null);
     const dragOffsetRef = useRef({ x: 0, y: 0 });
 
-    // Load map from localStorage when scenario changes
+    // Load map from Firestore (falls back to localStorage)
     useEffect(() => {
-        try {
-            const savedMap = localStorage.getItem(`sidecar_logicmap_${activeScenario.id}`);
-            if (savedMap) {
-                const parsed = JSON.parse(savedMap);
-                setNodes(parsed.nodes || []);
-                setEdges(parsed.edges || []);
+        firestoreLoadLogicMap(activeScenario.id).then(data => {
+            if (data) {
+                setNodes(data.nodes || []);
+                setEdges(data.edges || []);
             } else {
                 setNodes([]);
                 setEdges([]);
             }
-        } catch (e) {
+        }).catch(() => {
             setNodes([]);
             setEdges([]);
-        }
+        });
         setMode('select');
         setSelectedNode(null);
         setConnectingFrom(null);
     }, [activeScenario.id]);
 
-    // Save automatically
+    // Save to Firestore (debounced, also keeps localStorage as cache)
     useEffect(() => {
-        if (nodes.length > 0 || edges.length > 0) {
-            localStorage.setItem(`sidecar_logicmap_${activeScenario.id}`, JSON.stringify({ nodes, edges }));
-        } else {
-            localStorage.removeItem(`sidecar_logicmap_${activeScenario.id}`);
-        }
+        firestoreSaveLogicMap(activeScenario.id, nodes, edges);
     }, [nodes, edges, activeScenario.id]);
 
     const handleAddNode = (type: ProcessNode['type']) => {

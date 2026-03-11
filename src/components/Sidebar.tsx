@@ -7,6 +7,11 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario } from '../types';
+import {
+  loadFavorites as firestoreLoadFavorites,
+  saveFavorites as firestoreSaveFavorites,
+  type FavoriteEntry,
+} from '../services/firestoreService';
 
 interface SidebarProps {
   activeTab: string;
@@ -19,22 +24,13 @@ interface SidebarProps {
   onToggleMinimize?: () => void;
 }
 
-interface FavoriteEntry {
-  scenarioId: string;
-  alias?: string; // custom user name
-}
-
 const FAVORITES_KEY = 'sidecar_scenario_favorites';
 
-function loadFavorites(): FavoriteEntry[] {
+function loadFavoritesLocal(): FavoriteEntry[] {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
-}
-
-function saveFavorites(favs: FavoriteEntry[]) {
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
 }
 
 export default function Sidebar({
@@ -47,11 +43,19 @@ export default function Sidebar({
   isMinimized = false,
   onToggleMinimize,
 }: SidebarProps) {
-  const [favorites, setFavorites] = useState<FavoriteEntry[]>(() => loadFavorites());
+  const [favorites, setFavorites] = useState<FavoriteEntry[]>(() => loadFavoritesLocal());
   const [editingFavId, setEditingFavId] = useState<string | null>(null);
   const [editAlias, setEditAlias] = useState('');
 
-  useEffect(() => saveFavorites(favorites), [favorites]);
+  // Hydrate from Firestore on mount
+  useEffect(() => {
+    firestoreLoadFavorites().then(remote => {
+      if (remote.length > 0) setFavorites(remote);
+    });
+  }, []);
+
+  // Save to Firestore whenever favorites change
+  useEffect(() => firestoreSaveFavorites(favorites), [favorites]);
 
   const navItemClass =
     `flex items-center gap-3 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 cursor-pointer transition-all duration-200 rounded-lg ${isMinimized ? 'justify-center mx-3' : 'px-4 mx-2'}`;

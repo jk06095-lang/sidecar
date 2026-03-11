@@ -11,6 +11,13 @@ import DataAnalysis from './components/DataAnalysis';
 import { useOntologyStore } from './store/ontologyStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
 import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/marketDataService';
+import {
+  migrateLocalStorageToFirestore,
+  loadSettings as firestoreLoadSettings,
+  saveSettings as firestoreSaveSettings,
+  saveCustomScenarios,
+  cleanupScenarioOrphans,
+} from './services/firestoreService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -64,6 +71,17 @@ export default function App() {
 
   // Settings modal
   const [showSettings, setShowSettings] = useState(false);
+
+  // ============================================================
+  // EFFECT: Firebase migration + Firestore settings hydration
+  // Runs once on first mount. Migrates localStorage → Firestore.
+  // ============================================================
+  useEffect(() => {
+    migrateLocalStorageToFirestore();
+    firestoreLoadSettings().then(remote => {
+      if (remote) setSettings(prev => ({ ...prev, ...remote }));
+    });
+  }, []);
 
   // ============================================================
   // EFFECT: Listen for legacy ontology_updated events → recalculate
@@ -144,14 +162,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeScenarioId, storeSetSimulationParams, storeUpdateRealtimeParams]);
 
+  // Persist settings to both localStorage (instant) and Firestore (debounced)
   useEffect(() => {
-    localStorage.setItem('sidecar_settings', JSON.stringify(settings));
+    firestoreSaveSettings(settings);
     if (settings.theme === 'light') {
       document.documentElement.classList.add('light');
     } else {
       document.documentElement.classList.remove('light');
     }
   }, [settings]);
+
+  // Sync custom scenarios to Firestore whenever scenarios change
+  useEffect(() => {
+    saveCustomScenarios(scenarios);
+  }, [scenarios]);
 
   // ============================================================
   // HANDLERS (delegate to Zustand store actions)
@@ -190,6 +214,7 @@ export default function App() {
 
   const handleDeleteScenario = useCallback((id: string) => {
     storeDeleteScenario(id);
+    cleanupScenarioOrphans(id); // Remove associated logicMap from Firestore
   }, [storeDeleteScenario]);
 
   // handleGenerateBriefing moved to Reports.tsx

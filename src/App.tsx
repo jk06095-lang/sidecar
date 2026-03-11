@@ -229,11 +229,14 @@ export default function App() {
   // Persist settings to both localStorage (instant) and Firestore (debounced)
   useEffect(() => {
     firestoreSaveSettings(settings);
+    // Theme: toggle light class on root
     if (settings.theme === 'light') {
       document.documentElement.classList.add('light');
     } else {
       document.documentElement.classList.remove('light');
     }
+    // Language: set lang attribute on root
+    document.documentElement.lang = settings.language === 'en' ? 'en' : 'ko';
   }, [settings]);
 
   // Sync custom scenarios to Firestore whenever scenarios change
@@ -301,7 +304,6 @@ export default function App() {
           openTabs={openTabs}
           onTabClick={handleSetActiveTab}
           onTabClose={handleTabClose}
-          onOpenSettings={() => setShowSettings(true)}
           notifications={notifications}
           onNotificationRead={handleNotificationRead}
           onClearNotifications={handleClearNotifications}

@@ -292,18 +292,18 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Bottom */}
-      <div className={cn("py-2 px-2 border-t border-slate-800/50 bg-slate-950", isMinimized && "flex flex-col h-full items-center")}>
+      {/* Bottom — always pinned at very bottom */}
+      <div className={cn("py-2 px-2 border-t border-slate-800/50 bg-slate-950 mt-auto shrink-0", isMinimized && "flex flex-col items-center")}>
         <div
-          className={cn(navItemClass, 'py-2 px-3 justify-center')}
+          className={cn(navItemClass, 'py-2')}
           onClick={onOpenSettings}
           title="설정"
         >
           <Settings size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span className="text-xs font-semibold">플랫폼 설정</span>}
+          {!isMinimized && <span className="text-xs font-semibold">설정</span>}
         </div>
         <div
-          className={cn(navItemClass, 'py-2 px-3 justify-center text-rose-400 hover:text-rose-300')}
+          className={cn(navItemClass, 'py-2 text-rose-400 hover:text-rose-300')}
           onClick={logout}
           title="로그아웃"
         >

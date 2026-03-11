@@ -21,6 +21,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
 
     const handleSave = () => {
         onSettingsChange(tempSettings);
+        localStorage.setItem('sidecar_settings', JSON.stringify(tempSettings));
         onClose();
     };
 

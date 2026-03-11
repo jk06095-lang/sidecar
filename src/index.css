@@ -158,3 +158,100 @@ body {
   color: #e2e8f0;
   overflow: hidden;
 }
+
+/* =============================================
+   LIGHT THEME
+   Toggle via: document.documentElement.classList.add('light')
+   ============================================= */
+
+/* Body */
+.light body,
+html.light body {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+/* Root container */
+html.light .bg-slate-950 { background-color: #ffffff !important; }
+html.light .bg-slate-900 { background-color: #f8fafc !important; }
+html.light .bg-slate-900\/80 { background-color: rgba(248, 250, 252, 0.9) !important; }
+html.light .bg-slate-900\/50 { background-color: rgba(248, 250, 252, 0.6) !important; }
+html.light .bg-slate-800 { background-color: #f1f5f9 !important; }
+html.light .bg-slate-800\/40 { background-color: rgba(241, 245, 249, 0.5) !important; }
+html.light .bg-slate-800\/50 { background-color: rgba(241, 245, 249, 0.6) !important; }
+html.light .bg-slate-800\/60 { background-color: rgba(241, 245, 249, 0.7) !important; }
+html.light .bg-slate-800\/80 { background-color: rgba(241, 245, 249, 0.9) !important; }
+html.light .bg-slate-800\/20 { background-color: rgba(241, 245, 249, 0.25) !important; }
+html.light .bg-slate-950\/50 { background-color: rgba(255, 255, 255, 0.6) !important; }
+
+/* Text */
+html.light .text-slate-200 { color: #1e293b !important; }
+html.light .text-slate-100 { color: #0f172a !important; }
+html.light .text-slate-300 { color: #334155 !important; }
+html.light .text-slate-400 { color: #64748b !important; }
+html.light .text-slate-500 { color: #94a3b8 !important; }
+html.light .text-slate-600 { color: #94a3b8 !important; }
+html.light .text-white { color: #0f172a !important; }
+
+/* Borders */
+html.light .border-slate-800 { border-color: #e2e8f0 !important; }
+html.light .border-slate-800\/50 { border-color: rgba(226, 232, 240, 0.6) !important; }
+html.light .border-slate-800\/60 { border-color: rgba(226, 232, 240, 0.7) !important; }
+html.light .border-slate-800\/30 { border-color: rgba(226, 232, 240, 0.4) !important; }
+html.light .border-slate-700 { border-color: #e2e8f0 !important; }
+html.light .border-slate-700\/50 { border-color: rgba(226, 232, 240, 0.6) !important; }
+html.light .border-slate-600 { border-color: #cbd5e1 !important; }
+
+/* Sidebar */
+html.light .border-r.border-slate-800\/50 { border-right-color: #e2e8f0 !important; }
+
+/* Hover states */
+html.light .hover\:bg-slate-800\/60:hover { background-color: rgba(226, 232, 240, 0.7) !important; }
+html.light .hover\:bg-slate-800\/40:hover { background-color: rgba(226, 232, 240, 0.5) !important; }
+html.light .hover\:bg-slate-800\/30:hover { background-color: rgba(226, 232, 240, 0.4) !important; }
+html.light .hover\:bg-slate-700:hover { background-color: #e2e8f0 !important; }
+html.light .hover\:bg-slate-800:hover { background-color: #f1f5f9 !important; }
+html.light .hover\:text-slate-100:hover { color: #0f172a !important; }
+html.light .hover\:text-slate-300:hover { color: #334155 !important; }
+
+/* Inputs */
+html.light input,
+html.light textarea,
+html.light select {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Scrollbar (light theme) */
+html.light .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+html.light .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+html.light * {
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+/* Modals */
+html.light .bg-black\/60 { background-color: rgba(0, 0, 0, 0.3) !important; }
+
+/* Cards with special backgrounds stay muted */
+html.light .bg-cyan-950\/30 { background-color: rgba(236, 254, 255, 0.5) !important; }
+html.light .bg-indigo-950\/30 { background-color: rgba(238, 242, 255, 0.5) !important; }
+html.light .bg-emerald-950\/30 { background-color: rgba(236, 253, 245, 0.5) !important; }
+html.light .bg-purple-950\/30 { background-color: rgba(250, 245, 255, 0.5) !important; }
+html.light .bg-rose-950\/30 { background-color: rgba(255, 241, 242, 0.5) !important; }
+html.light .bg-amber-950\/30 { background-color: rgba(255, 251, 235, 0.5) !important; }
+
+/* Border colors for cards */
+html.light .border-cyan-900\/50 { border-color: rgba(6, 182, 212, 0.2) !important; }
+html.light .border-indigo-900\/50 { border-color: rgba(99, 102, 241, 0.2) !important; }
+html.light .border-emerald-900\/50 { border-color: rgba(16, 185, 129, 0.2) !important; }
+html.light .border-purple-900\/50 { border-color: rgba(168, 85, 247, 0.2) !important; }
+html.light .border-rose-900\/50 { border-color: rgba(244, 63, 94, 0.2) !important; }

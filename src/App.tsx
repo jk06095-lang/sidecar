@@ -59,7 +59,7 @@ export default function App() {
       if (saved) return JSON.parse(saved);
     } catch (e) { console.error('Failed to parse settings', e); }
     return {
-      apiKey: localStorage.getItem('gemini_api_key') || '',
+      apiKey: import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '',
       theme: 'dark',
       language: 'ko',
       osintSources: [],

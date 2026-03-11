@@ -1,13 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { Filter, AlertTriangle, Newspaper, Search, Folder, FolderOpen, FileText, ChevronRight, Tag, Bookmark, ShieldAlert, GitBranch, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+    Filter, AlertTriangle, Newspaper, Search, Folder, FolderOpen, FileText,
+    ChevronRight, Tag, Bookmark, ShieldAlert, GitBranch, ChevronDown,
+    Radio, Zap, Hash, RefreshCw, Loader2
+} from 'lucide-react';
 import { cn } from '../lib/utils';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
+import { useOntologyStore } from '../store/ontologyStore';
+import type { IntelArticle } from '../types';
 
 export default function News() {
     const [scrapedData, setScrapedData] = useState<any[]>([]);
     const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+    const [showSkeletons, setShowSkeletons] = useState(true);
+
+    // Ontology store for tag navigation
+    const objects = useOntologyStore(s => s.objects);
 
     const toggleFolder = (folderName: string) => {
         setExpandedFolders(prev => ({ ...prev, [folderName]: !prev[folderName] }));
@@ -20,6 +30,7 @@ export default function News() {
             setScrapedData(data);
             if (data.length > 0) setSelectedDoc(data[0]);
         } catch (e) { }
+        setTimeout(() => setShowSkeletons(false), 1500);
     }, []);
 
     // Refresh data handler if a new item is bookmarked from the widget
@@ -51,6 +62,26 @@ export default function News() {
         return acc;
     }, {});
 
+    // Handle ontology tag clicks from the news widget
+    const handleTagClick = useCallback((tag: string) => {
+        // Try to find matching ontology object
+        const matchingObj = objects.find(o =>
+            o.title.toLowerCase().includes(tag.toLowerCase()) ||
+            tag.toLowerCase().includes(o.title.toLowerCase())
+        );
+        if (matchingObj) {
+            // Set as selected doc in dossier view
+            setSelectedDoc({
+                id: matchingObj.id,
+                title: matchingObj.title,
+                content: matchingObj.description + '\n\n' + Object.entries(matchingObj.properties).map(([k, v]) => `${k}: ${v}`).join('\n'),
+                category: matchingObj.type,
+                type: 'ontology-object',
+                lastUpdated: matchingObj.metadata.createdAt,
+            });
+        }
+    }, [objects]);
+
     return (
         <div className="flex h-full bg-slate-950 overflow-hidden font-mono">
             {/* Left/Center Area: Wiki Dossier Database */}
@@ -78,7 +109,7 @@ export default function News() {
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
                         {Object.entries(groupedData).map(([folderName, folderData]: [string, any]) => {
-                            const isExpanded = expandedFolders[folderName] ?? true; // Default expanded
+                            const isExpanded = expandedFolders[folderName] ?? true;
                             return (
                                 <div key={folderName} className="select-none">
                                     <button
@@ -123,7 +154,7 @@ export default function News() {
                     {selectedDoc ? (
                         <div className="max-w-3xl mx-auto">
                             <div className="flex items-center gap-2 text-xs font-bold tracking-widest text-cyan-500 mb-6 uppercase">
-                                <span>Database</span> <ChevronRight size={12} /> <span>{selectedDoc.type === 'factor' ? 'Operational Factor' : 'Intelligence Scrap'}</span> <ChevronRight size={12} /> <span>{selectedDoc.category}</span>
+                                <span>Database</span> <ChevronRight size={12} /> <span>{selectedDoc.type === 'factor' ? 'Operational Factor' : selectedDoc.type === 'ontology-object' ? 'Ontology Object' : 'Intelligence Scrap'}</span> <ChevronRight size={12} /> <span>{selectedDoc.category}</span>
                             </div>
 
                             <h2 className="text-3xl font-bold text-slate-100 mb-4 tracking-tight leading-tight">
@@ -133,9 +164,11 @@ export default function News() {
                             <div className="flex flex-wrap items-center gap-3 mb-8 border-b border-slate-800/80 pb-6">
                                 <span className={cn(
                                     "text-xs px-2.5 py-1 rounded-sm uppercase tracking-wider font-semibold border",
-                                    selectedDoc.type === 'factor' ? "bg-amber-950/40 text-amber-500 border-amber-900" : "bg-cyan-950/40 text-cyan-500 border-cyan-900"
+                                    selectedDoc.type === 'factor' ? "bg-amber-950/40 text-amber-500 border-amber-900" :
+                                        selectedDoc.type === 'ontology-object' ? "bg-emerald-950/40 text-emerald-500 border-emerald-900" :
+                                            "bg-cyan-950/40 text-cyan-500 border-cyan-900"
                                 )}>
-                                    {selectedDoc.type === 'factor' ? 'FACTOR' : 'DOCUMENT'}
+                                    {selectedDoc.type === 'factor' ? 'FACTOR' : selectedDoc.type === 'ontology-object' ? 'ONTOLOGY' : 'DOCUMENT'}
                                 </span>
                                 <span className="text-xs text-slate-500 flex items-center gap-1">
                                     <Bookmark size={12} /> RECORD ID: {selectedDoc.id.split('_')[0].substring(0, 8).toUpperCase()}
@@ -160,7 +193,7 @@ export default function News() {
                                     <p className="mb-2 italic">이 레코드는 중앙 온톨로지 신경망(Ontology Network)에 실시간 연동되어 있습니다. 온톨로지 탭에서 시각적 관계망(Multiverse)을 확인하고 편집할 수 있습니다.</p>
                                     <div className="flex gap-2 mt-3">
                                         <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700">#Scrap</span>
-                                        <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700">#{selectedDoc.category.replace(/\s/g, '')}</span>
+                                        <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700">#{selectedDoc.category?.replace(/\s/g, '') || 'Unknown'}</span>
                                     </div>
                                 </div>
                             </div>
@@ -174,30 +207,51 @@ export default function News() {
                 </div>
             </div>
 
-            {/* Right panel: Breaking News & Indicators */}
-            <div className="w-[420px] shrink-0 overflow-y-auto custom-scrollbar flex flex-col p-5 bg-slate-900/30">
-                <div className="mb-6">
+            {/* Right panel: Enhanced Live Intelligence Feed */}
+            <div className="w-[440px] shrink-0 overflow-y-auto custom-scrollbar flex flex-col p-5 bg-slate-900/30">
+                <div className="mb-4">
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                             <Newspaper className="text-cyan-400" size={20} />
-                            <h2 className="text-xl font-bold text-slate-100">Live 동향 피드</h2>
+                            <h2 className="text-xl font-bold text-slate-100">OSINT 시그널 피드</h2>
                         </div>
-                        <div className="flex gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                            <div className="text-[10px] text-rose-500 font-bold tracking-widest uppercase">Live</div>
+                        <div className="flex items-center gap-2">
+                            <div className="flex gap-1">
+                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                <div className="text-[10px] text-rose-500 font-bold tracking-widest uppercase">Live</div>
+                            </div>
                         </div>
                     </div>
-                    <p className="text-sm text-slate-400">글로벌 경제 및 해운 관련 실시간 인텔리전스</p>
+                    <p className="text-xs text-slate-400">
+                        다중 소스 RSS 수집 → AIP 시그널 평가 → 노이즈 필터링 → 액션 시그널 추출
+                    </p>
                 </div>
+
+                {/* Skeleton loading state */}
+                {showSkeletons && (
+                    <div className="space-y-3 mb-4 animate-pulse">
+                        {[1, 2, 3].map(i => (
+                            <div key={i} className="bg-slate-800/40 border border-slate-700/30 rounded-xl p-4">
+                                <div className="flex gap-2 mb-3">
+                                    <div className="w-16 h-4 bg-slate-700/50 rounded" />
+                                    <div className="w-10 h-4 bg-slate-700/30 rounded" />
+                                </div>
+                                <div className="w-full h-4 bg-slate-700/40 rounded mb-2" />
+                                <div className="w-3/4 h-4 bg-slate-700/30 rounded mb-3" />
+                                <div className="w-full h-3 bg-slate-700/20 rounded" />
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {/* The global news widget */}
                 <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                    <GlobalNewsWidget />
+                    <GlobalNewsWidget onTagClick={handleTagClick} />
                 </div>
 
                 <div className="mt-4 p-4 rounded-xl border border-amber-900/30 bg-amber-950/20 text-sm text-amber-200/80 leading-relaxed shadow-lg">
                     <AlertTriangle size={16} className="text-amber-500 mb-2 inline-block mr-2" />
-                    <strong>Tip:</strong> 실시간 피드에서 스크랩(Bookmark) 아이콘을 클릭하면, 위키 DB에 레코드로 등록되며 온톨로지 탭의 신경망에 라이브 연동됩니다.
+                    <strong>Intelligence Pipeline:</strong> 실시간 RSS 수집 → Gemini AIP 시그널 평가 → Impact Score 50점 이상 시그널만 표시. #해시태그를 클릭하면 온톨로지 객체의 360° 뷰가 열립니다.
                 </div>
             </div>
         </div>

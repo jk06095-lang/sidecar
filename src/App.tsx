@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Home from './components/Home';
-import BriefingModal from './components/BriefingModal';
 import SettingsModal from './components/SettingsModal';
 import News from './components/News';
 import Ontology from './components/Ontology';
@@ -10,7 +9,6 @@ import ApiManager from './components/ApiManager';
 import ScenarioBuilder from './components/ScenarioBuilder';
 import DataAnalysis from './components/DataAnalysis';
 import { useOntologyStore } from './store/ontologyStore';
-import { generateBriefingContext, fetchGeminiBriefing, LOADING_MESSAGES } from './services/geminiService';
 import type { Scenario, SimulationParams, AppSettings } from './types';
 
 export default function App() {
@@ -55,14 +53,13 @@ export default function App() {
     return {
       apiKey: localStorage.getItem('gemini_api_key') || '',
       theme: 'dark',
-      language: 'ko'
+      language: 'ko',
+      osintSources: [],
+      osintKeywords: [],
     };
   });
 
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('');
-  const [briefingContent, setBriefingContent] = useState('');
-  const [showBriefingModal, setShowBriefingModal] = useState(false);
+  // Briefing generation moved to Reports.tsx
 
   // Settings modal
   const [showSettings, setShowSettings] = useState(false);
@@ -181,80 +178,7 @@ export default function App() {
     storeDeleteScenario(id);
   }, [storeDeleteScenario]);
 
-  const handleGenerateBriefing = useCallback(async () => {
-    if (!settings.apiKey || isGenerating) return;
-
-    setIsGenerating(true);
-    setBriefingContent('');
-
-    // Cycle through loading messages
-    let msgIndex = 0;
-    const msgInterval = setInterval(() => {
-      setLoadingMessage(LOADING_MESSAGES[msgIndex % LOADING_MESSAGES.length]);
-      msgIndex++;
-    }, 2000);
-
-    setLoadingMessage(LOADING_MESSAGES[0]);
-
-    try {
-      // Get active ontology items from local storage
-      let ontologies: any[] = [];
-      try {
-        const storedGrid = localStorage.getItem('sidecar_ontology');
-        if (storedGrid) {
-          ontologies = JSON.parse(storedGrid).filter((o: any) => o.isActive);
-        }
-      } catch (e) { console.error(e); }
-
-      const contextJSON = generateBriefingContext(activeScenario, simulationParams, dynamicFleetData);
-
-      // Enhance with ontology graph data
-      const parsedContext = JSON.parse(contextJSON);
-      parsedContext.grounding_ontology = ontologies;
-
-      // Include ontology graph summary for AI context
-      const storeState = useOntologyStore.getState();
-      parsedContext.ontology_graph = {
-        totalObjects: storeState.objects.length,
-        totalLinks: storeState.links.length,
-        objectsByType: storeState.objects.reduce((acc: Record<string, number>, o) => {
-          acc[o.type] = (acc[o.type] || 0) + 1;
-          return acc;
-        }, {}),
-      };
-
-      const enhancedContextJSON = JSON.stringify(parsedContext, null, 2);
-
-      const result = await fetchGeminiBriefing(settings.apiKey, enhancedContextJSON);
-      setBriefingContent(result);
-
-      // Auto-save generated report to local storage
-      try {
-        const storedReports = localStorage.getItem('sidecar_reports');
-        let reports = storedReports ? JSON.parse(storedReports) : [];
-        const newReport = {
-          id: Date.now().toString(),
-          title: `${activeScenario.name} 시뮬레이션 결과 보고서`,
-          date: new Date().toLocaleDateString('ko-KR'),
-          content: result
-        };
-        localStorage.setItem('sidecar_reports', JSON.stringify([newReport, ...reports]));
-        // dispatch an event so if Reports tab is already open it can update (though simple state refresh on mount will mostly do)
-        window.dispatchEvent(new Event('storage'));
-      } catch (e) { console.error("Could not save report automatically", e); }
-
-      setShowBriefingModal(true);
-    } catch (err) {
-      console.error('Gemini API Error:', err);
-      // Create error report with empty content and show modal
-      setBriefingContent(`---\nmarp: true\ntheme: default\n---\n\n# ⚠️ API 오류 발생\n\n에러: ${err instanceof Error ? err.message : 'Unknown error'}\n\nGemini API 키를 확인하거나 다시 시도해주세요.`);
-      setShowBriefingModal(true);
-    } finally {
-      clearInterval(msgInterval);
-      setIsGenerating(false);
-      setLoadingMessage('');
-    }
-  }, [settings.apiKey, isGenerating, activeScenario, simulationParams, dynamicFleetData]);
+  // handleGenerateBriefing moved to Reports.tsx
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden light:bg-slate-50 light:text-slate-900 transition-colors duration-300">
@@ -282,10 +206,6 @@ export default function App() {
             onScenarioChange={handleScenarioChange}
             onParamsChange={handleParamsChange}
             onSaveScenario={handleSaveScenario}
-            onGenerateBriefing={handleGenerateBriefing}
-            isGenerating={isGenerating}
-            loadingMessage={loadingMessage}
-            hasApiKey={!!settings.apiKey}
           />
         )}
         {activeTab === 'reports' && <Reports />}
@@ -324,11 +244,6 @@ export default function App() {
       </main>
 
       {/* Modals */}
-      <BriefingModal
-        isOpen={showBriefingModal}
-        onClose={() => setShowBriefingModal(false)}
-        marpContent={briefingContent}
-      />
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}

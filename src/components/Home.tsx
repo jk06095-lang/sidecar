@@ -29,10 +29,6 @@ interface HomeProps {
   onScenarioChange: (id: string) => void;
   onParamsChange: (params: SimulationParams) => void;
   onSaveScenario: (name: string) => void;
-  onGenerateBriefing: () => void;
-  isGenerating: boolean;
-  loadingMessage: string;
-  hasApiKey: boolean;
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -63,10 +59,6 @@ export default function Home({
   onScenarioChange,
   onParamsChange,
   onSaveScenario,
-  onGenerateBriefing,
-  isGenerating,
-  loadingMessage,
-  hasApiKey,
 }: HomeProps) {
   const [showScenarioDropdown, setShowScenarioDropdown] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -299,24 +291,6 @@ export default function Home({
               </div>
               <div className="flex items-center gap-3 w-full sm:w-auto">
                 <button
-                  onClick={onGenerateBriefing}
-                  disabled={isGenerating || !hasApiKey}
-                  className={cn(
-                    'flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-300 flex-1 sm:flex-none whitespace-nowrap',
-                    isGenerating
-                      ? 'bg-cyan-900/30 border border-cyan-700/30 text-cyan-400 cursor-wait'
-                      : hasApiKey
-                        ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-900/30'
-                        : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-                  )}
-                >
-                  {isGenerating ? (
-                    <><Loader2 size={14} className="animate-spin" /> {loadingMessage}</>
-                  ) : (
-                    <><Sparkles size={14} /> AI 대시보드 브리핑 리포트 생성</>
-                  )}
-                </button>
-                <button
                   onClick={() => setShowWidgetPicker(!showWidgetPicker)}
                   className={cn(
                     'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all border shrink-0',
@@ -488,32 +462,7 @@ export default function Home({
               } catch { return null; }
             })()}
 
-            {/* Loading bar for briefing generation */}
-            {isGenerating && (
-              <div className="bg-slate-900/80 border border-cyan-800/30 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-4">
-                  <Loader2 size={18} className="animate-spin text-cyan-400" />
-                  <span className="text-sm text-cyan-300 font-medium">제미나이 AI 분석 진행 중</span>
-                </div>
-                <div className="space-y-2">
-                  {['보안 해양 온톨로지에 연결 중...', 'WS 운임 스프레드 시뮬레이션 실행 중...', '테일 리스크 시나리오를 연산 중입니다...'].map((msg, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs font-mono">
-                      <span className="text-emerald-400">&gt;</span>
-                      <span className="text-slate-400">{msg}</span>
-                      <span className="text-emerald-400">[OK]</span>
-                    </div>
-                  ))}
-                  <div className="flex items-center gap-2 text-xs font-mono">
-                    <span className="text-cyan-400">&gt;</span>
-                    <span className="text-cyan-300">{loadingMessage}</span>
-                    <span className="animate-pulse text-cyan-400">▊</span>
-                  </div>
-                </div>
-                <div className="mt-4 h-1 bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full animate-progress" />
-                </div>
-              </div>
-            )}
+
           </div>
         </div>
 

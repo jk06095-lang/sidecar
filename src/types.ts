@@ -129,6 +129,30 @@ export interface AppSettings {
   apiKey: string;
   theme: Theme;
   language: Language;
+  osintSources: string[];
+  osintKeywords: string[];
+}
+
+// ============================================================
+// OSINT INTELLIGENCE ARTICLE (LLM-evaluated)
+// ============================================================
+
+export interface IntelArticle {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  source: string;           // e.g. 'AP News', 'Bloomberg', 'Lloyd's List'
+  sourceBadge: string;       // emoji badge e.g. '🔴', '🟠', '⚓'
+  publishedAt: string;
+  fetchedAt: string;
+  // LLM-evaluated fields (null until evaluated)
+  impactScore?: number;      // 0-100
+  riskLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
+  aiInsight?: string;        // 1-liner actionable insight
+  ontologyTags?: string[];   // related ontology keywords e.g. ['Hormuz', 'VLCC', 'BrentOil']
+  evaluated?: boolean;       // LLM evaluation completed
+  dropped?: boolean;         // noise-filtered by LLM
 }
 
 // ============================================================

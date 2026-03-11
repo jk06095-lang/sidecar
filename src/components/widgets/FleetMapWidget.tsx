@@ -3,10 +3,10 @@
  * Uses Leaflet with ESRI World Imagery satellite tiles (free, no API key).
  * Vessel positions derived from location strings in FLEET_DATA.
  */
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2, Search } from 'lucide-react';
+import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2 } from 'lucide-react';
 import type { FleetVessel } from '../../types';
 
 // Location string → coordinates mapping
@@ -69,29 +69,6 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
     const [hoveredVessel, setHoveredVessel] = useState<FleetVessel | null>(null);
     const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
     const [isExpanded, setIsExpanded] = useState(false);
-    const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    // Debounced hide: clear timeout when re-entering marker or tooltip
-    const scheduleHide = useCallback(() => {
-        hideTimeoutRef.current = setTimeout(() => {
-            setHoveredVessel(null);
-        }, 250);
-    }, []);
-
-    const cancelHide = useCallback(() => {
-        if (hideTimeoutRef.current) {
-            clearTimeout(hideTimeoutRef.current);
-            hideTimeoutRef.current = null;
-        }
-    }, []);
-
-    const handleMouseEnterTooltip = useCallback(() => {
-        cancelHide();
-    }, [cancelHide]);
-
-    const handleMouseLeaveTooltip = useCallback(() => {
-        scheduleHide();
-    }, [scheduleHide]);
 
     useEffect(() => {
         if (!mapRef.current || leafletMap.current) return;
@@ -165,7 +142,6 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
             const marker = L.marker(coords, { icon }).addTo(map);
 
             marker.on('mouseover', (e: L.LeafletMouseEvent) => {
-                cancelHide();
                 setHoveredVessel(vessel);
                 const container = mapRef.current;
                 if (container) {
@@ -177,12 +153,12 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                 }
             });
 
-            marker.on('mouseout', () => scheduleHide());
+            marker.on('mouseout', () => setHoveredVessel(null));
             marker.on('click', () => onSelectVessel?.(vessel));
 
             markersRef.current.push(marker);
         });
-    }, [vessels, onSelectVessel, cancelHide, scheduleHide]);
+    }, [vessels, onSelectVessel]);
 
     // Resize map when expanded/collapsed
     useEffect(() => {
@@ -190,9 +166,9 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
     }, [isExpanded]);
 
     return (
-        <div className={`relative bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden transition-all duration-300`}>
+        <div className={`relative bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden transition-all duration-300 ${isExpanded ? 'col-span-2 row-span-2' : ''}`}>
             {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-[400] flex items-center justify-between px-4 py-2 bg-gradient-to-b from-slate-900/90 to-transparent pointer-events-none">
+            <div className="absolute top-0 left-0 right-0 z-[1000] flex items-center justify-between px-4 py-2 bg-gradient-to-b from-slate-900/90 to-transparent pointer-events-none">
                 <div className="flex items-center gap-2 pointer-events-auto">
                     <div className="w-6 h-6 rounded bg-cyan-500/20 flex items-center justify-center">
                         <Navigation size={12} className="text-cyan-400" />
@@ -213,20 +189,18 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
             {/* Map */}
             <div
                 ref={mapRef}
-                className="w-full h-full"
-                style={{ minHeight: '320px' }}
+                className="w-full"
+                style={{ height: isExpanded ? '500px' : '320px' }}
             />
 
-            {/* Hover tooltip — POINTER EVENTS ENABLED for action menu */}
+            {/* Hover tooltip */}
             {hoveredVessel && (
                 <div
-                    className="absolute z-[1002] fleet-map-tooltip"
+                    className="absolute z-[1001] pointer-events-none"
                     style={{
-                        left: Math.min(tooltipPos.x + 12, (mapRef.current?.clientWidth || 600) - 270),
-                        top: Math.max(tooltipPos.y - 130, 40),
+                        left: Math.min(tooltipPos.x + 12, (mapRef.current?.clientWidth || 600) - 260),
+                        top: Math.max(tooltipPos.y - 120, 40),
                     }}
-                    onMouseEnter={handleMouseEnterTooltip}
-                    onMouseLeave={handleMouseLeaveTooltip}
                 >
                     <div className="bg-slate-900/95 border border-slate-600 rounded-xl p-3 shadow-2xl backdrop-blur-sm min-w-[240px]">
                         <div className="flex items-center gap-2 mb-2">
@@ -267,23 +241,13 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                                 </div>
                             </div>
                         </div>
-                        {/* Clickable Action Button */}
-                        <button
-                            onClick={() => {
-                                onSelectVessel?.(hoveredVessel);
-                                setHoveredVessel(null);
-                            }}
-                            className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 rounded-lg text-[10px] text-cyan-400 font-medium transition-all hover:text-cyan-300"
-                        >
-                            <Search size={10} />
-                            상세 조회
-                        </button>
+                        <div className="mt-2 text-[8px] text-cyan-500 text-center">클릭하여 상세 조회 →</div>
                     </div>
                 </div>
             )}
 
             {/* Vessel count badge */}
-            <div className="absolute bottom-3 left-3 z-[400] bg-slate-900/80 border border-slate-700/60 rounded-lg px-2.5 py-1 flex items-center gap-1.5">
+            <div className="absolute bottom-3 left-3 z-[1000] bg-slate-900/80 border border-slate-700/60 rounded-lg px-2.5 py-1 flex items-center gap-1.5">
                 <Anchor size={10} className="text-cyan-400" />
                 <span className="text-[10px] text-white font-mono font-bold">{vessels.length}</span>
                 <span className="text-[9px] text-slate-400">vessels tracked</span>

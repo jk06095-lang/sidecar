@@ -460,6 +460,205 @@ async function fetchDirectAPI(url: string): Promise<IntelArticle[]> {
 }
 
 // ============================================================
+// OFFICIAL SOURCE FETCHERS — Gemini Search Grounding
+// (KP&I website is Angular SPA, UKMTO is dynamic — can't scrape directly)
+// ============================================================
+
+let lastOfficialFetchTime = 0;
+const OFFICIAL_FETCH_INTERVAL_MS = 5 * 60 * 1000; // 5 min between official fetches
+const officialArticleCache: IntelArticle[] = [];
+
+async function getGeminiApiKey(): Promise<string> {
+    try {
+        const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
+        if (settings.apiKey) return settings.apiKey;
+    } catch { /* ignore */ }
+    // Fallback to env variable
+    return (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+}
+
+export async function fetchKPICirculars(apiKey: string): Promise<IntelArticle[]> {
+    if (!apiKey) return [];
+
+    try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey });
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                role: 'user',
+                parts: [{
+                    text: `한국 P&I 클럽(Korea P&I Club, kpiclub.or.kr)의 최근 공식 회람(Circular)을 검색해서 찾아줘.
+최근 6개월 이내에 발행된 해상보험 관련 회람을 최대 5건 찾아서 아래 JSON 형식으로 반환해.
+
+검색 키워드: "한국선주상호보험" OR "kpiclub" 회람 circular war risk premium 보험
+
+각 항목에 대해:
+- refNumber: 문서 번호 (예: "CIR-2025-001")이 없으면 날짜 기반으로 생성
+- title: 회람 제목 (한국어)
+- description: 핵심 내용 요약 (2-3문장, 한국어)
+- url: 가능한 경우 원본 URL, 없으면 "https://www.kpiclub.or.kr"
+- publishedAt: 발행일 ISO 형식
+- suggestedAction: 보험료/위험 관련 수치가 있다면 아래 형식으로:
+  { "targetNodeId": "insurance-war-risk", "targetNodeTitle": "War Risk Premium", "propertyKey": "rateTo", "newValue": 수치, "displayLabel": "표시 텍스트", "sourceRef": "문서 번호" }
+
+반드시 JSON 배열만 반환. 다른 텍스트 없이.
+만약 결과를 찾을 수 없다면 빈 배열 []을 반환.` }],
+            }],
+            config: {
+                tools: [{ googleSearch: {} }],
+            },
+        });
+
+        const text = response.text || '';
+        let jsonStr = text.trim();
+        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+        jsonStr = jsonStr.trim();
+
+        if (!jsonStr || jsonStr === '[]') return [];
+
+        const parsed = JSON.parse(jsonStr);
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed.map((item: any, i: number) => ({
+            id: generateArticleId(item.title || `kpi-circular-${i}`, 'KP&I'),
+            title: item.title || 'KP&I 회람',
+            description: item.description || '',
+            url: item.url || 'https://www.kpiclub.or.kr',
+            source: 'Korea P&I Club',
+            sourceBadge: '🇰🇷',
+            publishedAt: item.publishedAt || new Date().toISOString(),
+            fetchedAt: new Date().toISOString(),
+            evaluated: true,
+            dropped: false,
+            impactScore: 85,
+            riskLevel: 'High' as const,
+            category: 'OFFICIAL_CIRCULAR' as const,
+            refNumber: item.refNumber || `CIR-${new Date().getFullYear()}-${String(i + 1).padStart(3, '0')}`,
+            suggestedAction: item.suggestedAction || undefined,
+            aiInsight: item.description?.slice(0, 100) || undefined,
+            ontologyTags: ['P&I', 'War Risk', '보험료'],
+        }));
+    } catch (err) {
+        console.warn('[NewsService] KP&I fetch failed:', err);
+        return [];
+    }
+}
+
+export async function fetchSecurityAlerts(apiKey: string): Promise<IntelArticle[]> {
+    if (!apiKey) return [];
+
+    try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey });
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                role: 'user',
+                parts: [{
+                    text: `Search for the latest UKMTO (United Kingdom Maritime Trade Operations) maritime security alerts, warnings, and advisories.
+Also search for IMB (International Maritime Bureau), MSCHOA, and NATO Shipping Centre alerts.
+
+Find up to 5 recent maritime security incidents or warnings from the last 3 months. Return as JSON array:
+
+- refNumber: Warning reference (e.g. "WARNING 042/MAR/2026" or "UKMTO-2026-xxx")
+- title: Alert title in English
+- description: 2-3 sentence summary including coordinates if available, type of incident (attack, suspicious approach, piracy, etc.)
+- url: Source URL if available, otherwise "https://www.ukmto.org"
+- publishedAt: Date in ISO format
+- location: { "lat": number, "lng": number } if coordinates mentioned
+- suggestedAction: If risk level change is warranted, include:
+  { "targetNodeId": "macro-hormuz-tension", "targetNodeTitle": "Hormuz Tension", "propertyKey": "riskScore", "newValue": number, "displayLabel": "description", "sourceRef": "ref number" }
+
+Return ONLY a JSON array. No other text.
+If no results found, return empty array [].` }],
+            }],
+            config: {
+                tools: [{ googleSearch: {} }],
+            },
+        });
+
+        const text = response.text || '';
+        let jsonStr = text.trim();
+        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+        jsonStr = jsonStr.trim();
+
+        if (!jsonStr || jsonStr === '[]') return [];
+
+        const parsed = JSON.parse(jsonStr);
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed.map((item: any, i: number) => ({
+            id: generateArticleId(item.title || `security-alert-${i}`, 'UKMTO'),
+            title: item.title || 'Maritime Security Alert',
+            description: item.description || '',
+            url: item.url || 'https://www.ukmto.org',
+            source: item.source || 'UKMTO',
+            sourceBadge: '🇬🇧',
+            publishedAt: item.publishedAt || new Date().toISOString(),
+            fetchedAt: new Date().toISOString(),
+            evaluated: true,
+            dropped: false,
+            impactScore: 90,
+            riskLevel: 'Critical' as const,
+            category: 'SECURITY_ALERT' as const,
+            refNumber: item.refNumber || `UKMTO-${new Date().getFullYear()}-${String(i + 1).padStart(3, '0')}`,
+            suggestedAction: item.suggestedAction || undefined,
+            aiInsight: item.description?.slice(0, 100) || undefined,
+            ontologyTags: ['UKMTO', 'Maritime Security', '해양안보'],
+        }));
+    } catch (err) {
+        console.warn('[NewsService] Security alerts fetch failed:', err);
+        return [];
+    }
+}
+
+/**
+ * Fetch all official sources (KP&I + UKMTO). Rate-limited to once per 5 minutes.
+ * Returns cached results if called too frequently.
+ */
+export async function fetchOfficialSources(): Promise<IntelArticle[]> {
+    const now = Date.now();
+    if (now - lastOfficialFetchTime < OFFICIAL_FETCH_INTERVAL_MS && officialArticleCache.length > 0) {
+        return [...officialArticleCache];
+    }
+
+    const apiKey = await getGeminiApiKey();
+    if (!apiKey) return [...officialArticleCache];
+
+    try {
+        const [kpiArticles, securityArticles] = await Promise.allSettled([
+            fetchKPICirculars(apiKey),
+            fetchSecurityAlerts(apiKey),
+        ]);
+
+        const results: IntelArticle[] = [];
+        if (kpiArticles.status === 'fulfilled') results.push(...kpiArticles.value);
+        if (securityArticles.status === 'fulfilled') results.push(...securityArticles.value);
+
+        // Dedup against cache
+        const existingIds = new Set(officialArticleCache.map(a => a.id));
+        const newItems = results.filter(a => !existingIds.has(a.id));
+        officialArticleCache.push(...newItems);
+
+        // Keep cache bounded
+        while (officialArticleCache.length > 20) officialArticleCache.shift();
+
+        lastOfficialFetchTime = now;
+        return [...officialArticleCache];
+    } catch (err) {
+        console.warn('[NewsService] Official sources fetch failed:', err);
+        return [...officialArticleCache];
+    }
+}
+
+// ============================================================
 // UTILITIES
 // ============================================================
 

@@ -206,6 +206,9 @@ interface OntologyState {
         branchObjects: OntologyObject[];
     } | null;
 
+    // ---- Ripple Effect (signal triage visual feedback) ----
+    highlightedNodeIds: string[];
+
     // ---- Graph Actions ----
     addObject: (obj: OntologyObject) => void;
     removeObject: (id: string) => void;
@@ -223,6 +226,9 @@ interface OntologyState {
     deleteScenario: (id: string) => void;
     updateRealtimeScenarioParams: (params: SimulationParams) => void;
     recalculate: () => void;
+
+    // ---- Ripple Effect Actions ----
+    triggerRippleEffect: (nodeId: string) => void;
 
     // ---- Scenario Branching Actions ----
     createScenarioBranch: (name: string, branchParams: SimulationParams) => void;
@@ -252,6 +258,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         links: [...ONTOLOGY_LINKS],
         actionLog: [],
         scenarioBranch: null,
+        highlightedNodeIds: [],
 
         // ---- Application State ----
         scenarios: [...BASE_SCENARIOS],
@@ -479,6 +486,20 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                     branchObjects,
                 },
             });
+        },
+
+        // ---- Ripple Effect ----
+        triggerRippleEffect: (nodeId: string) => {
+            const state = get();
+            const connectedLinks = state.links.filter(l => l.sourceId === nodeId || l.targetId === nodeId);
+            const connectedIds = new Set<string>([nodeId]);
+            connectedLinks.forEach(l => {
+                connectedIds.add(l.sourceId);
+                connectedIds.add(l.targetId);
+            });
+            set({ highlightedNodeIds: Array.from(connectedIds) });
+            // Clear after 3 seconds
+            setTimeout(() => set({ highlightedNodeIds: [] }), 3000);
         },
 
         clearScenarioBranch: () => set({ scenarioBranch: null }),

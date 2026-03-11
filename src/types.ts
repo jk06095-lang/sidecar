@@ -138,6 +138,16 @@ export interface AppSettings {
 // OSINT INTELLIGENCE ARTICLE (LLM-evaluated)
 // ============================================================
 
+/** Actionable parameter extracted by LLM from official circulars/alerts */
+export interface SuggestedAction {
+  targetNodeId: string;      // ontology object id, e.g. 'insurance-war-risk'
+  targetNodeTitle: string;   // human label, e.g. 'War Risk Premium'
+  propertyKey: string;       // e.g. 'rateTo', 'riskScore'
+  newValue: number | string;
+  displayLabel: string;      // e.g. 'War Risk Premium +0.5%'
+  sourceRef: string;         // e.g. 'KP&I Circular CIR-2026-003'
+}
+
 export interface IntelArticle {
   id: string;
   title: string;
@@ -154,6 +164,11 @@ export interface IntelArticle {
   ontologyTags?: string[];   // related ontology keywords e.g. ['Hormuz', 'VLCC', 'BrentOil']
   evaluated?: boolean;       // LLM evaluation completed
   dropped?: boolean;         // noise-filtered by LLM
+  // Official source classification
+  category?: 'OSINT' | 'OFFICIAL_CIRCULAR' | 'SECURITY_ALERT';
+  refNumber?: string;        // e.g. 'CIR-2026-003', 'WARNING 042/MAR/2026'
+  suggestedAction?: SuggestedAction;
+  acknowledged?: boolean;    // User has acknowledged this official item
 }
 
 // ============================================================

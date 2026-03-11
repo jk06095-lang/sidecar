@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Filter, AlertTriangle, Newspaper, Search, Folder, FolderOpen, FileText,
     ChevronRight, Tag, Bookmark, ShieldAlert, GitBranch, ChevronDown,
-    Radio, Zap, Hash, RefreshCw, Loader2, Shield
+    Radio, Zap, Hash, RefreshCw, Loader2, Shield, Landmark, Globe
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
 import { useOntologyStore } from '../store/ontologyStore';
 import { getFinOpsStats, type FinOpsStats } from '../services/newsService';
 import type { IntelArticle } from '../types';
+
+type FeedTab = 'osint' | 'official';
 
 export default function News() {
     const [scrapedData, setScrapedData] = useState<any[]>([]);
@@ -17,6 +19,7 @@ export default function News() {
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
     const [showSkeletons, setShowSkeletons] = useState(true);
     const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
+    const [activeTab, setActiveTab] = useState<FeedTab>('osint');
 
     // Ontology store for tag navigation
     const objects = useOntologyStore(s => s.objects);
@@ -215,7 +218,7 @@ export default function News() {
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                             <Newspaper className="text-cyan-400" size={20} />
-                            <h2 className="text-xl font-bold text-slate-100">OSINT 시그널 피드</h2>
+                            <h2 className="text-xl font-bold text-slate-100">시그널 피드</h2>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="flex gap-1">
@@ -227,6 +230,35 @@ export default function News() {
                     <p className="text-xs text-slate-400">
                         다중 소스 RSS 수집 → 3-Tier 퍼널 필터 → AIP 시그널 평가 → 액션 시그널 추출
                     </p>
+
+                    {/* Two-Track Tab Navigation */}
+                    <div className="mt-3 flex rounded-lg bg-slate-800/40 border border-slate-700/50 p-0.5">
+                        <button
+                            onClick={() => setActiveTab('osint')}
+                            className={cn(
+                                "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-all",
+                                activeTab === 'osint'
+                                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/30 border border-transparent"
+                            )}
+                        >
+                            <Globe size={13} />
+                            🌍 매크로 뉴스
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('official')}
+                            className={cn(
+                                "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-all",
+                                activeTab === 'official'
+                                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30 shadow-sm"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/30 border border-transparent"
+                            )}
+                        >
+                            <Landmark size={13} />
+                            🏛️ 공식 지침 & 경보
+                        </button>
+                    </div>
+
                     {/* FinOps Shield Stats Banner */}
                     <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/20 border border-emerald-800/20">
                         <Shield size={14} className="text-emerald-500 shrink-0" />
@@ -255,7 +287,7 @@ export default function News() {
 
                 {/* The global news widget */}
                 <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                    <GlobalNewsWidget onTagClick={handleTagClick} onStatsUpdate={setFinOpsStats} />
+                    <GlobalNewsWidget onTagClick={handleTagClick} onStatsUpdate={setFinOpsStats} activeTab={activeTab} />
                 </div>
 
                 <div className="mt-4 p-3.5 rounded-xl border border-amber-900/30 bg-amber-950/20 text-xs text-amber-200/80 leading-relaxed shadow-lg">

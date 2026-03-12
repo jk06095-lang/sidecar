@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { X, Copy, Download, Presentation, ChevronLeft, ChevronRight, ExternalLink, Link2, ArrowLeft, Shield, Anchor } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { X, Copy, Download, Presentation, ChevronLeft, ChevronRight, ExternalLink, Link2, ArrowLeft, Shield, Anchor, Maximize2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { OntologyObject, OntologyLink } from '../types';
 
@@ -41,7 +41,9 @@ export default function BriefingModal({
     const [viewMode, setViewMode] = useState<'code' | 'slides' | 'aip-report'>('code');
     const [currentSlide, setCurrentSlide] = useState(0);
     const [detailObject, setDetailObject] = useState<OntologyObject | null>(null);
+    const [isPresentationMode, setIsPresentationMode] = useState(false);
     const streamEndRef = useRef<HTMLDivElement>(null);
+    const presentationRef = useRef<HTMLDivElement>(null);
 
     // Determine if we have AIP content
     const hasAIPContent = !!(streamingText || isStreaming);
@@ -59,6 +61,55 @@ export default function BriefingModal({
             streamEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
     }, [streamingText, isStreaming]);
+
+    // Parse Marp content into slides (must be before useEffect that references totalSlides)
+    const slides = marpContent
+        .split(/^---$/m)
+        .filter(s => s.trim() && !s.trim().startsWith('marp:'))
+        .map(s => s.trim());
+    const totalSlides = slides.length;
+
+    // Presentation mode — fullscreen handling
+    const enterPresentationMode = useCallback(() => {
+        setIsPresentationMode(true);
+        document.documentElement.requestFullscreen?.().catch(() => { });
+    }, []);
+
+    const exitPresentationMode = useCallback(() => {
+        setIsPresentationMode(false);
+        if (document.fullscreenElement) {
+            document.exitFullscreen?.().catch(() => { });
+        }
+    }, []);
+
+    // Listen for fullscreen exit (ESC or browser chrome)
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            if (!document.fullscreenElement && isPresentationMode) {
+                setIsPresentationMode(false);
+            }
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, [isPresentationMode]);
+
+    // Keyboard navigation for presentation mode
+    useEffect(() => {
+        if (!isPresentationMode) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                e.preventDefault();
+                setCurrentSlide(prev => Math.min(totalSlides - 1, prev + 1));
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                setCurrentSlide(prev => Math.max(0, prev - 1));
+            } else if (e.key === 'Escape') {
+                exitPresentationMode();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isPresentationMode, totalSlides, exitPresentationMode]);
 
     if (!isOpen) return null;
 
@@ -94,16 +145,10 @@ export default function BriefingModal({
         URL.revokeObjectURL(url);
     };
 
-    // Parse Marp content into slides
-    const slides = marpContent
-        .split(/^---$/m)
-        .filter(s => s.trim() && !s.trim().startsWith('marp:'))
-        .map(s => s.trim());
-
-    const totalSlides = slides.length;
 
     // ============================================================
-    // PREMIUM SLIDE RENDERER
+    // PREMIUM SLIDE RENDERER — INVESTMENT BANKING STYLE
+    // Goldman Sachs / Morgan Stanley inspired typography & color
     // ============================================================
     const renderSlideContent = (md: string) => {
         const lines = md.split('\n');
@@ -118,12 +163,11 @@ export default function BriefingModal({
             if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
                 if (!inTable) {
                     inTable = true;
-                    tableHtml = '<table class="report-table my-4 w-full">';
+                    tableHtml = '<div class="ib-table-wrap my-5"><table class="report-table w-full">';
                 }
                 const cells = line.split('|').filter(c => c.trim());
                 const isSeparator = cells.every(c => /^[\s:-]+$/.test(c));
                 if (isSeparator) continue;
-                // Check if next line is separator = header row
                 const nextLine = lines[i + 1]?.trim();
                 const isHeader = nextLine && /^\|[\s:|-]+\|$/.test(nextLine);
                 if (isHeader) {
@@ -137,53 +181,55 @@ export default function BriefingModal({
                 }
                 continue;
             } else if (inTable) {
-                tableHtml += '</tbody></table>';
+                tableHtml += '</tbody></table></div>';
                 html += tableHtml;
                 inTable = false;
                 tableHtml = '';
             }
 
-            // Headers
+            // H1 — IB Pitch Deck Title
             if (line.startsWith('# ')) {
-                html += `<h1 class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 mb-5 leading-tight tracking-tight">${line.slice(2)}</h1>`;
-                html += `<div class="w-24 h-0.5 bg-gradient-to-r from-cyan-500 to-transparent mb-5 rounded-full"></div>`;
+                html += `<h1 class="ib-slide-title text-[1.65rem] font-bold mb-4 leading-tight tracking-tight">${line.slice(2)}</h1>`;
+                html += `<div class="ib-title-rule"></div>`;
                 continue;
             }
+            // H2 — Section Header with left accent bar
             if (line.startsWith('## ')) {
-                html += `<h2 class="text-lg font-semibold text-slate-100 mb-3 mt-5 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0"></span>${line.slice(3)}</h2>`;
+                html += `<div class="ib-section-header mt-6 mb-3"><h2 class="text-lg font-semibold text-slate-100">${line.slice(3)}</h2></div>`;
                 continue;
             }
+            // H3 — Subsection
             if (line.startsWith('### ')) {
-                html += `<h3 class="text-base font-medium text-slate-300 mb-2 mt-3 pl-3 border-l-2 border-cyan-700/40">${line.slice(4)}</h3>`;
+                html += `<h3 class="text-sm font-semibold text-amber-200/90 mb-2 mt-4 pl-3 border-l-2 border-amber-500/30 uppercase tracking-wider">${line.slice(4)}</h3>`;
                 continue;
             }
 
-            // Bullet points
+            // Bullet points — gold diamond
             if (line.trim().startsWith('- ')) {
                 const content = line.trim().slice(2);
-                html += `<div class="flex items-start gap-3 ml-2 mb-2"><span class="text-cyan-400 mt-1 text-[10px] shrink-0">◆</span><span class="text-slate-300 text-sm leading-relaxed">${renderBoldInline(content)}</span></div>`;
+                html += `<div class="flex items-start gap-3 ml-3 mb-2"><span class="text-amber-400/80 mt-1 text-[9px] shrink-0">◆</span><span class="text-slate-200 text-[0.84rem] leading-relaxed">${renderBoldInline(content)}</span></div>`;
                 continue;
             }
 
-            // Numbered list
+            // Numbered list — navy circle
             const numMatch = line.trim().match(/^(\d+)\.\s(.+)/);
             if (numMatch) {
-                html += `<div class="flex items-start gap-3 ml-2 mb-2"><span class="text-cyan-400 font-mono text-xs mt-0.5 shrink-0 w-5 text-right font-bold">${numMatch[1]}.</span><span class="text-slate-300 text-sm leading-relaxed">${renderBoldInline(numMatch[2])}</span></div>`;
+                html += `<div class="flex items-start gap-3 ml-3 mb-2"><span class="ib-num-badge">${numMatch[1]}</span><span class="text-slate-200 text-[0.84rem] leading-relaxed">${renderBoldInline(numMatch[2])}</span></div>`;
                 continue;
             }
 
             // Empty line
             if (!line.trim()) {
-                html += '<div class="h-3"></div>';
+                html += '<div class="h-2.5"></div>';
                 continue;
             }
 
             // Regular text
-            html += `<p class="text-slate-300 text-sm leading-relaxed mb-1.5">${renderBoldInline(line)}</p>`;
+            html += `<p class="text-slate-200/90 text-[0.84rem] leading-relaxed mb-1.5">${renderBoldInline(line)}</p>`;
         }
 
         if (inTable) {
-            tableHtml += '</tbody></table>';
+            tableHtml += '</tbody></table></div>';
             html += tableHtml;
         }
 
@@ -210,42 +256,169 @@ export default function BriefingModal({
         }
     };
 
-    // Render AIP report content with data lineage badges
-    const renderAIPContent = (text: string) => {
-        // Split by [[...]] pattern
+    // Render a single inline badge button for [[keyword]]
+    const renderBadge = (keyword: string, key: string | number) => {
+        const obj = keywordMap.get(keyword);
+        const type = obj?.type || 'RiskFactor';
+        const colors = BADGE_COLORS[type] || BADGE_COLORS.RiskFactor;
+        const icon = TYPE_ICONS[type] || '📎';
+
+        return (
+            <button
+                key={key}
+                onClick={() => handleBadgeClick(keyword)}
+                className={cn(
+                    'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition-all',
+                    'hover:scale-105 hover:shadow-lg cursor-pointer mx-0.5 align-baseline',
+                    colors.bg, colors.text, colors.border,
+                    obj ? 'ring-1 ring-white/5' : 'opacity-75'
+                )}
+                title={obj ? `${obj.type}: ${obj.title} (Risk: ${obj.properties.riskScore})` : keyword}
+            >
+                <span className="text-[10px]">{icon}</span>
+                {keyword}
+                {obj && <ExternalLink size={9} className="ml-0.5 opacity-60" />}
+            </button>
+        );
+    };
+
+    // Render inline text with [[badge]] replacement + bold/italic
+    const renderInlineWithBadges = (text: string, keyPrefix: string | number) => {
         const parts = text.split(/(\[\[[^\]]+\]\])/g);
-
-        return parts.map((part, idx) => {
+        return parts.map((part, i) => {
             const match = part.match(/^\[\[(.+)\]\]$/);
-            if (match) {
-                const keyword = match[1];
-                const obj = keywordMap.get(keyword);
-                const type = obj?.type || 'RiskFactor';
-                const colors = BADGE_COLORS[type] || BADGE_COLORS.RiskFactor;
-                const icon = TYPE_ICONS[type] || '📎';
+            if (match) return renderBadge(match[1], `${keyPrefix}-badge-${i}`);
+            return <span key={`${keyPrefix}-t-${i}`}>{renderBoldItalic(part)}</span>;
+        });
+    };
 
-                return (
-                    <button
-                        key={idx}
-                        onClick={() => handleBadgeClick(keyword)}
-                        className={cn(
-                            'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition-all',
-                            'hover:scale-105 hover:shadow-lg cursor-pointer mx-0.5',
-                            colors.bg, colors.text, colors.border,
-                            obj ? 'ring-1 ring-white/5' : 'opacity-75'
+    // Render AIP report content with data lineage badges — LINE-FIRST approach
+    // Process line-by-line first → determine block type → then inline-replace badges
+    const renderAIPContent = (text: string) => {
+        const lines = text.split('\n');
+        let tableBuffer: string[][] = [];
+        let isHeaderRow = false;
+        const result: React.ReactNode[] = [];
+
+        const flushTable = () => {
+            if (tableBuffer.length === 0) return;
+            result.push(
+                <div key={`table-${result.length}`} className="my-5 overflow-x-auto rounded-xl border border-slate-700/50">
+                    <table className="report-table">
+                        {tableBuffer.length > 1 && (
+                            <thead>
+                                <tr>
+                                    {tableBuffer[0].map((cell, ci) => (
+                                        <th key={ci}>{renderInlineWithBadges(cell.trim(), `th-${result.length}-${ci}`)}</th>
+                                    ))}
+                                </tr>
+                            </thead>
                         )}
-                        title={obj ? `${obj.type}: ${obj.title} (Risk: ${obj.properties.riskScore})` : keyword}
-                    >
-                        <span className="text-[10px]">{icon}</span>
-                        {keyword}
-                        {obj && <ExternalLink size={9} className="ml-0.5 opacity-60" />}
-                    </button>
-                );
+                        <tbody>
+                            {tableBuffer.slice(1).map((row, ri) => (
+                                <tr key={ri}>
+                                    {row.map((cell, ci) => (
+                                        <td key={ci}>{renderInlineWithBadges(cell.trim(), `td-${result.length}-${ri}-${ci}`)}</td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+            tableBuffer = [];
+            isHeaderRow = false;
+        };
+
+        for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+            const line = lines[lineIdx];
+
+            // Table handling
+            if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+                const cells = line.split('|').filter(c => c.trim());
+                const isSeparator = cells.every(c => /^[\s:-]+$/.test(c));
+                if (isSeparator) {
+                    isHeaderRow = true;
+                    continue;
+                }
+                if (tableBuffer.length === 0 || !isHeaderRow) {
+                    tableBuffer.push(cells);
+                } else {
+                    tableBuffer.push(cells);
+                }
+                continue;
+            } else if (tableBuffer.length > 0) {
+                flushTable();
             }
 
-            // Render markdown-like formatting within non-badge text
-            return <span key={idx}>{renderMarkdownInline(part)}</span>;
-        });
+            // Headers — premium styling
+            if (line.startsWith('## ')) {
+                result.push(
+                    <div key={lineIdx} className="report-section-bar rounded-r-lg py-3 pr-4 mt-10 mb-5">
+                        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 to-slate-100 flex items-center gap-2 leading-tight">
+                            {renderInlineWithBadges(line.slice(3), lineIdx)}
+                        </h2>
+                    </div>
+                );
+                continue;
+            }
+            if (line.startsWith('### ')) {
+                result.push(
+                    <h3 key={lineIdx} className="text-base font-semibold text-slate-200 mt-6 mb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0"></span>
+                        {renderInlineWithBadges(line.slice(4), lineIdx)}
+                    </h3>
+                );
+                continue;
+            }
+            if (line.startsWith('# ')) {
+                result.push(
+                    <div key={lineIdx} className="mt-8 mb-5">
+                        <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 via-blue-200 to-violet-300 tracking-tight">{renderInlineWithBadges(line.slice(2), lineIdx)}</h1>
+                        <div className="w-32 h-0.5 bg-gradient-to-r from-cyan-500 via-violet-500 to-transparent mt-3 rounded-full" />
+                    </div>
+                );
+                continue;
+            }
+
+            // Bullet points — enhanced (with inline badges)
+            if (line.trim().startsWith('- ')) {
+                result.push(
+                    <div key={lineIdx} className="flex items-start gap-3 ml-4 mb-2.5">
+                        <span className="text-cyan-500 mt-1.5 text-[8px] shrink-0">◆</span>
+                        <span className="text-slate-300 text-[0.8125rem] leading-relaxed">{renderInlineWithBadges(line.slice(line.indexOf('- ') + 2), lineIdx)}</span>
+                    </div>
+                );
+                continue;
+            }
+
+            // Numbered lists — enhanced (with inline badges)
+            if (/^\d+\.\s/.test(line.trim())) {
+                const num = line.trim().match(/^(\d+)\.\s/)?.[1];
+                const content = line.trim().replace(/^\d+\.\s/, '');
+                result.push(
+                    <div key={lineIdx} className="flex items-start gap-3 ml-4 mb-2.5">
+                        <span className="text-cyan-400 font-mono text-xs mt-0.5 shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-cyan-500/10 border border-cyan-500/20 font-bold">{num}</span>
+                        <span className="text-slate-300 text-[0.8125rem] leading-relaxed pt-0.5">{renderInlineWithBadges(content, lineIdx)}</span>
+                    </div>
+                );
+                continue;
+            }
+
+            // Empty line
+            if (!line.trim()) {
+                result.push(<div key={lineIdx} className="h-3" />);
+                continue;
+            }
+
+            // Regular text (with inline badges)
+            result.push(<p key={lineIdx} className="text-slate-300 text-[0.8125rem] leading-relaxed mb-1.5">{renderInlineWithBadges(line, lineIdx)}</p>);
+        }
+
+        // Flush remaining table
+        flushTable();
+
+        return result;
     };
 
     // ============================================================
@@ -605,8 +778,8 @@ export default function BriefingModal({
                                             </div>
 
                                             {/* Decorative corner accents */}
-                                            <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-cyan-500/20 rounded-tl" />
-                                            <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-cyan-500/20 rounded-br" />
+                                            <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-amber-500/20 rounded-tl" />
+                                            <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-amber-500/20 rounded-br" />
 
                                             {/* Slide content */}
                                             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
@@ -635,6 +808,14 @@ export default function BriefingModal({
 
                                 {/* Slide Navigation */}
                                 <div className="flex items-center justify-center gap-4 pb-5 no-print">
+                                    {/* Presentation Mode Button */}
+                                    <button
+                                        onClick={enterPresentationMode}
+                                        className="p-2.5 rounded-xl bg-gradient-to-r from-amber-600/80 to-orange-600/80 text-white hover:from-amber-500 hover:to-orange-500 transition-all border border-amber-500/30 shadow-lg shadow-amber-900/20"
+                                        title="발표 모드 (풀스크린)"
+                                    >
+                                        <Maximize2 size={16} />
+                                    </button>
                                     <button
                                         onClick={() => setCurrentSlide(Math.max(0, currentSlide - 1))}
                                         disabled={currentSlide === 0}
@@ -827,6 +1008,113 @@ export default function BriefingModal({
                     )}
                 </div>
             </div>
+
+            {/* ====== FULLSCREEN PRESENTATION MODE OVERLAY ====== */}
+            {isPresentationMode && (
+                <div
+                    ref={presentationRef}
+                    className="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center"
+                    onClick={(e) => {
+                        // Click right half → next slide, left half → prev slide
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const clickX = e.clientX - rect.left;
+                        if (clickX > rect.width / 2) {
+                            setCurrentSlide(prev => Math.min(totalSlides - 1, prev + 1));
+                        } else {
+                            setCurrentSlide(prev => Math.max(0, prev - 1));
+                        }
+                    }}
+                >
+                    {/* Exit Button */}
+                    <button
+                        onClick={(e) => { e.stopPropagation(); exitPresentationMode(); }}
+                        className="absolute top-4 right-4 z-10 p-2 rounded-lg bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/80 transition-all backdrop-blur-sm"
+                        title="발표 종료 (ESC)"
+                    >
+                        <X size={20} />
+                    </button>
+
+                    {/* Centered Slide */}
+                    <div className="w-[90vw] max-w-[1440px] slide-frame bg-gradient-to-br from-slate-800/95 via-slate-850 to-slate-900 border border-slate-700/40 rounded-2xl shadow-2xl shadow-black/60" style={{ animation: 'slide-enter 0.3s ease-out' }}>
+                        <div className="relative h-full flex flex-col p-12 lg:p-16">
+                            {/* Slide number */}
+                            <div className="absolute top-5 right-6 flex items-center gap-1.5 text-xs text-slate-500 font-mono">
+                                <span className="px-3 py-1 rounded-lg bg-slate-700/50 border border-slate-600/30 text-slate-400 font-bold">
+                                    {currentSlide + 1} / {totalSlides}
+                                </span>
+                            </div>
+
+                            {/* Decorative corner accents */}
+                            <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-amber-500/30 rounded-tl" />
+                            <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-amber-500/30 rounded-br" />
+
+                            {/* Slide content (larger text for presentation) */}
+                            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 presentation-slide-content" onClick={(e) => e.stopPropagation()}>
+                                {slides[currentSlide] && (
+                                    <div
+                                        dangerouslySetInnerHTML={{
+                                            __html: renderSlideContent(slides[currentSlide]),
+                                        }}
+                                    />
+                                )}
+                            </div>
+
+                            {/* Slide footer */}
+                            <div className="mt-auto pt-4 flex items-center justify-between border-t border-slate-700/30">
+                                <div className="flex items-center gap-2 text-[10px] text-slate-600 font-mono tracking-wider">
+                                    <Anchor size={10} className="text-amber-600/50" />
+                                    SIDECAR Maritime Command
+                                </div>
+                                <div className="text-[10px] text-slate-600 font-mono tracking-wider">
+                                    CONFIDENTIAL · {currentDateStr}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Bottom Navigation Bar */}
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-800/80 backdrop-blur-md rounded-2xl px-5 py-2.5 border border-slate-700/50 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                        <button
+                            onClick={() => setCurrentSlide(Math.max(0, currentSlide - 1))}
+                            disabled={currentSlide === 0}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 transition-colors"
+                            title="이전 슬라이드"
+                        >
+                            <ChevronLeft size={18} />
+                        </button>
+                        <div className="flex items-center gap-1">
+                            {slides.map((_, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => setCurrentSlide(idx)}
+                                    className={cn(
+                                        "transition-all rounded-full",
+                                        idx === currentSlide
+                                            ? "w-5 h-1.5 bg-amber-400"
+                                            : "w-1.5 h-1.5 bg-slate-600 hover:bg-slate-400"
+                                    )}
+                                    title={`슬라이드 ${idx + 1}`}
+                                />
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => setCurrentSlide(Math.min(totalSlides - 1, currentSlide + 1))}
+                            disabled={currentSlide === totalSlides - 1}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 transition-colors"
+                            title="다음 슬라이드"
+                        >
+                            <ChevronRight size={18} />
+                        </button>
+                        <div className="w-px h-5 bg-slate-700 mx-1" />
+                        <span className="text-xs text-slate-400 font-mono">{currentSlide + 1}/{totalSlides}</span>
+                    </div>
+
+                    {/* Hint text */}
+                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] text-slate-700 font-mono">
+                        ← → 화살표 키 또는 화면 좌/우 클릭 · ESC 종료
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

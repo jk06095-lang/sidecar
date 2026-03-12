@@ -267,7 +267,7 @@ input[type='range']::-moz-range-thumb {
   left: 0;
   width: 4px;
   height: 100%;
-  background: linear-gradient(180deg, #06b6d4, #8b5cf6, #06b6d4);
+  background: linear-gradient(180deg, #d97706, #fbbf24, #d97706);
   border-radius: 0 2px 2px 0;
   z-index: 1;
 }
@@ -324,13 +324,86 @@ input[type='range']::-moz-range-thumb {
   }
 
   .slide-frame::before {
-    background: #06b6d4 !important;
+    background: #b8860b !important;
   }
 
   .report-section-bar {
     border-left-color: #0891b2 !important;
   }
 }
+
+/* =============================================
+   INVESTMENT BANKING — Slide Design System
+   Navy + Gold • Goldman Sachs / Morgan Stanley
+   ============================================= */
+
+/* IB Slide Title — navy to gold gradient */
+.ib-slide-title {
+  background: linear-gradient(135deg, #e2e8f0 0%, #fbbf24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* IB Title Rule — gold underline */
+.ib-title-rule {
+  width: 80px;
+  height: 2px;
+  background: linear-gradient(90deg, #d97706, #fbbf24, transparent);
+  border-radius: 1px;
+  margin-bottom: 1.25rem;
+}
+
+/* IB Section Header — dark navy bar with warm tint */
+.ib-section-header {
+  position: relative;
+  padding-left: 14px;
+  border-left: 3px solid #d97706;
+  background: linear-gradient(90deg, rgba(217, 119, 6, 0.06) 0%, transparent 60%);
+  border-radius: 0 6px 6px 0;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/* IB Numbered Badge */
+.ib-num-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  color: #fbbf24;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* IB Table Wrapper */
+.ib-table-wrap {
+  border-radius: 10px;
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  overflow: hidden;
+}
+
+/* Presentation mode — larger text for projection */
+.presentation-slide-content h1 {
+  font-size: 2.2rem !important;
+}
+
+.presentation-slide-content h2 {
+  font-size: 1.5rem !important;
+}
+
+.presentation-slide-content p,
+.presentation-slide-content span {
+  font-size: 1rem !important;
+}
+
 
 /* Global dark scrollbar for firefox */
 * {

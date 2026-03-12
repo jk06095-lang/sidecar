@@ -17,6 +17,7 @@
 import { lsegGet, isLSEGAvailable, type LSEGResponse } from '../lib/lsegApiClient';
 import type { MarketQuote } from './marketDataService';
 import { fetchAllMarketData, getCachedMarketData } from './marketDataService';
+import type { QuantMetrics } from '../types';
 
 // ============================================================
 // LSEG RIC → Symbol Mapping
@@ -45,6 +46,9 @@ const LSEG_RIC_MAPPINGS: LSEGRICMapping[] = [
     { ric: 'GCc1', name: 'Gold', nameKo: '금', currency: 'USD', yahooFallbackSymbol: 'GC=F' },
     { ric: 'HGc1', name: 'Copper', nameKo: '구리', currency: 'USD', scenarioVarId: 'copperLME', yahooFallbackSymbol: 'HG=F' },
     { ric: 'SIc1', name: 'Silver', nameKo: '은', currency: 'USD', yahooFallbackSymbol: 'SI=F' },
+    // Maritime Freight & Bunker
+    { ric: 'SCFI', name: 'Shanghai Containerized Freight Index', nameKo: 'SCFI 컨테이너운임', currency: 'USD', scenarioVarId: 'scfiFactor' },
+    { ric: 'VLSFO380', name: 'VLSFO Singapore', nameKo: 'VLSFO 벙커유', currency: 'USD', scenarioVarId: 'vlsfoPrice', yahooFallbackSymbol: 'VLSFO.SI' },
     // Indices
     { ric: '.SPX', name: 'S&P 500', nameKo: 'S&P 500', currency: 'USD', yahooFallbackSymbol: '^GSPC' },
     { ric: '.DXY', name: 'Dollar Index', nameKo: '달러 인덱스', currency: 'USD', yahooFallbackSymbol: 'DX-Y.NYB' },
@@ -94,8 +98,10 @@ export interface MarketDataResult {
     source: MarketDataSource;
     isFallback: boolean;
     lastUpdated: string;
-    /** 20-day historical time series (when available from LSEG) */
+    /** 30-day historical time series (when available from LSEG) */
     historicalData?: Record<string, { date: string; close: number }[]>;
+    /** Quant preprocessing metrics per RIC — auto-calculated from historical data */
+    quantMetrics?: Record<string, QuantMetrics>;
 }
 
 // ============================================================
@@ -172,12 +178,14 @@ async function fetchLSEGPricing(): Promise<MarketQuote[]> {
 // ============================================================
 
 /**
- * Fetch 20-day historical data for key RICs.
+ * Fetch 30-day historical data for key maritime & macro RICs.
  * Returns compact data to stay within 10K daily point limit.
+ * 30 data points per RIC × 5 RICs = 150 points per call — very conservative.
+ * Cache TTL: 2h (7200s) to minimize redundant API calls.
  */
 async function fetchLSEGHistorical(): Promise<Record<string, { date: string; close: number }[]>> {
-    // Only fetch historicals for key indicators (limit API usage)
-    const keyRics = ['LCOc1', 'BADI', 'KRW='];
+    // Key indicators for quant preprocessing: energy, freight, bunker, FX
+    const keyRics = ['LCOc1', 'BADI', 'KRW=', 'SCFI', 'VLSFO380'];
     const rics = keyRics.join(',');
 
     try {
@@ -186,10 +194,10 @@ async function fetchLSEGHistorical(): Promise<Record<string, { date: string; clo
             {
                 rics,
                 interval: 'daily',
-                count: 20,
+                count: 30,  // 30 days for volatility calculation
                 fields: 'CLOSE',
             },
-            3600, // 1h cache for historicals
+            7200, // 2h cache — conservative to save API quota
         );
 
         const result: Record<string, { date: string; close: number }[]> = {};
@@ -212,6 +220,120 @@ async function fetchLSEGHistorical(): Promise<Record<string, { date: string; clo
 }
 
 // ============================================================
+// QUANT PREPROCESSING — SMA, Volatility, Z-Score
+// ============================================================
+
+/**
+ * Calculate Simple Moving Average for the last `period` data points.
+ * Returns 0 if insufficient data.
+ */
+function calculateSMA(closes: number[], period: number): number {
+    if (closes.length < period) return closes.length > 0 ? closes.reduce((a, b) => a + b, 0) / closes.length : 0;
+    const slice = closes.slice(-period);
+    return slice.reduce((sum, v) => sum + v, 0) / period;
+}
+
+/**
+ * Calculate historical volatility (annualized standard deviation of log returns).
+ * Uses log returns: ln(P_t / P_{t-1}) for each consecutive pair.
+ * Annualizes by √252 (trading days per year).
+ */
+function calculateVolatility(closes: number[], period: number): number {
+    const slice = closes.slice(-Math.min(period + 1, closes.length));
+    if (slice.length < 3) return 0; // Need at least 3 points for meaningful vol
+
+    // Calculate log returns
+    const logReturns: number[] = [];
+    for (let i = 1; i < slice.length; i++) {
+        if (slice[i - 1] > 0 && slice[i] > 0) {
+            logReturns.push(Math.log(slice[i] / slice[i - 1]));
+        }
+    }
+
+    if (logReturns.length < 2) return 0;
+
+    // Standard deviation of log returns
+    const mean = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
+    const variance = logReturns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (logReturns.length - 1);
+    const dailyStdDev = Math.sqrt(variance);
+
+    // Annualize: daily vol × √252
+    return Math.round(dailyStdDev * Math.sqrt(252) * 10000) / 10000;
+}
+
+/**
+ * Calculate Z-Score: how many standard deviations the current price
+ * deviates from the SMA. Positive = above SMA, Negative = below SMA.
+ */
+function calculateZScore(currentPrice: number, sma: number, closes: number[], period: number): number {
+    if (sma === 0 || closes.length < 2) return 0;
+
+    const slice = closes.slice(-period);
+    const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+    const variance = slice.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / slice.length;
+    const stdDev = Math.sqrt(variance);
+
+    if (stdDev === 0) return 0;
+    return Math.round(((currentPrice - sma) / stdDev) * 10000) / 10000;
+}
+
+/**
+ * Compute QuantMetrics for all RICs with available historical data.
+ * Returns a map of RIC → QuantMetrics with SMA20, 30d Volatility, Z-Score,
+ * momentum ratio, and automatic risk alerting when |Z-Score| > 2.0.
+ *
+ * This replaces the need for a data scientist to manually compute these
+ * indicators — the engine runs automatically on every LSEG data fetch.
+ */
+export function computeQuantMetrics(
+    historicalData: Record<string, { date: string; close: number }[]>,
+    currentQuotes: MarketQuote[]
+): Record<string, QuantMetrics> {
+    const metrics: Record<string, QuantMetrics> = {};
+    const now = new Date().toISOString();
+
+    for (const [ric, series] of Object.entries(historicalData)) {
+        if (!series || series.length < 5) {
+            // Need minimum 5 data points for meaningful analysis
+            console.debug(`[QuantEngine] Skipping ${ric}: insufficient data (${series?.length ?? 0} points)`);
+            continue;
+        }
+
+        const closes = series.map(p => p.close);
+
+        // Get current price from live quotes first, fallback to latest historical
+        const quote = currentQuotes.find(q => q.symbol === ric);
+        const currentPrice = quote?.price ?? closes[closes.length - 1];
+
+        // Calculate quant indicators
+        const sma20 = calculateSMA(closes, 20);
+        const volatility30d = calculateVolatility(closes, 30);
+        const zScore = calculateZScore(currentPrice, sma20, closes, 20);
+        const momentum = sma20 > 0 ? Math.round((currentPrice / sma20) * 10000) / 10000 : 1;
+        const riskAlert = Math.abs(zScore) > 2.0;
+
+        metrics[ric] = {
+            sma20: Math.round(sma20 * 100) / 100,
+            volatility30d,
+            zScore,
+            riskAlert,
+            momentum,
+            lastCalculatedAt: now,
+        };
+
+        if (riskAlert) {
+            console.warn(
+                `[QuantEngine] 🚨 RISK ALERT: ${ric} Z-Score=${zScore.toFixed(2)} ` +
+                `(price=${currentPrice}, SMA20=${sma20.toFixed(2)}, vol=${volatility30d.toFixed(4)})`
+            );
+        }
+    }
+
+    console.log(`[QuantEngine] ✅ Computed metrics for ${Object.keys(metrics).length} RICs`);
+    return metrics;
+}
+
+// ============================================================
 // UNIFIED FETCH — LSEG → Yahoo → Cache → Mock
 // ============================================================
 
@@ -221,6 +343,9 @@ async function fetchLSEGHistorical(): Promise<Record<string, { date: string; clo
  * 2. Yahoo Finance (free, CORS proxy)
  * 3. localStorage cache (last known data)
  * 4. Mock data (hardcoded last resort)
+ *
+ * When LSEG succeeds, automatically computes QuantMetrics
+ * (SMA20, 30d volatility, Z-Score) from historical time-series data.
  */
 export async function fetchMarketDataWithFallback(): Promise<MarketDataResult> {
     const now = new Date().toISOString();
@@ -235,13 +360,25 @@ export async function fetchMarketDataWithFallback(): Promise<MarketDataResult> {
             ]);
 
             if (quotes.length > 0) {
-                console.log('[LSEGMarket] ✅ Live LSEG data:', quotes.length, 'quotes');
+                const hasHistorical = Object.keys(historical).length > 0;
+
+                // Auto-compute quant metrics if historical data is available
+                const quantMetrics = hasHistorical
+                    ? computeQuantMetrics(historical, quotes)
+                    : undefined;
+
+                console.log(
+                    `[LSEGMarket] ✅ Live LSEG data: ${quotes.length} quotes` +
+                    (quantMetrics ? `, ${Object.keys(quantMetrics).length} quant metrics` : '')
+                );
+
                 return {
                     quotes,
                     source: 'lseg',
                     isFallback: false,
                     lastUpdated: now,
-                    historicalData: Object.keys(historical).length > 0 ? historical : undefined,
+                    historicalData: hasHistorical ? historical : undefined,
+                    quantMetrics,
                 };
             }
         }

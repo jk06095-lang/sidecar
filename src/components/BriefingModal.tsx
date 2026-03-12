@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Copy, Download, Presentation, ChevronLeft, ChevronRight, ExternalLink, Link2, ArrowLeft, Shield, Anchor, Maximize2 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { OntologyObject, OntologyLink } from '../types';
+import type { OntologyObject, OntologyLink, AIPExecutiveBriefing } from '../types';
+import SkeletonLoader from './widgets/SkeletonLoader';
+import StrategicActionPanel from './widgets/StrategicActionPanel';
 
 // Badge color mapping by ontology object type
 const BADGE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -30,15 +32,19 @@ interface BriefingModalProps {
     isStreaming?: boolean;
     ontologyObjects?: OntologyObject[];
     ontologyLinks?: OntologyLink[];
+    // Module 3: Executive Briefing mode props
+    executiveBriefing?: AIPExecutiveBriefing | null;
+    isExecutiveBriefingLoading?: boolean;
 }
 
 export default function BriefingModal({
     isOpen, onClose, marpContent,
     streamingText, isStreaming,
     ontologyObjects = [], ontologyLinks = [],
+    executiveBriefing, isExecutiveBriefingLoading,
 }: BriefingModalProps) {
     const [copied, setCopied] = useState(false);
-    const [viewMode, setViewMode] = useState<'code' | 'slides' | 'aip-report'>('code');
+    const [viewMode, setViewMode] = useState<'code' | 'slides' | 'aip-report' | 'executive'>('code');
     const [currentSlide, setCurrentSlide] = useState(0);
     const [detailObject, setDetailObject] = useState<OntologyObject | null>(null);
     const [isPresentationMode, setIsPresentationMode] = useState(false);
@@ -54,6 +60,13 @@ export default function BriefingModal({
             setViewMode('aip-report');
         }
     }, [hasAIPContent]);
+
+    // Auto-switch to executive mode when executive briefing is available
+    useEffect(() => {
+        if (executiveBriefing || isExecutiveBriefingLoading) {
+            setViewMode('executive');
+        }
+    }, [executiveBriefing, isExecutiveBriefingLoading]);
 
     // Auto-scroll during streaming
     useEffect(() => {
@@ -113,7 +126,149 @@ export default function BriefingModal({
 
     if (!isOpen) return null;
 
-    const displayContent = viewMode === 'aip-report' ? (streamingText || '') : marpContent;
+    const displayContent = viewMode === 'aip-report' ? (streamingText || '') : viewMode === 'executive' ? '' : marpContent;
+
+    // ============================================================
+    // MODULE 3: EXECUTIVE BRIEFING RENDERER
+    // ============================================================
+    const renderExecutiveBriefing = (briefing: AIPExecutiveBriefing) => {
+        const trendColors: Record<string, string> = {
+            up: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+            down: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
+            stable: 'text-slate-300 bg-slate-700/30 border-slate-600/30',
+            critical: 'text-red-400 bg-red-500/15 border-red-500/40 animate-pulse',
+        };
+        const trendIcons: Record<string, string> = { up: '📈', down: '📉', stable: '➡️', critical: '🔴' };
+
+        const priorityStyles: Record<string, { color: string; bg: string; border: string; label: string }> = {
+            IMMEDIATE: { color: 'text-rose-300', bg: 'bg-rose-500/10', border: 'border-rose-500/40', label: '즉시 실행' },
+            SHORT_TERM: { color: 'text-amber-300', bg: 'bg-amber-500/10', border: 'border-amber-500/30', label: '단기 (1-4주)' },
+            MEDIUM_TERM: { color: 'text-cyan-300', bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', label: '중기 (1-3개월)' },
+        };
+
+        return (
+            <div className="space-y-8">
+                {/* Section 1: Market Outlook */}
+                <div>
+                    <div className="report-section-bar rounded-r-lg py-3 pr-4 mb-5">
+                        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 to-slate-100 flex items-center gap-2">
+                            📊 Market Outlook — 시장 위기 평가
+                        </h2>
+                    </div>
+                    <p className="text-slate-300 text-sm leading-relaxed mb-5">{briefing.marketOutlook.summary}</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {briefing.marketOutlook.keyMetrics.map((m, i) => (
+                            <div key={i} className={cn('rounded-xl border p-4 transition-all', trendColors[m.trend])}>
+                                <div className="text-[10px] uppercase tracking-wider opacity-70 mb-1">{m.label}</div>
+                                <div className="text-lg font-black font-mono">{m.value}</div>
+                                <div className="text-[10px] mt-1 flex items-center gap-1">
+                                    <span>{trendIcons[m.trend]}</span>
+                                    <span className="uppercase font-bold">{m.trend}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Section 2: Financial Impact & VaR */}
+                <div>
+                    <div className="report-section-bar rounded-r-lg py-3 pr-4 mb-5">
+                        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-rose-200 flex items-center gap-2">
+                            💰 Financial Impact & VaR
+                        </h2>
+                    </div>
+                    <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-5 mb-5">
+                        <div className="text-[10px] uppercase tracking-wider text-rose-400/70 mb-1">Total Value-at-Risk (95% CI)</div>
+                        <div className="text-2xl font-black text-rose-300 font-mono">{briefing.financialImpactVaR.totalVaR}</div>
+                    </div>
+                    {briefing.financialImpactVaR.breakdown.length > 0 && (
+                        <div className="overflow-x-auto rounded-xl border border-slate-700/50 mb-5">
+                            <table className="report-table">
+                                <thead>
+                                    <tr>
+                                        <th>항목</th>
+                                        <th>예상 금액</th>
+                                        <th>발생 확률</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {briefing.financialImpactVaR.breakdown.map((b, i) => (
+                                        <tr key={i}>
+                                            <td className="font-medium">{b.item}</td>
+                                            <td className="font-mono text-amber-300">{b.amount}</td>
+                                            <td className="text-slate-400">{b.probability}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                    <p className="text-slate-400 text-sm leading-relaxed">{briefing.financialImpactVaR.assessment}</p>
+                </div>
+
+                {/* Section 3: Hedging Strategies */}
+                <div>
+                    <div className="report-section-bar rounded-r-lg py-3 pr-4 mb-5">
+                        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-200 to-cyan-200 flex items-center gap-2">
+                            🛡 Hedging Strategies — 파생상품 헤지 전략
+                        </h2>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {briefing.hedgingStrategies.map((h, i) => (
+                            <div key={i} className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-5 hover:border-emerald-500/40 transition-colors">
+                                <div className="text-sm font-bold text-emerald-300 mb-2">{h.strategy}</div>
+                                <div className="space-y-2 text-[11px]">
+                                    <div className="flex items-start gap-2">
+                                        <span className="text-slate-500 shrink-0 w-16">상품:</span>
+                                        <span className="text-slate-200 font-mono">{h.instrument}</span>
+                                    </div>
+                                    <div className="flex items-start gap-2">
+                                        <span className="text-slate-500 shrink-0 w-16">비율:</span>
+                                        <span className="text-amber-300 font-bold">{h.ratio}</span>
+                                    </div>
+                                    <div className="flex items-start gap-2">
+                                        <span className="text-slate-500 shrink-0 w-16">근거:</span>
+                                        <span className="text-slate-400">{h.rationale}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Section 4: Operational Directives */}
+                <div>
+                    <div className="report-section-bar rounded-r-lg py-3 pr-4 mb-5">
+                        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-violet-200 to-rose-200 flex items-center gap-2">
+                            ⚡ Operational Directives — 운영 지시사항
+                        </h2>
+                    </div>
+                    <div className="space-y-3">
+                        {briefing.operationalDirectives.map((d, i) => {
+                            const ps = priorityStyles[d.priority] || priorityStyles.SHORT_TERM;
+                            return (
+                                <div key={i} className={cn('rounded-xl border p-5', ps.bg, ps.border)}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className={cn('text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border', ps.color, ps.bg, ps.border)}>
+                                            {ps.label}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500 font-mono">→ {d.responsible}</span>
+                                    </div>
+                                    <div className={cn('text-sm font-semibold mb-1.5', ps.color)}>{d.directive}</div>
+                                    <div className="text-[11px] text-slate-400">기대 효과: {d.impact}</div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Generated timestamp */}
+                <div className="text-[10px] text-slate-600 text-right font-mono pt-4 border-t border-slate-800/50">
+                    Generated: {briefing.generatedAt} · AI Quant Strategist · Gemini Pro
+                </div>
+            </div>
+        );
+    };
 
     const handleCopy = async () => {
         try {
@@ -594,7 +749,7 @@ export default function BriefingModal({
                             </div>
                             <div>
                                 <h2 className="text-base font-bold text-slate-100 tracking-tight">
-                                    {viewMode === 'aip-report' ? '🔬 AIP 의사결정 보고서' : '📊 AI 경영진 브리핑 보고서'}
+                                    {viewMode === 'executive' ? '🧠 퀀트 전략가 브리핑' : viewMode === 'aip-report' ? '🔬 AIP 의사결정 보고서' : '📊 AI 경영진 브리핑 보고서'}
                                 </h2>
                                 <div className="flex items-center gap-2 mt-0.5">
                                     {isStreaming && (
@@ -649,6 +804,19 @@ export default function BriefingModal({
                                         )}
                                     >
                                         🔬 AIP Report
+                                    </button>
+                                )}
+                                {(executiveBriefing || isExecutiveBriefingLoading) && (
+                                    <button
+                                        onClick={() => { setViewMode('executive'); }}
+                                        className={cn(
+                                            'px-3 py-1.5 text-xs rounded-md transition-all font-medium',
+                                            viewMode === 'executive'
+                                                ? 'bg-violet-500/20 text-violet-400 shadow-sm'
+                                                : 'text-slate-400 hover:text-slate-200'
+                                        )}
+                                    >
+                                        🧠 Quant Briefing
                                     </button>
                                 )}
                             </div>
@@ -755,6 +923,75 @@ export default function BriefingModal({
                                                 <div className="flex items-center gap-2">
                                                     <Anchor size={10} className="text-cyan-600" />
                                                     <span className="font-mono">SIDECAR Maritime Command · AI-Powered Intelligence Platform</span>
+                                                </div>
+                                                <span className="font-mono">{currentDateStr} · CONFIDENTIAL</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : viewMode === 'executive' ? (
+                            /* ====== EXECUTIVE BRIEFING VIEW — QUANT STRATEGIST ====== */
+                            <div className="p-8">
+                                <div className="max-w-4xl mx-auto">
+                                    {/* Report Header */}
+                                    <div className="mb-10 pb-8 border-b border-slate-700/50">
+                                        <div className="flex items-start justify-between">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-violet-500/20 to-rose-500/20 border border-violet-500/30 flex items-center justify-center shadow-lg shadow-violet-950/20">
+                                                    <span className="text-3xl">🧠</span>
+                                                </div>
+                                                <div>
+                                                    <div className="text-[10px] uppercase tracking-[0.2em] text-violet-400/70 font-semibold mb-1">AI Quant Strategist</div>
+                                                    <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 tracking-tight">
+                                                        AIP Executive Briefing
+                                                    </h1>
+                                                </div>
+                                            </div>
+                                            <div className="text-right space-y-1">
+                                                <div className="flex items-center gap-1.5 text-[10px] text-amber-400/80">
+                                                    <Shield size={10} />
+                                                    <span className="font-bold uppercase tracking-wider">Confidential</span>
+                                                </div>
+                                                <div className="text-[11px] text-slate-500 font-mono">{currentDateStr}</div>
+                                                <div className="text-[10px] text-violet-500/70 font-mono">Gemini Pro · T=0.2</div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-5 h-px bg-gradient-to-r from-violet-500/40 via-rose-500/20 to-transparent rounded-full" />
+                                    </div>
+
+                                    {/* Body */}
+                                    <div className="prose prose-invert max-w-none">
+                                        {isExecutiveBriefingLoading ? (
+                                            <div className="space-y-6">
+                                                <SkeletonLoader variant="kpi" />
+                                                <SkeletonLoader variant="list" lines={5} />
+                                                <SkeletonLoader variant="list" lines={4} />
+                                                <SkeletonLoader variant="list" lines={3} />
+                                            </div>
+                                        ) : executiveBriefing ? (
+                                            <>
+                                                {renderExecutiveBriefing(executiveBriefing)}
+                                                <StrategicActionPanel briefing={executiveBriefing} />
+                                            </>
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center h-[50vh] text-slate-500">
+                                                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 flex items-center justify-center mb-5 shadow-xl">
+                                                    <span className="text-4xl">🧠</span>
+                                                </div>
+                                                <p className="text-base font-medium text-slate-400">퀀트 전략가 브리핑이 생성되면 여기에 표시됩니다</p>
+                                                <p className="text-sm mt-2 text-slate-600">시나리오 빌더에서 '🧠 AIP 퀀트 브리핑' 버튼을 클릭하세요</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Footer */}
+                                    {executiveBriefing && !isExecutiveBriefingLoading && (
+                                        <div className="mt-12 pt-6 border-t border-slate-700/50">
+                                            <div className="flex items-center justify-between text-[10px] text-slate-600">
+                                                <div className="flex items-center gap-2">
+                                                    <Anchor size={10} className="text-violet-600" />
+                                                    <span className="font-mono">SIDECAR Maritime Command · AI Quant Strategist Engine</span>
                                                 </div>
                                                 <span className="font-mono">{currentDateStr} · CONFIDENTIAL</span>
                                             </div>

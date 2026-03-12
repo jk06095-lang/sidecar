@@ -41,7 +41,7 @@ import {
     type DocumentData
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Scenario, SimulationParams, AppSettings } from '../types';
+import type { Scenario, SimulationParams, AppSettings, StrategicDecision } from '../types';
 
 // ============================================================
 // DEBOUNCE UTILITY — Prevent rapid Firestore writes
@@ -323,4 +323,46 @@ export async function migrateLocalStorageToFirestore(): Promise<void> {
     } catch (err) {
         console.warn('[Firestore] Migration failed (will retry next visit):', err);
     }
+}
+
+// ============================================================
+// STRATEGIC DECISIONS — Sub-collection: app/strategic_decisions/{id}
+// Module 4: C-Level executive action approval records.
+// No debounce — executive actions require instant persistence.
+// ============================================================
+
+export async function saveStrategicDecision(decision: StrategicDecision): Promise<void> {
+    // Instant localStorage cache
+    try {
+        const existing = JSON.parse(localStorage.getItem('sidecar_strategic_decisions') || '[]') as StrategicDecision[];
+        const updated = [decision, ...existing.filter(d => d.id !== decision.id)];
+        localStorage.setItem('sidecar_strategic_decisions', JSON.stringify(updated));
+    } catch { /* ignore */ }
+
+    // Direct Firestore write (no debounce for executive actions)
+    try {
+        await setDoc(doc(db, 'app', 'strategic_decisions', decision.id), {
+            ...decision,
+            updatedAt: serverTimestamp(),
+        });
+        console.info(`[Firestore] Strategic decision saved: ${decision.id}`);
+    } catch (err) {
+        console.warn(`[Firestore] saveStrategicDecision failed:`, err);
+    }
+}
+
+export async function loadStrategicDecisions(): Promise<StrategicDecision[]> {
+    try {
+        const snap = await getDocs(collection(db, 'app', 'strategic_decisions'));
+        if (!snap.empty) {
+            return snap.docs.map(d => ({ id: d.id, ...d.data() } as StrategicDecision));
+        }
+    } catch (err) {
+        console.warn('[Firestore] loadStrategicDecisions failed:', err);
+    }
+    // Fallback to localStorage
+    try {
+        const raw = localStorage.getItem('sidecar_strategic_decisions');
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
 }

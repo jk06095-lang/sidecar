@@ -134,6 +134,39 @@ export function getLSEGDailyUsage(): { count: number; limit: number; remaining: 
 }
 
 // ============================================================
+// ADAPTIVE CACHE TTL — Cost-Aware Dynamic Throttling
+// ============================================================
+
+export type LSEGUsageTier = 'normal' | 'moderate' | 'elevated' | 'critical';
+
+/**
+ * Returns the current usage tier based on daily request count.
+ * External consumers can use this to display usage health.
+ */
+export function getLSEGUsageTier(): { tier: LSEGUsageTier; multiplier: number; usagePercent: number } {
+    const { count } = getLSEGDailyUsage();
+    const usagePercent = Math.round((count / DAILY_SOFT_CAP) * 100);
+
+    if (usagePercent >= 90) return { tier: 'critical', multiplier: 8, usagePercent };
+    if (usagePercent >= 75) return { tier: 'elevated', multiplier: 4, usagePercent };
+    if (usagePercent >= 50) return { tier: 'moderate', multiplier: 2, usagePercent };
+    return { tier: 'normal', multiplier: 1, usagePercent };
+}
+
+/**
+ * Computes an adaptive cache TTL based on current daily API usage.
+ * As usage increases, cache lifetime extends to reduce outgoing requests.
+ *   - 0–50%  usage → base TTL (e.g. 2h)
+ *   - 50–75% usage → 2× base TTL
+ *   - 75–90% usage → 4× base TTL
+ *   - 90%+   usage → 8× base TTL
+ */
+function getAdaptiveCacheTtl(baseTtlSeconds: number): number {
+    const { multiplier } = getLSEGUsageTier();
+    return baseTtlSeconds * multiplier;
+}
+
+// ============================================================
 // REQUEST QUEUE — Sequential, 1 req/sec throttle
 // ============================================================
 
@@ -259,12 +292,15 @@ async function executeRequest(options: LSEGRequestOptions): Promise<LSEGResponse
  * All requests go through the sequential queue (max 1/sec).
  */
 export function lsegRequest<T = unknown>(options: LSEGRequestOptions): Promise<LSEGResponse<T>> {
+    // Apply adaptive cache TTL based on daily usage tier
+    const effectiveTtl = getAdaptiveCacheTtl(options.cacheTtlSeconds ?? DEFAULT_CACHE_TTL_S);
+
     // 1. Check cache first (unless skipped)
     if (!options.skipCache) {
         const cacheKey = getCacheKey(options.endpoint, options.params);
-        const cached = getFromCache<T>(cacheKey, options.cacheTtlSeconds ?? DEFAULT_CACHE_TTL_S);
+        const cached = getFromCache<T>(cacheKey, effectiveTtl);
         if (cached) {
-            console.debug(`[LSEG] Cache hit for ${options.endpoint}`);
+            console.debug(`[LSEG] Cache hit for ${options.endpoint} (adaptive TTL: ${effectiveTtl}s)`);
             return Promise.resolve(cached);
         }
     }

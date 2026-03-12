@@ -13,6 +13,8 @@ import type {
     IntelArticle,
     BEVIState,
     BEVIHistoryEntry,
+    QuantMetrics,
+    AIPExecutiveBriefing,
 } from '../types';
 import { computeScenarioBranch } from '../lib/utils';
 import {
@@ -323,6 +325,218 @@ function mapOntologyToInsuranceCirculars(objects: OntologyObject[]): InsuranceCi
 
 
 // ============================================================
+// QUANT-ONTOLOGY DERIVED STATE ENGINE (Module 2)
+// ============================================================
+
+interface DerivedRiskUpdate {
+    objectId: string;
+    property: string;
+    value: string | number | boolean;
+}
+
+/**
+ * Cross-references LSEG QuantMetrics (market anomalies) with physical fleet data
+ * to compute derived risk states:
+ * - bunkerCostRisk: 'High' when VLSFO Z-Score signals anomaly AND vessel is on long voyage
+ * - estimatedMargin: decreases when BDI/SCFI Z-Scores are negative (freight rate decline)
+ * - riskScore: adjusted upward for vessels linked to risk-alerted market indicators
+ */
+function computeDerivedRiskStates(
+    objects: OntologyObject[],
+    quantMetrics: Record<string, QuantMetrics>,
+    links: OntologyLink[],
+): DerivedRiskUpdate[] {
+    const updates: DerivedRiskUpdate[] = [];
+
+    const vlsfoMetrics = quantMetrics['VLSFO380'];
+    const bdiMetrics = quantMetrics['BADI'];
+    const scfiMetrics = quantMetrics['SCFI'];
+    const brentMetrics = quantMetrics['LCOc1'];
+
+    // Build a linkage map: objectId → set of linked objectIds
+    const linkMap = new Map<string, Set<string>>();
+    for (const link of links) {
+        if (!linkMap.has(link.sourceId)) linkMap.set(link.sourceId, new Set());
+        if (!linkMap.has(link.targetId)) linkMap.set(link.targetId, new Set());
+        linkMap.get(link.sourceId)!.add(link.targetId);
+        linkMap.get(link.targetId)!.add(link.sourceId);
+    }
+
+    // Identify which market indicator ontology objects have riskAlert
+    const alertedMarketIds = new Set<string>();
+    for (const obj of objects) {
+        if (obj.type === 'Commodity' || obj.type === 'Market') {
+            // Check if any quant metric associated with this object has riskAlert
+            const ric = String(obj.properties.ric || obj.properties.symbol || '');
+            if (ric && quantMetrics[ric]?.riskAlert) {
+                alertedMarketIds.add(obj.id);
+            }
+        }
+    }
+
+    const vessels = objects.filter(o => o.type === 'Vessel' && o.metadata.status === 'active');
+
+    for (const vessel of vessels) {
+        const planDays = Number(vessel.properties.planDays || 0);
+        const sailedDays = Number(vessel.properties.sailedDays || 0);
+        const currentRisk = Number(vessel.properties.riskScore || 0);
+        const isLongVoyage = planDays > 20 || sailedDays > 15;
+
+        // ── Bunker Cost Risk ──
+        // VLSFO price anomaly + long voyage = high bunker cost exposure
+        if (vlsfoMetrics?.riskAlert || brentMetrics?.riskAlert) {
+            if (isLongVoyage) {
+                updates.push({ objectId: vessel.id, property: 'bunkerCostRisk', value: 'High' });
+                // Boost risk score for fuel-exposed vessels
+                const fuelRiskBoost = Math.min(20, Math.abs(vlsfoMetrics?.zScore || brentMetrics?.zScore || 0) * 5);
+                if (currentRisk + fuelRiskBoost > currentRisk) {
+                    updates.push({ objectId: vessel.id, property: 'riskScore', value: Math.min(100, Math.round(currentRisk + fuelRiskBoost)) });
+                }
+            } else {
+                updates.push({ objectId: vessel.id, property: 'bunkerCostRisk', value: 'Medium' });
+            }
+        } else {
+            updates.push({ objectId: vessel.id, property: 'bunkerCostRisk', value: 'Low' });
+        }
+
+        // ── Estimated Margin ──
+        // Freight index decline (negative Z-Score) → margin squeeze
+        const freightZScore = bdiMetrics?.zScore ?? scfiMetrics?.zScore ?? 0;
+        const baseMargin = Number(vessel.properties.estimatedMargin || 15); // default 15%
+        let adjustedMargin = baseMargin;
+
+        if (freightZScore < -1.0) {
+            // Significant freight decline: reduce margin proportionally
+            adjustedMargin = Math.max(0, baseMargin + freightZScore * 3); // each Z-unit = ~3% margin impact
+        } else if (freightZScore > 1.0) {
+            // Freight surge: margin improvement
+            adjustedMargin = Math.min(40, baseMargin + freightZScore * 2);
+        }
+        updates.push({ objectId: vessel.id, property: 'estimatedMargin', value: Math.round(adjustedMargin * 10) / 10 });
+
+        // ── Risk propagation via ontology links ──
+        // If this vessel is linked to an alerted market indicator, boost its riskScore
+        const linkedIds = linkMap.get(vessel.id);
+        if (linkedIds) {
+            const linkedAlertCount = [...linkedIds].filter(id => alertedMarketIds.has(id)).length;
+            if (linkedAlertCount > 0) {
+                const linkBoost = Math.min(15, linkedAlertCount * 8);
+                const existingRisk = Number(vessel.properties.riskScore || 0);
+                updates.push({
+                    objectId: vessel.id,
+                    property: 'riskScore',
+                    value: Math.min(100, Math.round(existingRisk + linkBoost)),
+                });
+            }
+        }
+    }
+
+    return updates;
+}
+
+// ============================================================
+// HIGH-RISK VESSEL SELECTOR (Module 2)
+// ============================================================
+
+export interface HighRiskVesselEntry {
+    vessel: OntologyObject;
+    exposedRisks: {
+        ric: string;
+        zScore: number;
+        metric: string; // e.g. 'VLSFO Price Anomaly', 'BDI Decline'
+    }[];
+    bunkerCostRisk: string;
+    estimatedMargin: number;
+}
+
+function selectHighRiskVesselsFromState(
+    objects: OntologyObject[],
+    links: OntologyLink[],
+    quantMetrics: Record<string, QuantMetrics>,
+): HighRiskVesselEntry[] {
+    const alertedRics = Object.entries(quantMetrics)
+        .filter(([, m]) => m.riskAlert)
+        .map(([ric, m]) => ({ ric, zScore: m.zScore }));
+
+    if (alertedRics.length === 0) return [];
+
+    // Map metric RIC to human-readable name
+    const metricNames: Record<string, string> = {
+        'LCOc1': 'Brent Crude Anomaly',
+        'VLSFO380': 'VLSFO Bunker Price Anomaly',
+        'BADI': 'Baltic Dry Index Anomaly',
+        'SCFI': 'SCFI Container Freight Anomaly',
+        'KRW=': 'USD/KRW Exchange Rate Anomaly',
+    };
+
+    // Find market/commodity objects that correspond to alerted RICs
+    const alertedObjectIds = new Set<string>();
+    for (const obj of objects) {
+        const ric = String(obj.properties.ric || obj.properties.symbol || '');
+        if (ric && quantMetrics[ric]?.riskAlert) {
+            alertedObjectIds.add(obj.id);
+        }
+    }
+
+    // Build linkage: find vessels connected to alerted objects
+    const vesselRiskMap = new Map<string, Set<string>>(); // vesselId → set of alerted objectIds
+    for (const link of links) {
+        if (alertedObjectIds.has(link.sourceId)) {
+            const target = objects.find(o => o.id === link.targetId);
+            if (target?.type === 'Vessel') {
+                if (!vesselRiskMap.has(target.id)) vesselRiskMap.set(target.id, new Set());
+                vesselRiskMap.get(target.id)!.add(link.sourceId);
+            }
+        }
+        if (alertedObjectIds.has(link.targetId)) {
+            const source = objects.find(o => o.id === link.sourceId);
+            if (source?.type === 'Vessel') {
+                if (!vesselRiskMap.has(source.id)) vesselRiskMap.set(source.id, new Set());
+                vesselRiskMap.get(source.id)!.add(link.targetId);
+            }
+        }
+    }
+
+    // Also include all vessels if critical market-wide alerts exist (VLSFO/BDI affect entire fleet)
+    const fleetWideAlerts = alertedRics.filter(r => ['VLSFO380', 'BADI', 'SCFI'].includes(r.ric));
+    if (fleetWideAlerts.length > 0) {
+        const allVessels = objects.filter(o => o.type === 'Vessel' && o.metadata.status === 'active');
+        for (const v of allVessels) {
+            if (!vesselRiskMap.has(v.id)) vesselRiskMap.set(v.id, new Set());
+        }
+    }
+
+    // Build results
+    const results: HighRiskVesselEntry[] = [];
+    for (const [vesselId] of vesselRiskMap) {
+        const vessel = objects.find(o => o.id === vesselId);
+        if (!vessel) continue;
+
+        const exposedRisks = alertedRics.map(({ ric, zScore }) => ({
+            ric,
+            zScore,
+            metric: metricNames[ric] || `${ric} Anomaly`,
+        }));
+
+        results.push({
+            vessel,
+            exposedRisks,
+            bunkerCostRisk: String(vessel.properties.bunkerCostRisk || 'Unknown'),
+            estimatedMargin: Number(vessel.properties.estimatedMargin || 0),
+        });
+    }
+
+    // Sort by highest combined Z-score exposure
+    results.sort((a, b) => {
+        const aMax = Math.max(...a.exposedRisks.map(r => Math.abs(r.zScore)));
+        const bMax = Math.max(...b.exposedRisks.map(r => Math.abs(r.zScore)));
+        return bMax - aMax;
+    });
+
+    return results;
+}
+
+// ============================================================
 // STORE INTERFACE
 // ============================================================
 
@@ -347,6 +561,7 @@ interface OntologyState {
     lsegDataSource: 'live' | 'demo';
     lsegIsLoading: boolean;
     lsegMarketQuotes: MarketQuote[];
+    lsegQuantMetrics: Record<string, QuantMetrics>;
     newsRiskBoost: number;
 
     // ---- Scenario Branching ----
@@ -405,6 +620,16 @@ interface OntologyState {
     selectInsuranceCirculars: () => InsuranceCircular[];
     selectObjectsByType: (type: OntologyObjectType) => OntologyObject[];
     selectLinksForObject: (objectId: string) => OntologyLink[];
+
+    // ---- Quant-Ontology Selectors (Module 2) ----
+    selectHighRiskVessels: () => HighRiskVesselEntry[];
+
+    // ---- Module 3: Executive Briefing State ----
+    executiveBriefing: AIPExecutiveBriefing | null;
+    isExecutiveBriefingLoading: boolean;
+    showExecutiveBriefingModal: boolean;
+    requestExecutiveBriefing: () => Promise<void>;
+    clearExecutiveBriefing: () => void;
 }
 
 // ============================================================
@@ -443,7 +668,13 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         lsegDataSource: 'demo' as const,
         lsegIsLoading: false,
         lsegMarketQuotes: [],
+        lsegQuantMetrics: {} as Record<string, QuantMetrics>,
         newsRiskBoost: 0,
+
+        // ---- Module 3: Executive Briefing ----
+        executiveBriefing: null as AIPExecutiveBriefing | null,
+        isExecutiveBriefingLoading: false,
+        showExecutiveBriefingModal: false,
 
         // ---- Graph Actions (with BEVI recalc) ----
         addObject: (obj) => {
@@ -688,6 +919,38 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         store.updateObjectProperty('currency-krw', 'baseRate', quote.price);
                     }
                 }
+
+                // ── Module 2: Bind QuantMetrics & propagate derived risk ──
+                if (result.quantMetrics && Object.keys(result.quantMetrics).length > 0) {
+                    set({ lsegQuantMetrics: result.quantMetrics });
+
+                    // Compute derived risk states from quant + physical data
+                    const currentObjects = get().objects;
+                    const currentLinks = get().links;
+                    const derivedUpdates = computeDerivedRiskStates(
+                        currentObjects, result.quantMetrics, currentLinks,
+                    );
+
+                    // Apply derived risk updates to ontology objects
+                    if (derivedUpdates.length > 0) {
+                        set((state) => {
+                            let updatedObjects = [...state.objects];
+                            for (const update of derivedUpdates) {
+                                updatedObjects = updatedObjects.map(o =>
+                                    o.id === update.objectId
+                                        ? {
+                                            ...o,
+                                            properties: { ...o.properties, [update.property]: update.value },
+                                            metadata: { ...o.metadata, updatedAt: new Date().toISOString() },
+                                        }
+                                        : o,
+                                );
+                            }
+                            return { objects: updatedObjects };
+                        });
+                        console.log(`[OntologyStore] 🔗 Applied ${derivedUpdates.length} derived risk updates from QuantMetrics`);
+                    }
+                }
             } catch (err) {
                 console.error('[OntologyStore] fetchAndBindMarketData failed:', err);
                 set({ lsegDataSource: 'demo', lsegIsLoading: false });
@@ -820,6 +1083,61 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         selectObjectsByType: (type) => get().objects.filter((o) => o.type === type),
         selectLinksForObject: (objectId) =>
             get().links.filter((l) => l.sourceId === objectId || l.targetId === objectId),
+
+        // ---- Quant-Ontology Selectors (Module 2) ----
+        selectHighRiskVessels: () => {
+            const state = get();
+            return selectHighRiskVesselsFromState(state.objects, state.links, state.lsegQuantMetrics);
+        },
+
+        // ---- Module 3: Executive Briefing Actions ----
+        requestExecutiveBriefing: async () => {
+            const state = get();
+            if (state.isExecutiveBriefingLoading) return;
+
+            // Read API key from settings
+            let apiKey = '';
+            try {
+                const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
+                apiKey = settings.apiKey || '';
+            } catch { /* ignore */ }
+
+            if (!apiKey) {
+                console.warn('[OntologyStore] Executive briefing requires API key');
+                return;
+            }
+
+            set({
+                isExecutiveBriefingLoading: true,
+                showExecutiveBriefingModal: true,
+                executiveBriefing: null,
+            });
+
+            try {
+                const { generateAIPExecutiveBriefing } = await import('../services/geminiService');
+                const briefing = await generateAIPExecutiveBriefing(
+                    apiKey,
+                    {
+                        objects: state.objects,
+                        links: state.links,
+                        quantMetrics: state.lsegQuantMetrics,
+                    },
+                    state.simulationParams,
+                    state.dynamicFleetData,
+                );
+                set({ executiveBriefing: briefing, isExecutiveBriefingLoading: false });
+                console.log('[OntologyStore] 🧠 Executive briefing generated successfully');
+            } catch (err) {
+                console.error('[OntologyStore] Executive briefing generation failed:', err);
+                set({ isExecutiveBriefingLoading: false });
+            }
+        },
+
+        clearExecutiveBriefing: () => set({
+            executiveBriefing: null,
+            isExecutiveBriefingLoading: false,
+            showExecutiveBriefingModal: false,
+        }),
     };
 });
 

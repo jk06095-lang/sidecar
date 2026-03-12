@@ -294,3 +294,77 @@ export interface BEVIState {
   history: BEVIHistoryEntry[];         // max 50 entries
   lastCalculatedAt: string;
 }
+
+// ============================================================
+// QUANT PREPROCESSING METRICS (Module 1)
+// ============================================================
+
+/** Quant preprocessing metrics — auto-calculated from time-series data */
+export interface QuantMetrics {
+  /** 20-day Simple Moving Average */
+  sma20: number;
+  /** 30-day historical volatility (annualized standard deviation) */
+  volatility30d: number;
+  /** Z-Score: how many std-devs current price deviates from SMA20 */
+  zScore: number;
+  /** true when |zScore| > 2.0 — signals market anomaly */
+  riskAlert: boolean;
+  /** Momentum indicator: currentPrice / SMA20 ratio (>1 = bullish, <1 = bearish) */
+  momentum: number;
+  /** ISO timestamp of last calculation */
+  lastCalculatedAt: string;
+}
+
+// ============================================================
+// AIP EXECUTIVE BRIEFING — Structured JSON output from AI Quant Strategist (Module 3)
+// ============================================================
+
+export interface AIPExecutiveBriefing {
+  /** Quant-based market crisis assessment */
+  marketOutlook: {
+    summary: string;
+    keyMetrics: { label: string; value: string; trend: 'up' | 'down' | 'stable' | 'critical' }[];
+  };
+  /** Fleet-wide Value-at-Risk (VaR) and financial exposure */
+  financialImpactVaR: {
+    totalVaR: string;
+    breakdown: { item: string; amount: string; probability: string }[];
+    assessment: string;
+  };
+  /** Derivative hedging recommendations with specific ratios */
+  hedgingStrategies: {
+    strategy: string;
+    instrument: string;
+    ratio: string;
+    rationale: string;
+  }[];
+  /** Priority-coded operational directives */
+  operationalDirectives: {
+    priority: 'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM';
+    directive: string;
+    responsible: string;
+    impact: string;
+  }[];
+  /** ISO timestamp of generation */
+  generatedAt: string;
+}
+
+// ============================================================
+// STRATEGIC DECISION — C-Level approved action record (Module 4)
+// ============================================================
+
+export interface StrategicDecision {
+  id: string;
+  type: 'HEDGING' | 'OPERATIONAL';
+  title: string;
+  detail: string;
+  /** Auto-generated department-specific directive message */
+  departmentMessage: string;
+  targetDepartment: string;
+  approver: string;
+  status: 'PENDING' | 'APPROVED' | 'EXECUTED';
+  /** LSEG quant metrics snapshot as evidence */
+  lsegEvidence: Record<string, unknown>;
+  executedAt: string;
+  scenarioName: string;
+}

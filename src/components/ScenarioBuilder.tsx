@@ -3,11 +3,12 @@ import {
     Activity, Save, Sparkles, Fuel, AlertTriangle,
     Shield, TrendingUp, Box, Database, Network, Copy, Trash2, Edit2, Check, X,
     Flame, CloudLightning, Wifi, Globe2, Package, Zap, GitBranch, Play,
-    Plus, Search, ChevronRight, ChevronDown, Minus, RotateCcw
+    Plus, Search, ChevronRight, ChevronDown, Minus, RotateCcw, Loader2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario, SimulationParams, AppSettings } from '../types';
 import LogicMapCanvas from './widgets/LogicMapCanvas';
+import BriefingModal from './BriefingModal';
 import { useOntologyStore } from '../store/ontologyStore';
 import {
     SCENARIO_VARIABLE_CATALOG,
@@ -58,6 +59,15 @@ export default function ScenarioBuilder({
     const createScenarioBranch = useOntologyStore((s) => s.createScenarioBranch);
     const clearScenarioBranch = useOntologyStore((s) => s.clearScenarioBranch);
     const scenarioBranch = useOntologyStore((s) => s.scenarioBranch);
+
+    // Module 3: Executive Briefing state from Zustand
+    const requestExecutiveBriefing = useOntologyStore((s) => s.requestExecutiveBriefing);
+    const clearExecutiveBriefing = useOntologyStore((s) => s.clearExecutiveBriefing);
+    const executiveBriefing = useOntologyStore((s) => s.executiveBriefing);
+    const isExecutiveBriefingLoading = useOntologyStore((s) => s.isExecutiveBriefingLoading);
+    const showExecutiveBriefingModal = useOntologyStore((s) => s.showExecutiveBriefingModal);
+    const ontologyObjects = useOntologyStore((s) => s.objects);
+    const ontologyLinks = useOntologyStore((s) => s.links);
 
     const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
@@ -297,6 +307,22 @@ export default function ScenarioBuilder({
                             <p className="text-[11px] text-slate-500 mt-0.5 max-w-[500px] truncate">{activeScenario.description}</p>
                         </div>
                         <div className="flex items-center gap-2">
+                            <button
+                                onClick={requestExecutiveBriefing}
+                                disabled={isExecutiveBriefingLoading}
+                                className={cn(
+                                    'flex items-center gap-2 px-4 py-2 text-[11px] font-bold rounded-lg transition-all whitespace-nowrap',
+                                    isExecutiveBriefingLoading
+                                        ? 'bg-violet-900/30 border border-violet-700/30 text-violet-400 cursor-wait'
+                                        : 'bg-gradient-to-r from-violet-600 to-rose-600 hover:from-violet-500 hover:to-rose-500 text-white shadow-lg shadow-violet-900/20'
+                                )}
+                            >
+                                {isExecutiveBriefingLoading ? (
+                                    <><Loader2 size={13} className="animate-spin" /> 퀀트 분석 중...</>
+                                ) : (
+                                    <><Sparkles size={13} /> 🧠 AIP 퀀트 브리핑</>
+                                )}
+                            </button>
                             <span className="text-[10px] text-slate-500 bg-zinc-800/60 px-2 py-1 rounded font-mono">{activeVariableIds.length} vars</span>
                             <button
                                 onClick={() => {
@@ -420,6 +446,17 @@ export default function ScenarioBuilder({
                     </div>
                 </div>
             </div>
+
+            {/* Module 3: Executive Briefing Modal */}
+            <BriefingModal
+                isOpen={showExecutiveBriefingModal}
+                onClose={clearExecutiveBriefing}
+                marpContent=""
+                executiveBriefing={executiveBriefing}
+                isExecutiveBriefingLoading={isExecutiveBriefingLoading}
+                ontologyObjects={ontologyObjects}
+                ontologyLinks={ontologyLinks}
+            />
         </div>
     );
 }

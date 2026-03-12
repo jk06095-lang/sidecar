@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import type { SimulationParams, FleetVessel, Scenario, OntologyObject, OntologyLink } from '../types';
+import type { SimulationParams, FleetVessel, Scenario, OntologyObject, OntologyLink, QuantMetrics, AIPExecutiveBriefing } from '../types';
 
 export const LOADING_MESSAGES = [
     '보안 해양 온톨로지에 연결 중...',
@@ -575,5 +575,210 @@ JSON 응답만 반환:
             riskLevel: 'High',
             impactSummary: 'Pro 분석 응답 파싱 실패',
         };
+    }
+}
+
+
+// ============================================================
+// MODULE 3: AIP EXECUTIVE BRIEFING — Quant Strategist Engine
+// Generates structured JSON with hedging strategies, VaR, and
+// operational directives. Temperature 0.2 for cold analysis.
+// ============================================================
+
+export const EXECUTIVE_BRIEFING_LOADING_MESSAGES = [
+    '퀀트 전략가 AI 초기화 중...',
+    '온톨로지 + LSEG 퀀트 데이터 결합 분석 중...',
+    '선대 VaR 노출도 계산 중...',
+    '파생상품 헤지 비율 최적화 중...',
+    '운영 지시사항 도출 중...',
+    '경영진 브리핑 JSON 생성 중...',
+];
+
+export async function generateAIPExecutiveBriefing(
+    apiKey: string,
+    ontologyState: {
+        objects: OntologyObject[];
+        links: OntologyLink[];
+        quantMetrics: Record<string, QuantMetrics>;
+    },
+    scenarioParams: SimulationParams,
+    fleetData?: FleetVessel[],
+): Promise<AIPExecutiveBriefing> {
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Build compact context for the AI
+    const highRiskObjects = ontologyState.objects.filter(
+        o => (o.properties.riskScore as number) >= 40 && o.metadata.status === 'active'
+    );
+
+    const vessels = ontologyState.objects.filter(o => o.type === 'Vessel');
+    const vesselSummaries = vessels.slice(0, 15).map(v => ({
+        name: v.title,
+        riskScore: v.properties.riskScore,
+        bunkerCostRisk: v.properties.bunkerCostRisk || 'Unknown',
+        estimatedMargin: v.properties.estimatedMargin || 'N/A',
+        planDays: v.properties.planDays,
+        sailedDays: v.properties.sailedDays,
+    }));
+
+    const quantSummary = Object.entries(ontologyState.quantMetrics).map(([ric, m]) => ({
+        ric,
+        sma20: m.sma20,
+        volatility30d: m.volatility30d,
+        zScore: m.zScore,
+        riskAlert: m.riskAlert,
+        momentum: m.momentum,
+    }));
+
+    const riskAlerts = quantSummary.filter(q => q.riskAlert);
+
+    const context = {
+        analysisType: 'EXECUTIVE_QUANT_BRIEFING',
+        timestamp: new Date().toISOString(),
+        scenarioParameters: {
+            vlsfoPrice: scenarioParams.vlsfoPrice,
+            newsSentimentScore: scenarioParams.newsSentimentScore,
+            awrpRate: scenarioParams.awrpRate,
+            interestRate: scenarioParams.interestRate,
+            supplyChainStress: scenarioParams.supplyChainStress,
+            cyberThreatLevel: scenarioParams.cyberThreatLevel,
+        },
+        quantMetrics: quantSummary,
+        activeRiskAlerts: riskAlerts,
+        fleetSummary: {
+            totalVessels: vessels.length,
+            vesselDetails: vesselSummaries,
+        },
+        highRiskNodes: highRiskObjects.slice(0, 20).map(o => ({
+            id: o.id, type: o.type, title: o.title,
+            riskScore: o.properties.riskScore,
+            keyProps: Object.fromEntries(
+                Object.entries(o.properties).filter(([k]) => !['riskScore'].includes(k)).slice(0, 5)
+            ),
+        })),
+        ontologyStats: {
+            totalObjects: ontologyState.objects.length,
+            totalLinks: ontologyState.links.length,
+        },
+    };
+
+    const systemPrompt = `너는 글로벌 해운사의 수석 퀀트 전략가(Chief Quant Strategist)다.
+제공된 온톨로지 그래프 상태, LSEG 퀀트 메트릭스(SMA, Volatility, Z-Score), 그리고 시나리오 파라미터를 분석하여
+최고경영진(CEO, CFO, COO)에게 즉각적인 조치사항을 보고하라.
+
+## 응답 규칙:
+1. 반드시 순수 JSON으로만 응답하라. 마크다운 코드블럭(\`\`\`)을 절대 사용하지 말라.
+2. 제공된 데이터의 실제 수치를 근거로 분석하라. 임의 수치 사용 금지.
+3. 모든 텍스트는 한국어로 작성하되, 금융 전문 용어는 영문 병기.
+4. 헤지 전략에는 구체적인 파생상품명과 비율을 포함하라.
+5. VaR은 시나리오별 구체적 금액(USD)으로 산출하라.
+
+## JSON 스키마:
+{
+  "marketOutlook": {
+    "summary": "퀀트 수치 기반 위기 상황 요약 (3-5문장)",
+    "keyMetrics": [
+      { "label": "지표명", "value": "수치와 단위", "trend": "up|down|stable|critical" }
+    ]
+  },
+  "financialImpactVaR": {
+    "totalVaR": "선대 전체 예상 최대 손실액 (95% 신뢰구간)",
+    "breakdown": [
+      { "item": "비용 항목", "amount": "금액 (USD)", "probability": "발생 확률" }
+    ],
+    "assessment": "재무적 리스크 종합 평가 (2-3문장)"
+  },
+  "hedgingStrategies": [
+    {
+      "strategy": "Capesize FFA 매도 헤지",
+      "instrument": "Baltic Capesize 5TC FFA Q2 2026",
+      "ratio": "선대 운임 노출의 30%",
+      "rationale": "BDI Z-Score 기반 운임 하락 방어 근거"
+    }
+  ],
+  "operationalDirectives": [
+    {
+      "priority": "IMMEDIATE|SHORT_TERM|MEDIUM_TERM",
+      "directive": "구체적 운영 지시",
+      "responsible": "담당 부서/직책",
+      "impact": "기대 효과"
+    }
+  ],
+  "generatedAt": "ISO timestamp"
+}
+
+분석할 데이터:`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            config: {
+                temperature: 0.2,
+            },
+            contents: [
+                {
+                    role: 'user',
+                    parts: [{ text: `${systemPrompt}\n\n${JSON.stringify(context, null, 2)}` }],
+                },
+            ],
+        });
+
+        const text = response.text || '';
+
+        // Parse JSON — handle potential code fence wrapping
+        let jsonStr = text.trim();
+        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+        jsonStr = jsonStr.trim();
+
+        const parsed = JSON.parse(jsonStr);
+
+        // Type-safe mapping with defaults
+        const briefing: AIPExecutiveBriefing = {
+            marketOutlook: {
+                summary: parsed.marketOutlook?.summary || '시장 분석 데이터 부족',
+                keyMetrics: Array.isArray(parsed.marketOutlook?.keyMetrics)
+                    ? parsed.marketOutlook.keyMetrics.map((m: any) => ({
+                        label: String(m.label || ''),
+                        value: String(m.value || ''),
+                        trend: (['up', 'down', 'stable', 'critical'].includes(m.trend) ? m.trend : 'stable') as 'up' | 'down' | 'stable' | 'critical',
+                    }))
+                    : [],
+            },
+            financialImpactVaR: {
+                totalVaR: parsed.financialImpactVaR?.totalVaR || 'N/A',
+                breakdown: Array.isArray(parsed.financialImpactVaR?.breakdown)
+                    ? parsed.financialImpactVaR.breakdown.map((b: any) => ({
+                        item: String(b.item || ''),
+                        amount: String(b.amount || ''),
+                        probability: String(b.probability || ''),
+                    }))
+                    : [],
+                assessment: parsed.financialImpactVaR?.assessment || '',
+            },
+            hedgingStrategies: Array.isArray(parsed.hedgingStrategies)
+                ? parsed.hedgingStrategies.map((h: any) => ({
+                    strategy: String(h.strategy || ''),
+                    instrument: String(h.instrument || ''),
+                    ratio: String(h.ratio || ''),
+                    rationale: String(h.rationale || ''),
+                }))
+                : [],
+            operationalDirectives: Array.isArray(parsed.operationalDirectives)
+                ? parsed.operationalDirectives.map((d: any) => ({
+                    priority: (['IMMEDIATE', 'SHORT_TERM', 'MEDIUM_TERM'].includes(d.priority) ? d.priority : 'SHORT_TERM') as 'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM',
+                    directive: String(d.directive || ''),
+                    responsible: String(d.responsible || ''),
+                    impact: String(d.impact || ''),
+                }))
+                : [],
+            generatedAt: parsed.generatedAt || new Date().toISOString(),
+        };
+
+        return briefing;
+    } catch (err) {
+        console.error('[GeminiService] Executive briefing generation failed:', err);
+        throw new Error(`Executive briefing 생성 실패: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
 }

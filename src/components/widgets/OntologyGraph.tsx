@@ -21,6 +21,8 @@ interface GraphNode {
     riskScore: number;
     expanded: boolean; // whether connected nodes are revealed
     visible: boolean;  // whether this node is visible in the graph
+    /** Module 2: true when this node is affected by a QuantMetrics riskAlert */
+    isQuantRiskAlert: boolean;
 }
 
 interface GraphLink {
@@ -72,6 +74,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     // Zustand store
     const storeObjects = useOntologyStore((s) => s.objects);
     const storeLinks = useOntologyStore((s) => s.links);
+    const lsegQuantMetrics = useOntologyStore((s) => s.lsegQuantMetrics);
 
     // Graph state
     const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
@@ -132,6 +135,18 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
 
             if (isSeed) seedIds.add(obj.id);
 
+            // Module 2: Check if this node is affected by a QuantMetrics riskAlert
+            let isQuantRiskAlert = false;
+            // Check direct RIC match (for Commodity/Market nodes)
+            const ric = String(obj.properties.ric || obj.properties.symbol || '');
+            if (ric && lsegQuantMetrics[ric]?.riskAlert) {
+                isQuantRiskAlert = true;
+            }
+            // Check if this vessel has bunkerCostRisk='High'
+            if (obj.type === 'Vessel' && obj.properties.bunkerCostRisk === 'High') {
+                isQuantRiskAlert = true;
+            }
+
             // Arrange seed nodes in a circle, others at random positions
             const angle = (i / storeObjects.length) * Math.PI * 2;
             const radius_spread = isSeed ? 180 : 280;
@@ -150,6 +165,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 riskScore,
                 expanded: isSeed,
                 visible: isSeed,
+                isQuantRiskAlert,
             });
         });
 
@@ -174,7 +190,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
         nodesRef.current = newNodes;
         linksRef.current = newLinks;
         setExpandedIds(seedIds);
-    }, [storeObjects, storeLinks]);
+    }, [storeObjects, storeLinks, lsegQuantMetrics]);
 
     // Sync refs
     useEffect(() => { nodesRef.current = graphNodes; }, [graphNodes]);
@@ -387,6 +403,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 node.y = Math.max(node.radius + 5, Math.min(canvas.height - node.radius - 5, node.y));
             });
 
+            // Time variable for animations (used in both links and nodes)
+            const t = timeRef.current;
+
             // ---- DRAW LINKS ----
             visibleLinks.forEach((link) => {
                 const source = visibleNodes.find((n) => n.id === link.source);
@@ -396,6 +415,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 const isHovered = hoveredLink?.id === link.id;
                 const isConnectedToSelected = selectedObjectId && (link.source === selectedObjectId || link.target === selectedObjectId);
 
+                // Module 2: Red dashed animated link between quant-risk-alerted nodes
+                const isBothQuantRisk = source.isQuantRiskAlert && target.isQuantRiskAlert;
+
                 ctx.beginPath();
                 const cp1x = source.x + (target.x - source.x) / 3;
                 const cp1y = source.y + (target.y - source.y) / 3 + 12;
@@ -404,14 +426,25 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 ctx.moveTo(source.x, source.y);
                 ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, target.x, target.y);
 
-                const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
-                const opacityMultiplier = isConnectedToSelected || isHovered ? 1 : 0.35;
-                gradient.addColorStop(0, `${source.color}${Math.round(opacityMultiplier * 200).toString(16).padStart(2, '0')}`);
-                gradient.addColorStop(1, `${target.color}${Math.round(opacityMultiplier * 200).toString(16).padStart(2, '0')}`);
+                if (isBothQuantRisk) {
+                    // Animated red dashed line for risk-linked pairs
+                    ctx.strokeStyle = `rgba(255, 23, 68, ${0.4 + Math.sin(t * 4) * 0.2})`;
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([6, 4]);
+                    ctx.lineDashOffset = -t * 30; // animated scroll
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.lineDashOffset = 0;
+                } else {
+                    const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
+                    const opacityMultiplier = isConnectedToSelected || isHovered ? 1 : 0.35;
+                    gradient.addColorStop(0, `${source.color}${Math.round(opacityMultiplier * 200).toString(16).padStart(2, '0')}`);
+                    gradient.addColorStop(1, `${target.color}${Math.round(opacityMultiplier * 200).toString(16).padStart(2, '0')}`);
 
-                ctx.strokeStyle = gradient;
-                ctx.lineWidth = Math.max(1, link.weight * 3) * (isHovered || isConnectedToSelected ? 1.5 : 1);
-                ctx.stroke();
+                    ctx.strokeStyle = gradient;
+                    ctx.lineWidth = Math.max(1, link.weight * 3) * (isHovered || isConnectedToSelected ? 1.5 : 1);
+                    ctx.stroke();
+                }
 
                 // Relation label at midpoint
                 if (isHovered || isConnectedToSelected) {
@@ -433,7 +466,31 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 const isSelected = selectedObjectId === node.id;
                 const isHovered = hoveredNode?.id === node.id;
                 const cfg = TYPE_CONFIG[node.type] || { icon: '?', baseRadius: 16 };
-                const t = timeRef.current;
+
+                // Module 2: Quant Risk Alert — Red pulse shadow (drawn BEFORE existing glow)
+                if (node.isQuantRiskAlert) {
+                    // Outer pulse ring — wide, soft red glow
+                    const outerAlpha = 0.08 + Math.sin(t * 2.5 + 1.0) * 0.07;
+                    const outerRadius = node.radius + 14 + Math.sin(t * 1.8) * 5;
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, outerRadius, 0, Math.PI * 2);
+                    const outerGlow = ctx.createRadialGradient(node.x, node.y, node.radius, node.x, node.y, outerRadius);
+                    outerGlow.addColorStop(0, `rgba(255, 23, 68, ${outerAlpha})`);
+                    outerGlow.addColorStop(1, 'rgba(255, 23, 68, 0)');
+                    ctx.fillStyle = outerGlow;
+                    ctx.fill();
+
+                    // Inner pulse ring — tighter, brighter red
+                    const innerAlpha = 0.2 + Math.sin(t * 3.5) * 0.1;
+                    const innerRadius = node.radius + 6 + Math.sin(t * 3.0 + 0.5) * 3;
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, innerRadius, 0, Math.PI * 2);
+                    const innerGlow = ctx.createRadialGradient(node.x, node.y, node.radius - 2, node.x, node.y, innerRadius);
+                    innerGlow.addColorStop(0, `rgba(255, 23, 68, ${innerAlpha})`);
+                    innerGlow.addColorStop(1, 'rgba(255, 23, 68, 0)');
+                    ctx.fillStyle = innerGlow;
+                    ctx.fill();
+                }
 
                 // Risk-based pulsing glow for high-risk nodes
                 if (node.riskScore >= 70) {

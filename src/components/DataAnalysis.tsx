@@ -123,6 +123,7 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
     // ============================================================
     const updateObjectProperty = useOntologyStore(s => s.updateObjectProperty);
     const triggerRippleEffect = useOntologyStore(s => s.triggerRippleEffect);
+    const forceRecalculateBEVI = useOntologyStore(s => s.forceRecalculateBEVI);
     const ontologyLinks = useOntologyStore(s => s.links);
     const [forceSyncing, setForceSyncing] = useState(false);
     const [terminalLog, setTerminalLog] = useState<string[]>([]);
@@ -202,6 +203,9 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
                 source: 'MANUAL_OVERRIDE',
             }));
 
+            // Force BEVI recalculation immediately (bypass 30-min gate)
+            forceRecalculateBEVI();
+
             appendLog('');
             appendLog('═══════════════════════════════════════════════════════');
             appendLog(`🎯 FORCE SYNC COMPLETE — ${proResult.ontologyUpdates.length}개 노드 갱신, 위험 수준: ${proResult.riskLevel}`);
@@ -213,7 +217,7 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
         } finally {
             setForceSyncing(false);
         }
-    }, [forceSyncing, objects, ontologyLinks, updateObjectProperty, triggerRippleEffect, appendLog]);
+    }, [forceSyncing, objects, ontologyLinks, updateObjectProperty, triggerRippleEffect, forceRecalculateBEVI, appendLog]);
 
     const saveCards = useCallback((newCards: AnalysisCard[]) => {
         setCards(newCards);

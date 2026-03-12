@@ -109,6 +109,11 @@ function calculateDynamicFleetData(params: SimulationParams, baseFleet: FleetVes
 
 const BEVI_HISTORY_MAX = 50;
 const BEVI_TREND_THRESHOLD = 1; // ±1 point = stable
+const BEVI_UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+/** Module-level dirty flag — set by any ontology mutation, flushed by interval */
+let _beviDirty = false;
+let _beviLastCalcAt = 0;
 
 /** Macro/Geo risk types — BEVI component 1 (weight 40%) */
 const MACRO_TYPES: Set<string> = new Set(['RiskFactor', 'Commodity', 'Insurance', 'MacroEvent']);
@@ -368,6 +373,8 @@ interface OntologyState {
     // ---- BEVI Actions ----
     addIntelArticles: (articles: IntelArticle[]) => void;
     recalculateBEVI: () => void;
+    forceRecalculateBEVI: () => void;
+    markBEVIDirty: () => void;
 
     // ---- Application Actions ----
     setActiveScenario: (id: string) => void;
@@ -441,7 +448,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         // ---- Graph Actions (with BEVI recalc) ----
         addObject: (obj) => {
             set((state) => ({ objects: [...state.objects, obj] }));
-            setTimeout(() => get().recalculateBEVI(), 0);
+            get().markBEVIDirty();
         },
 
         removeObject: (id) => {
@@ -449,7 +456,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 objects: state.objects.filter((o) => o.id !== id),
                 links: state.links.filter((l) => l.sourceId !== id && l.targetId !== id),
             }));
-            setTimeout(() => get().recalculateBEVI(), 0);
+            get().markBEVIDirty();
         },
 
         updateObjectProperty: (id, key, value) => {
@@ -460,9 +467,9 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         : o,
                 ),
             }));
-            // Recalc BEVI if riskScore changed
+            // Mark BEVI dirty if risk-relevant property changed
             if (key === 'riskScore' || key === 'impactValue' || key === 'congestionPct') {
-                setTimeout(() => get().recalculateBEVI(), 0);
+                get().markBEVIDirty();
             }
         },
 
@@ -512,7 +519,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
 
                 return { actionLog: newLog, objects: newObjects };
             });
-            setTimeout(() => get().recalculateBEVI(), 0);
+            get().markBEVIDirty();
         },
 
         // ---- BEVI Actions ----
@@ -524,17 +531,38 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 const merged = [...newArticles, ...state.intelArticles].slice(0, 100);
                 return { intelArticles: merged };
             });
-            setTimeout(() => get().recalculateBEVI(), 0);
+            get().markBEVIDirty();
         },
 
+        /** Mark BEVI as needing recalculation (deferred to 30-min interval) */
+        markBEVIDirty: () => {
+            _beviDirty = true;
+        },
+
+        /** Interval-gated recalculation — only runs if dirty AND 30 min elapsed */
         recalculateBEVI: () => {
+            const now = Date.now();
+            if (!_beviDirty && now - _beviLastCalcAt < BEVI_UPDATE_INTERVAL_MS) return;
+
             const state = get();
             const newBevi = deriveNewBEVI(state.bevi, state.objects, state.intelArticles);
+            _beviDirty = false;
+            _beviLastCalcAt = now;
             // Only update if value actually changed (avoids infinite loops)
             if (newBevi.value !== state.bevi.value || newBevi.topFactor !== state.bevi.topFactor) {
                 console.log(`[BEVI] 📊 ${state.bevi.value} → ${newBevi.value} (Δ${newBevi.delta > 0 ? '+' : ''}${newBevi.delta}) | ${newBevi.topFactor}`);
                 set({ bevi: newBevi });
             }
+        },
+
+        /** Bypass 30-min gate — used by Force Intelligence Sync */
+        forceRecalculateBEVI: () => {
+            const state = get();
+            const newBevi = deriveNewBEVI(state.bevi, state.objects, state.intelArticles);
+            _beviDirty = false;
+            _beviLastCalcAt = Date.now();
+            console.log(`[BEVI] ⚡ FORCE ${state.bevi.value} → ${newBevi.value} (Δ${newBevi.delta > 0 ? '+' : ''}${newBevi.delta}) | ${newBevi.topFactor}`);
+            set({ bevi: newBevi });
         },
 
         // ---- Application Actions ----
@@ -794,4 +822,14 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             get().links.filter((l) => l.sourceId === objectId || l.targetId === objectId),
     };
 });
+
+// ============================================================
+// 30-MINUTE BEVI INTERVAL TIMER
+// Periodically flushes dirty flag and recalculates BEVI.
+// ============================================================
+setInterval(() => {
+    if (_beviDirty) {
+        useOntologyStore.getState().recalculateBEVI();
+    }
+}, BEVI_UPDATE_INTERVAL_MS);
 

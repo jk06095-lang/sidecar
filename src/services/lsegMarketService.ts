@@ -105,27 +105,6 @@ export interface MarketDataResult {
 }
 
 // ============================================================
-// MOCK MARKET DATA (Last resort fallback)
-// ============================================================
-
-function getMockMarketQuotes(): MarketQuote[] {
-    const now = new Date().toISOString();
-    return [
-        { symbol: 'LCOc1', name: 'Brent Crude', nameKo: '브렌트 원유', price: 92.35, change: 1.85, changePercent: 2.04, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'CLc1', name: 'WTI Crude', nameKo: 'WTI 원유', price: 87.20, change: 1.50, changePercent: 1.75, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'NGc1', name: 'Natural Gas', nameKo: '천연가스', price: 3.85, change: 0.12, changePercent: 3.22, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'BADI', name: 'Baltic Dry Index', nameKo: 'BDI 운임', price: 1625, change: -35, changePercent: -2.11, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'KRW=', name: 'USD/KRW', nameKo: '원/달러', price: 1420, change: 5.50, changePercent: 0.39, currency: 'KRW', lastUpdated: now, source: 'Mock' },
-        { symbol: 'EUR=', name: 'EUR/USD', nameKo: '유로/달러', price: 1.0880, change: -0.0025, changePercent: -0.23, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'GCc1', name: 'Gold', nameKo: '금', price: 2180, change: 12.50, changePercent: 0.58, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'HGc1', name: 'Copper', nameKo: '구리', price: 4.15, change: 0.03, changePercent: 0.73, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: 'SIc1', name: 'Silver', nameKo: '은', price: 24.80, change: 0.35, changePercent: 1.43, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: '.SPX', name: 'S&P 500', nameKo: 'S&P 500', price: 5205, change: 22.30, changePercent: 0.43, currency: 'USD', lastUpdated: now, source: 'Mock' },
-        { symbol: '.DXY', name: 'Dollar Index', nameKo: '달러 인덱스', price: 103.85, change: 0.15, changePercent: 0.14, currency: 'USD', lastUpdated: now, source: 'Mock' },
-    ];
-}
-
-// ============================================================
 // LSEG API FETCH — Current Prices
 // ============================================================
 
@@ -313,11 +292,13 @@ export function computeQuantMetrics(
         const riskAlert = Math.abs(zScore) > 2.0;
 
         metrics[ric] = {
+            historicalPrices: closes,
             sma20: Math.round(sma20 * 100) / 100,
             volatility30d,
             zScore,
             riskAlert,
             momentum,
+            trend: (currentPrice - sma20) > sma20 * 0.005 ? 'UP' : (currentPrice - sma20) < -(sma20 * 0.005) ? 'DOWN' : 'STABLE',
             lastCalculatedAt: now,
         };
 
@@ -334,7 +315,7 @@ export function computeQuantMetrics(
 }
 
 // ============================================================
-// UNIFIED FETCH — LSEG → Yahoo → Cache → Mock
+// UNIFIED FETCH — LSEG → Yahoo → Cache (NO MOCK)
 // ============================================================
 
 /**
@@ -342,10 +323,9 @@ export function computeQuantMetrics(
  * 1. LSEG Workspace (real-time, local proxy)
  * 2. Yahoo Finance (free, CORS proxy)
  * 3. localStorage cache (last known data)
- * 4. Mock data (hardcoded last resort)
- *
- * When LSEG succeeds, automatically computes QuantMetrics
- * (SMA20, 30d volatility, Z-Score) from historical time-series data.
+ * 
+ * ⚠️ No mock data tier — if all sources fail, throws error.
+ * UI must handle error state gracefully.
  */
 export async function fetchMarketDataWithFallback(): Promise<MarketDataResult> {
     const now = new Date().toISOString();
@@ -414,14 +394,9 @@ export async function fetchMarketDataWithFallback(): Promise<MarketDataResult> {
         };
     }
 
-    // ── TIER 4: Mock data (absolute last resort) ──
-    console.log('[LSEGMarket] ⚠️ Using mock data — no data sources available');
-    return {
-        quotes: getMockMarketQuotes(),
-        source: 'mock',
-        isFallback: true,
-        lastUpdated: now,
-    };
+    // ── NO DATA — throw explicit error ──
+    console.error('[LSEGMarket] ❌ All data sources unavailable');
+    throw new Error('DATA_PIPELINE_OFFLINE: All market data sources (LSEG, Yahoo, Cache) are unavailable');
 }
 
 // ============================================================

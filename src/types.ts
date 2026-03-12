@@ -301,6 +301,8 @@ export interface BEVIState {
 
 /** Quant preprocessing metrics — auto-calculated from time-series data */
 export interface QuantMetrics {
+  /** Raw historical closing prices (real time-series) */
+  historicalPrices: number[];
   /** 20-day Simple Moving Average */
   sma20: number;
   /** 30-day historical volatility (annualized standard deviation) */
@@ -311,6 +313,8 @@ export interface QuantMetrics {
   riskAlert: boolean;
   /** Momentum indicator: currentPrice / SMA20 ratio (>1 = bullish, <1 = bearish) */
   momentum: number;
+  /** Price trend direction derived from SMA comparison */
+  trend: 'UP' | 'DOWN' | 'STABLE';
   /** ISO timestamp of last calculation */
   lastCalculatedAt: string;
 }

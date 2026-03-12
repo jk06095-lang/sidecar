@@ -562,6 +562,7 @@ interface OntologyState {
     lsegIsLoading: boolean;
     lsegMarketQuotes: MarketQuote[];
     lsegQuantMetrics: Record<string, QuantMetrics>;
+    lsegError: string | null;
     newsRiskBoost: number;
 
     // ---- Scenario Branching ----
@@ -669,6 +670,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         lsegIsLoading: false,
         lsegMarketQuotes: [],
         lsegQuantMetrics: {} as Record<string, QuantMetrics>,
+        lsegError: null as string | null,
         newsRiskBoost: 0,
 
         // ---- Module 3: Executive Briefing ----
@@ -892,6 +894,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                     lsegDataSource: source,
                     lsegIsLoading: false,
                     lsegMarketQuotes: result.quotes,
+                    lsegError: null,
                     newsRiskBoost,
                 });
 
@@ -952,8 +955,9 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                     }
                 }
             } catch (err) {
-                console.error('[OntologyStore] fetchAndBindMarketData failed:', err);
-                set({ lsegDataSource: 'demo', lsegIsLoading: false });
+                const msg = err instanceof Error ? err.message : 'Unknown market data error';
+                console.error('[OntologyStore] fetchAndBindMarketData failed:', msg);
+                set({ lsegDataSource: 'demo', lsegIsLoading: false, lsegError: msg });
             }
         },
 

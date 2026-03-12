@@ -5,7 +5,7 @@ import SettingsModal from './components/SettingsModal';
 import News from './components/News';
 import Ontology from './components/Ontology';
 import Reports from './components/Reports';
-import ApiManager from './components/ApiManager';
+
 import ScenarioBuilder from './components/ScenarioBuilder';
 import DataAnalysis from './components/DataAnalysis';
 import IntegratedEditor from './components/IntegratedEditor';
@@ -335,7 +335,7 @@ export default function App() {
           {activeTab === 'reports' && <Reports />}
           {activeTab === 'news' && <News />}
           {activeTab === 'ontology' && <Ontology />}
-          {activeTab === 'api-manager' && <ApiManager settings={settings} onSettingsChange={setSettings} />}
+
           {activeTab === 'data-analysis' && (
             <DataAnalysis
               simulationParams={simulationParams}
@@ -358,7 +358,7 @@ export default function App() {
             />
           )}
           {activeTab === 'editor' && <IntegratedEditor />}
-          {activeTab !== 'home' && activeTab !== 'reports' && activeTab !== 'news' && activeTab !== 'ontology' && activeTab !== 'api-manager' && activeTab !== 'scenario-builder' && activeTab !== 'data-analysis' && activeTab !== 'editor' && (
+          {activeTab !== 'home' && activeTab !== 'reports' && activeTab !== 'news' && activeTab !== 'ontology' && activeTab !== 'scenario-builder' && activeTab !== 'data-analysis' && activeTab !== 'editor' && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <h1 className="text-xl font-semibold text-slate-400 capitalize">{activeTab.replace('-', ' ')}</h1>

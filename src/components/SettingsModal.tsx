@@ -2,11 +2,12 @@ import React, { useState, useMemo } from 'react';
 import {
     Settings, X, Save, Palette, Globe, Radio, Plus, Tag,
     Search, Sliders, Key, Filter, Zap, AlertTriangle, Clock,
-    Shield, ChevronRight, Hash, Gauge
+    Shield, ChevronRight, Hash, Gauge, Server
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { AppSettings } from '../types';
 import { DEFAULT_OSINT_SOURCES, DEFAULT_OSINT_KEYWORDS, DEFAULT_CRISIS_TERMS } from '../services/newsService';
+import ApiManager from './ApiManager';
 
 // ============================================================
 // CATEGORY DEFINITIONS
@@ -27,7 +28,7 @@ const CATEGORIES: CategoryDef[] = [
     { id: 'general', label: '일반', labelEn: 'General', icon: <Palette size={16} />, color: 'text-cyan-400', description: '테마, 언어 설정' },
     { id: 'intelligence', label: '인텔리전스', labelEn: 'Intelligence', icon: <Radio size={16} />, color: 'text-amber-400', description: 'OSINT 소스 및 키워드' },
     { id: 'pipeline', label: '파이프라인', labelEn: 'Pipeline', icon: <Sliders size={16} />, color: 'text-emerald-400', description: '위기 감지, 임계치 설정' },
-    { id: 'api', label: 'API 연동', labelEn: 'API', icon: <Key size={16} />, color: 'text-rose-400', description: 'Gemini API 키 관리' },
+    { id: 'api', label: '데이터 커넥션', labelEn: 'Data Connections', icon: <Key size={16} />, color: 'text-rose-400', description: '외부 API 파이프라인 관리' },
 ];
 
 // All searchable setting labels for filtering
@@ -35,7 +36,7 @@ const SEARCHABLE_ITEMS: Record<SettingsCategory, string[]> = {
     general: ['테마', 'Theme', '다크', '라이트', '언어', 'Language', '한국어', 'English'],
     intelligence: ['OSINT', '소스', 'Sources', '키워드', 'Keywords', 'Bloomberg', 'Reuters', 'AP News', 'Hormuz', 'UKMTO'],
     pipeline: ['임계치', 'Threshold', '지속성', 'Persistence', '위기 키워드', 'Crisis', '폴링', 'Polling', '배치', 'Batch', '에스컬레이션'],
-    api: ['API', 'Gemini', 'Key', '키'],
+    api: ['API', 'Gemini', 'Key', '키', '커넥션', 'Connection', '파이프라인', 'Pipeline', 'LSEG', 'Data'],
 };
 
 // ============================================================
@@ -351,6 +352,15 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                                     <Zap size={12} className="inline mr-1 text-amber-500" />
                                     <strong>비용 방어:</strong> Persistence Tracker가 활성화되면 단발성 뉴스는 LLM 호출 없이 로컬에서 처리됩니다.
                                     위기 키워드가 {tempSettings.persistenceThresholdMinutes}분 이상 지속되고 {tempSettings.persistenceMinArticles}건 이상 누적될 때만 AI 분석이 트리거됩니다.
+                                </div>
+
+                                {/* DATA CONNECTIONS — CRUD */}
+                                <div className="mt-6 pt-6 border-t border-slate-700/50">
+                                    <SectionHeader icon={<Server size={16} />} title="데이터 커넥션 (Data Connections)" color="text-purple-400" />
+                                    <p className="text-[11px] text-slate-500 mb-3">
+                                        사용자 정의 외부 API 파이프라인을 등록하고 관리합니다. API 키는 암호화되어 저장됩니다.
+                                    </p>
+                                    <ApiManager />
                                 </div>
                             </div>
                         )}

@@ -26,6 +26,16 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
+        // Vercel Serverless Proxy — local dev forwarding
+        '/api/proxy': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('error', (err) => {
+              console.warn('[Vite Proxy] API Proxy connection failed:', err.message);
+            });
+          },
+        },
       },
     },
   };

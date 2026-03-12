@@ -229,10 +229,7 @@ export default function Sidebar({
           <Database size={isMinimized ? 20 : 16} className="shrink-0" />
           {!isMinimized && <span>에디터</span>}
         </div>
-        <div title="외부 API" className={cn(navItemClass, activeTab === 'api-manager' && activeClass)} onClick={() => setActiveTab('api-manager')}>
-          <Server size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>외부 API</span>}
-        </div>
+
       </div>
 
       {/* Dynamic Interaction Area */}
@@ -334,14 +331,7 @@ export default function Sidebar({
             <div className="text-[10px] flex items-center gap-1 text-emerald-500 bg-emerald-950/50 px-2 py-1 rounded inline-flex border border-emerald-900"><CheckCircle2 size={10} /> 실시간 동기화 됨</div>
           </div>
         )}
-        {activeTab === 'api-manager' && (
-          <div className="bg-purple-950/30 border border-purple-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-purple-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Server size={12} /> API 엔드포인트</h5>
-            <p className="text-[10px] text-slate-400 mb-2">연결된 외부 자원에 대한 호출 트래픽과 Rate Limit 정보를 확인하세요.</p>
-            <div className="w-full bg-slate-900 rounded-full h-1.5 mb-1"><div className="bg-purple-500 h-1.5 rounded-full w-[45%]"></div></div>
-            <div className="text-[9px] text-right text-slate-500 font-mono">Usage: 45%</div>
-          </div>
-        )}
+
         {activeTab === 'news' && (
           <div className="bg-rose-950/30 border border-rose-900/50 rounded-lg p-3">
             <h5 className="text-[11px] font-bold text-rose-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Globe size={12} /> 트렌드 & 스크랩</h5>

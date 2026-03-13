@@ -15,23 +15,59 @@ import type {
     BEVIHistoryEntry,
     QuantMetrics,
     AIPExecutiveBriefing,
+    VulnerabilityDataPoint,
 } from '../types';
 import { computeScenarioBranch } from '../lib/utils';
 import {
     BASE_SCENARIOS,
-    BASE_VULNERABILITY_DATA,
-    BROKER_REPORTS,
-    INSURANCE_CIRCULARS,
     ONTOLOGY_OBJECTS,
     ONTOLOGY_LINKS,
 } from '../data/mockData';
-import { fetchMarketDataWithFallback, mapLSEGQuotesToScenarioParams, type MarketDataSource } from '../services/lsegMarketService';
+import {
+    fullSync,
+    applyMarketUpdatesToParams,
+} from '../services/maritimeIntegrationService';
 import type { MarketQuote } from '../services/marketDataService';
-import { scanHeadlinesForRisk } from '../lib/sentimentScanner';
-import { fetchLSEGNewsHeadlines } from '../services/newsService';
 
 // ============================================================
-// CALCULATION HELPERS (moved from App.tsx for centralization)
+// INTERNAL: VULNERABILITY BASE DATA (for chart calculation)
+// Migrated from mockData — 30-day WS time series seed
+// ============================================================
+const BASE_VULNERABILITY_DATA: VulnerabilityDataPoint[] = [
+    { date: '02/09', Base_WS: 55, WS_High: 58, WS_Low: 52, News_Sentiment_Score: 12 },
+    { date: '02/10', Base_WS: 56, WS_High: 59, WS_Low: 53, News_Sentiment_Score: 14 },
+    { date: '02/11', Base_WS: 54, WS_High: 57, WS_Low: 51, News_Sentiment_Score: 11 },
+    { date: '02/12', Base_WS: 57, WS_High: 61, WS_Low: 53, News_Sentiment_Score: 18 },
+    { date: '02/13', Base_WS: 55, WS_High: 58, WS_Low: 52, News_Sentiment_Score: 15 },
+    { date: '02/14', Base_WS: 58, WS_High: 62, WS_Low: 54, News_Sentiment_Score: 20 },
+    { date: '02/15', Base_WS: 56, WS_High: 59, WS_Low: 53, News_Sentiment_Score: 16 },
+    { date: '02/16', Base_WS: 59, WS_High: 63, WS_Low: 55, News_Sentiment_Score: 22 },
+    { date: '02/17', Base_WS: 58, WS_High: 62, WS_Low: 54, News_Sentiment_Score: 25 },
+    { date: '02/18', Base_WS: 60, WS_High: 65, WS_Low: 55, News_Sentiment_Score: 30 },
+    { date: '02/19', Base_WS: 62, WS_High: 68, WS_Low: 56, News_Sentiment_Score: 35 },
+    { date: '02/20', Base_WS: 61, WS_High: 67, WS_Low: 55, News_Sentiment_Score: 38 },
+    { date: '02/21', Base_WS: 65, WS_High: 72, WS_Low: 58, News_Sentiment_Score: 45 },
+    { date: '02/22', Base_WS: 63, WS_High: 70, WS_Low: 56, News_Sentiment_Score: 42 },
+    { date: '02/23', Base_WS: 68, WS_High: 78, WS_Low: 58, News_Sentiment_Score: 55 },
+    { date: '02/24', Base_WS: 66, WS_High: 74, WS_Low: 58, News_Sentiment_Score: 48 },
+    { date: '02/25', Base_WS: 70, WS_High: 82, WS_Low: 58, News_Sentiment_Score: 62 },
+    { date: '02/26', Base_WS: 72, WS_High: 88, WS_Low: 56, News_Sentiment_Score: 70 },
+    { date: '02/27', Base_WS: 68, WS_High: 80, WS_Low: 56, News_Sentiment_Score: 58 },
+    { date: '02/28', Base_WS: 75, WS_High: 95, WS_Low: 55, News_Sentiment_Score: 78 },
+    { date: '03/01', Base_WS: 78, WS_High: 102, WS_Low: 54, News_Sentiment_Score: 85 },
+    { date: '03/02', Base_WS: 74, WS_High: 96, WS_Low: 52, News_Sentiment_Score: 80 },
+    { date: '03/03', Base_WS: 80, WS_High: 110, WS_Low: 50, News_Sentiment_Score: 92 },
+    { date: '03/04', Base_WS: 76, WS_High: 100, WS_Low: 52, News_Sentiment_Score: 82 },
+    { date: '03/05', Base_WS: 82, WS_High: 115, WS_Low: 49, News_Sentiment_Score: 95 },
+    { date: '03/06', Base_WS: 79, WS_High: 108, WS_Low: 50, News_Sentiment_Score: 88 },
+    { date: '03/07', Base_WS: 85, WS_High: 120, WS_Low: 50, News_Sentiment_Score: 96 },
+    { date: '03/08', Base_WS: 83, WS_High: 115, WS_Low: 51, News_Sentiment_Score: 90 },
+    { date: '03/09', Base_WS: 80, WS_High: 108, WS_Low: 52, News_Sentiment_Score: 84 },
+    { date: '03/10', Base_WS: 78, WS_High: 104, WS_Low: 52, News_Sentiment_Score: 80 },
+];
+
+// ============================================================
+// CALCULATION HELPERS
 // ============================================================
 
 function calculateDynamicChartData(params: SimulationParams): ChartDataPoint[] {
@@ -83,19 +119,15 @@ function calculateDynamicFleetData(
 ): FleetVessel[] {
     const { newsSentimentScore, awrpRate } = params;
 
-    // Geopolitical risk zones — polygons simplified as location string matches
     const RISK_ZONES: { keywords: string[]; label: string }[] = [
         { keywords: ['hormuz', 'persian gulf', 'fujairah', 'oman', 'shinas', 'sharjah', 'muscat', 'dammam'], label: '호르무즈 해협 지정학적 위기' },
         { keywords: ['red sea', 'bab el', 'aden', 'jeddah', 'yemen', 'houthi'], label: '홍해 지정학적 위험 구역' },
         { keywords: ['suez'], label: '수에즈 운하 봉쇄 리스크' },
     ];
 
-    // Large fuel-intensive vessel types
     const LARGE_VESSEL_TYPES = new Set(['vlcc', 'suezmax', 'aframax', 'capesize', 'lng carrier', 'lngc']);
-    // Bulk carrier types affected by BDI
     const BULK_TYPES = new Set(['capesize', 'panamax', 'supramax', 'handysize', 'bulk carrier', 'bulker']);
 
-    // Extract quant metrics for maritime-critical indicators
     const vlsfoMetrics = quantMetrics?.['VLSFO380'] || quantMetrics?.['LCOc1'] || quantMetrics?.['BZ=F'];
     const bdiMetrics = quantMetrics?.['BADI'] || quantMetrics?.['^BDIY'];
 
@@ -105,7 +137,6 @@ function calculateDynamicFleetData(
         const factors: string[] = [];
         let derivedLevel: 'SAFE' | 'WARNING' | 'CRITICAL' = 'SAFE';
 
-        // ── 1. Geopolitical Zone Risk ──
         const isMiddleEast =
             locLower.includes('hormuz') ||
             locLower.includes('middle east') ||
@@ -135,7 +166,6 @@ function calculateDynamicFleetData(
             }
         }
 
-        // ── 2. Fuel Price Risk (VLSFO/Brent Z-Score) ──
         if (vlsfoMetrics?.riskAlert) {
             const isLargeVessel = LARGE_VESSEL_TYPES.has(typeLower);
             const isLongVoyage = vessel.voyage_info.plan_days > 20 || vessel.voyage_info.sailed_days > 15;
@@ -152,10 +182,8 @@ function calculateDynamicFleetData(
             }
         }
 
-        // ── 3. Freight Rate Risk (BDI Trend + Z-Score) ──
         if (bdiMetrics) {
             const isBulk = BULK_TYPES.has(typeLower);
-            // Ballast detection: speed near 0 or location contains "ballast" keywords
             const isBallast = vessel.speed_and_weather_metrics.avg_speed < 5;
 
             if (bdiMetrics.trend === 'DOWN' && bdiMetrics.zScore < -2.0) {
@@ -172,8 +200,6 @@ function calculateDynamicFleetData(
             }
         }
 
-        // ── 4. Compound Risk Escalation ──
-        // If multiple factors, escalate to CRITICAL
         if (factors.length >= 3 && derivedLevel === 'WARNING') {
             derivedLevel = 'CRITICAL';
             factors.push('복합 리스크 에스컬레이션');
@@ -193,16 +219,13 @@ function calculateDynamicFleetData(
 // ============================================================
 
 const BEVI_HISTORY_MAX = 50;
-const BEVI_TREND_THRESHOLD = 1; // ±1 point = stable
+const BEVI_TREND_THRESHOLD = 1;
 const BEVI_UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
-/** Module-level dirty flag — set by any ontology mutation, flushed by interval */
 let _beviDirty = false;
 let _beviLastCalcAt = 0;
 
-/** Macro/Geo risk types — BEVI component 1 (weight 40%) */
 const MACRO_TYPES: Set<string> = new Set(['RiskFactor', 'Commodity', 'Insurance', 'MacroEvent']);
-/** Asset/Supply chain types — BEVI component 2 (weight 30%) */
 const ASSET_TYPES: Set<string> = new Set(['Port', 'Vessel']);
 
 interface BEVIComponentResult {
@@ -217,97 +240,70 @@ function calculateBEVIComponents(
     objects: OntologyObject[],
     intelArticles: IntelArticle[],
 ): BEVIComponentResult {
-    // ── Component 1: Macro/Geo Risk (40%) ──
-    const macroNodes = objects.filter(o =>
-        o.metadata.status === 'active' && MACRO_TYPES.has(o.type),
-    );
-    const macroScores = macroNodes
-        .map(o => Number(o.properties.riskScore) || 0)
-        .filter(s => s > 0);
-    const macroRiskAvg = macroScores.length > 0
-        ? macroScores.reduce((a, b) => a + b, 0) / macroScores.length
+    // Component 1: Macro Risk (40%)
+    const macroObjects = objects.filter(o => MACRO_TYPES.has(o.type) && o.metadata.status === 'active');
+    const macroRiskAvg = macroObjects.length > 0
+        ? macroObjects.reduce((sum, o) => sum + (Number(o.properties.riskScore) || 0), 0) / macroObjects.length
         : 0;
 
-    // ── Component 2: Asset/Supply Chain Risk (30%) ──
-    const assetNodes = objects.filter(o =>
-        o.metadata.status === 'active' && ASSET_TYPES.has(o.type),
-    );
-    const assetScores = assetNodes
-        .map(o => Number(o.properties.riskScore) || 0)
-        .filter(s => s > 0);
-    const assetRiskAvg = assetScores.length > 0
-        ? assetScores.reduce((a, b) => a + b, 0) / assetScores.length
+    // Component 2: Asset Risk (30%)
+    const assetObjects = objects.filter(o => ASSET_TYPES.has(o.type) && o.metadata.status === 'active');
+    const assetRiskAvg = assetObjects.length > 0
+        ? assetObjects.reduce((sum, o) => sum + (Number(o.properties.riskScore) || 0), 0) / assetObjects.length
         : 0;
 
-    // ── Component 3: Real-time Intelligence Shock (30%) ──
-    const evaluatedArticles = intelArticles.filter(
-        a => a.evaluated && !a.dropped && typeof a.impactScore === 'number',
-    );
-    const intelScores = evaluatedArticles.map(a => a.impactScore!);
-    const intelShockAvg = intelScores.length > 0
-        ? intelScores.reduce((a, b) => a + b, 0) / intelScores.length
+    // Component 3: Intel Shock (30%)
+    const recentArticles = intelArticles.filter(a => {
+        if (!a.evaluated || a.dropped) return false;
+        const age = Date.now() - new Date(a.fetchedAt).getTime();
+        return age < 24 * 60 * 60 * 1000; // last 24 hours
+    });
+    const intelShockAvg = recentArticles.length > 0
+        ? recentArticles.reduce((sum, a) => sum + (a.impactScore || 0), 0) / recentArticles.length
         : 0;
 
-    // ── BEVI = Weighted Average ──
-    const value = Math.round(
-        macroRiskAvg * 0.4 +
-        assetRiskAvg * 0.3 +
-        intelShockAvg * 0.3,
-    );
-    const clampedValue = Math.max(0, Math.min(100, value));
+    // Composite
+    const value = Math.round(macroRiskAvg * 0.4 + assetRiskAvg * 0.3 + intelShockAvg * 0.3);
 
-    // ── Top Factor ──
-    let topFactor = '데이터 수집 중...';
-    const components = [
-        { label: '거시/지정학 리스크', avg: macroRiskAvg },
-        { label: '자산/공급망 리스크', avg: assetRiskAvg },
-        { label: '실시간 인텔리전스', avg: intelShockAvg },
-    ];
-    const top = components.reduce((a, b) => (a.avg >= b.avg ? a : b));
-
-    // Find the specific node/article with highest score in that pillar
-    if (top.label === '거시/지정학 리스크' && macroNodes.length > 0) {
-        const worst = macroNodes.reduce((a, b) =>
-            (Number(a.properties.riskScore) || 0) >= (Number(b.properties.riskScore) || 0) ? a : b,
-        );
-        topFactor = `견인 요인: ${worst.title} (${worst.properties.riskScore}점)`;
-    } else if (top.label === '자산/공급망 리스크' && assetNodes.length > 0) {
-        const worst = assetNodes.reduce((a, b) =>
-            (Number(a.properties.riskScore) || 0) >= (Number(b.properties.riskScore) || 0) ? a : b,
-        );
-        topFactor = `견인 요인: ${worst.title} (${worst.properties.riskScore}점)`;
-    } else if (top.label === '실시간 인텔리전스' && evaluatedArticles.length > 0) {
-        const worst = evaluatedArticles.reduce((a, b) =>
-            (a.impactScore || 0) >= (b.impactScore || 0) ? a : b,
-        );
-        topFactor = `견인 요인: ${worst.title.slice(0, 40)}… (⚡${worst.impactScore})`;
+    // Find top contributing factor
+    let topFactor = '안정적 환경';
+    let topScore = 0;
+    for (const o of [...macroObjects, ...assetObjects]) {
+        const score = Number(o.properties.riskScore) || 0;
+        if (score > topScore) {
+            topScore = score;
+            topFactor = `견인 요인: ${o.title} (${score})`;
+        }
     }
 
-    return { macroRiskAvg: Math.round(macroRiskAvg * 10) / 10, assetRiskAvg: Math.round(assetRiskAvg * 10) / 10, intelShockAvg: Math.round(intelShockAvg * 10) / 10, topFactor, value: clampedValue };
+    return { macroRiskAvg, assetRiskAvg, intelShockAvg, topFactor, value };
 }
 
 function deriveNewBEVI(prev: BEVIState, objects: OntologyObject[], intelArticles: IntelArticle[]): BEVIState {
-    const { macroRiskAvg, assetRiskAvg, intelShockAvg, topFactor, value } = calculateBEVIComponents(objects, intelArticles);
-    const delta = value - prev.value;
-    const trend: BEVIState['trend'] =
-        delta > BEVI_TREND_THRESHOLD ? 'up' :
-            delta < -BEVI_TREND_THRESHOLD ? 'down' : 'stable';
+    const comp = calculateBEVIComponents(objects, intelArticles);
+    const delta = comp.value - prev.value;
+    let trend: 'up' | 'down' | 'stable' = 'stable';
+    if (delta > BEVI_TREND_THRESHOLD) trend = 'up';
+    else if (delta < -BEVI_TREND_THRESHOLD) trend = 'down';
 
-    const now = new Date().toISOString();
-    const newEntry: BEVIHistoryEntry = { timestamp: now, value };
-    const history = [...prev.history, newEntry].slice(-BEVI_HISTORY_MAX);
+    const newEntry: BEVIHistoryEntry = {
+        timestamp: new Date().toISOString(),
+        value: comp.value,
+    };
+
+    const history = [newEntry, ...prev.history].slice(0, BEVI_HISTORY_MAX);
 
     return {
-        value,
+        value: comp.value,
         previousValue: prev.value,
         trend,
         delta,
-        topFactor,
-        macroRiskAvg,
-        assetRiskAvg,
-        intelShockAvg,
+        topFactor: comp.topFactor,
+        macroRiskAvg: comp.macroRiskAvg,
+        assetRiskAvg: comp.assetRiskAvg,
+        intelShockAvg: comp.intelShockAvg,
         history,
-        lastCalculatedAt: now,
+        lastCalculatedAt: new Date().toISOString(),
     };
 }
 
@@ -326,9 +322,10 @@ const INITIAL_BEVI: BEVIState = {
 
 // ============================================================
 // ONTOLOGY → LEGACY MAPPERS (backward-compat selectors)
+// These map OntologyObjects to deprecated FleetVessel/BrokerReport/etc.
+// New code should use selectObjectsByType() directly.
 // ============================================================
 
-/** Map Vessel-type OntologyObjects back to the FleetVessel interface */
 function mapOntologyToFleetVessels(objects: OntologyObject[]): FleetVessel[] {
     return objects
         .filter((o) => o.type === 'Vessel' && o.metadata.status === 'active')
@@ -380,7 +377,6 @@ function mapOntologyToFleetVessels(objects: OntologyObject[]): FleetVessel[] {
         });
 }
 
-/** Map Market-type OntologyObjects back to BrokerReport interface */
 function mapOntologyToBrokerReports(objects: OntologyObject[]): BrokerReport[] {
     return objects
         .filter((o) => o.type === 'Market' && o.metadata.status === 'active')
@@ -394,7 +390,6 @@ function mapOntologyToBrokerReports(objects: OntologyObject[]): BrokerReport[] {
         }));
 }
 
-/** Map Insurance-type OntologyObjects back to InsuranceCircular interface */
 function mapOntologyToInsuranceCirculars(objects: OntologyObject[]): InsuranceCircular[] {
     return objects
         .filter((o) => o.type === 'Insurance' && o.metadata.status === 'active')
@@ -406,7 +401,6 @@ function mapOntologyToInsuranceCirculars(objects: OntologyObject[]): InsuranceCi
         }));
 }
 
-
 // ============================================================
 // QUANT-ONTOLOGY DERIVED STATE ENGINE (Module 2)
 // ============================================================
@@ -417,13 +411,6 @@ interface DerivedRiskUpdate {
     value: string | number | boolean;
 }
 
-/**
- * Cross-references LSEG QuantMetrics (market anomalies) with physical fleet data
- * to compute derived risk states:
- * - bunkerCostRisk: 'High' when VLSFO Z-Score signals anomaly AND vessel is on long voyage
- * - estimatedMargin: decreases when BDI/SCFI Z-Scores are negative (freight rate decline)
- * - riskScore: adjusted upward for vessels linked to risk-alerted market indicators
- */
 function computeDerivedRiskStates(
     objects: OntologyObject[],
     quantMetrics: Record<string, QuantMetrics>,
@@ -436,7 +423,6 @@ function computeDerivedRiskStates(
     const scfiMetrics = quantMetrics['SCFI'];
     const brentMetrics = quantMetrics['LCOc1'];
 
-    // Build a linkage map: objectId → set of linked objectIds
     const linkMap = new Map<string, Set<string>>();
     for (const link of links) {
         if (!linkMap.has(link.sourceId)) linkMap.set(link.sourceId, new Set());
@@ -445,11 +431,9 @@ function computeDerivedRiskStates(
         linkMap.get(link.targetId)!.add(link.sourceId);
     }
 
-    // Identify which market indicator ontology objects have riskAlert
     const alertedMarketIds = new Set<string>();
     for (const obj of objects) {
         if (obj.type === 'Commodity' || obj.type === 'Market') {
-            // Check if any quant metric associated with this object has riskAlert
             const ric = String(obj.properties.ric || obj.properties.symbol || '');
             if (ric && quantMetrics[ric]?.riskAlert) {
                 alertedMarketIds.add(obj.id);
@@ -465,12 +449,9 @@ function computeDerivedRiskStates(
         const currentRisk = Number(vessel.properties.riskScore || 0);
         const isLongVoyage = planDays > 20 || sailedDays > 15;
 
-        // ── Bunker Cost Risk ──
-        // VLSFO price anomaly + long voyage = high bunker cost exposure
         if (vlsfoMetrics?.riskAlert || brentMetrics?.riskAlert) {
             if (isLongVoyage) {
                 updates.push({ objectId: vessel.id, property: 'bunkerCostRisk', value: 'High' });
-                // Boost risk score for fuel-exposed vessels
                 const fuelRiskBoost = Math.min(20, Math.abs(vlsfoMetrics?.zScore || brentMetrics?.zScore || 0) * 5);
                 if (currentRisk + fuelRiskBoost > currentRisk) {
                     updates.push({ objectId: vessel.id, property: 'riskScore', value: Math.min(100, Math.round(currentRisk + fuelRiskBoost)) });
@@ -482,23 +463,17 @@ function computeDerivedRiskStates(
             updates.push({ objectId: vessel.id, property: 'bunkerCostRisk', value: 'Low' });
         }
 
-        // ── Estimated Margin ──
-        // Freight index decline (negative Z-Score) → margin squeeze
         const freightZScore = bdiMetrics?.zScore ?? scfiMetrics?.zScore ?? 0;
-        const baseMargin = Number(vessel.properties.estimatedMargin || 15); // default 15%
+        const baseMargin = Number(vessel.properties.estimatedMargin || 15);
         let adjustedMargin = baseMargin;
 
         if (freightZScore < -1.0) {
-            // Significant freight decline: reduce margin proportionally
-            adjustedMargin = Math.max(0, baseMargin + freightZScore * 3); // each Z-unit = ~3% margin impact
+            adjustedMargin = Math.max(0, baseMargin + freightZScore * 3);
         } else if (freightZScore > 1.0) {
-            // Freight surge: margin improvement
             adjustedMargin = Math.min(40, baseMargin + freightZScore * 2);
         }
         updates.push({ objectId: vessel.id, property: 'estimatedMargin', value: Math.round(adjustedMargin * 10) / 10 });
 
-        // ── Risk propagation via ontology links ──
-        // If this vessel is linked to an alerted market indicator, boost its riskScore
         const linkedIds = linkMap.get(vessel.id);
         if (linkedIds) {
             const linkedAlertCount = [...linkedIds].filter(id => alertedMarketIds.has(id)).length;
@@ -526,7 +501,7 @@ export interface HighRiskVesselEntry {
     exposedRisks: {
         ric: string;
         zScore: number;
-        metric: string; // e.g. 'VLSFO Price Anomaly', 'BDI Decline'
+        metric: string;
     }[];
     bunkerCostRisk: string;
     estimatedMargin: number;
@@ -543,7 +518,6 @@ function selectHighRiskVesselsFromState(
 
     if (alertedRics.length === 0) return [];
 
-    // Map metric RIC to human-readable name
     const metricNames: Record<string, string> = {
         'LCOc1': 'Brent Crude Anomaly',
         'VLSFO380': 'VLSFO Bunker Price Anomaly',
@@ -552,7 +526,6 @@ function selectHighRiskVesselsFromState(
         'KRW=': 'USD/KRW Exchange Rate Anomaly',
     };
 
-    // Find market/commodity objects that correspond to alerted RICs
     const alertedObjectIds = new Set<string>();
     for (const obj of objects) {
         const ric = String(obj.properties.ric || obj.properties.symbol || '');
@@ -561,8 +534,7 @@ function selectHighRiskVesselsFromState(
         }
     }
 
-    // Build linkage: find vessels connected to alerted objects
-    const vesselRiskMap = new Map<string, Set<string>>(); // vesselId → set of alerted objectIds
+    const vesselRiskMap = new Map<string, Set<string>>();
     for (const link of links) {
         if (alertedObjectIds.has(link.sourceId)) {
             const target = objects.find(o => o.id === link.targetId);
@@ -580,7 +552,6 @@ function selectHighRiskVesselsFromState(
         }
     }
 
-    // Also include all vessels if critical market-wide alerts exist (VLSFO/BDI affect entire fleet)
     const fleetWideAlerts = alertedRics.filter(r => ['VLSFO380', 'BADI', 'SCFI'].includes(r.ric));
     if (fleetWideAlerts.length > 0) {
         const allVessels = objects.filter(o => o.type === 'Vessel' && o.metadata.status === 'active');
@@ -589,7 +560,6 @@ function selectHighRiskVesselsFromState(
         }
     }
 
-    // Build results
     const results: HighRiskVesselEntry[] = [];
     for (const [vesselId] of vesselRiskMap) {
         const vessel = objects.find(o => o.id === vesselId);
@@ -609,7 +579,6 @@ function selectHighRiskVesselsFromState(
         });
     }
 
-    // Sort by highest combined Z-score exposure
     results.sort((a, b) => {
         const aMax = Math.max(...a.exposedRisks.map(r => Math.abs(r.zScore)));
         const bMax = Math.max(...b.exposedRisks.map(r => Math.abs(r.zScore)));
@@ -624,7 +593,7 @@ function selectHighRiskVesselsFromState(
 // ============================================================
 
 interface OntologyState {
-    // ---- Graph Data ----
+    // ---- Graph Data (Single Source of Truth) ----
     objects: OntologyObject[];
     links: OntologyLink[];
     actionLog: OntologyAction[];
@@ -641,7 +610,7 @@ interface OntologyState {
     dynamicFleetData: FleetVessel[];
     getHighRiskVessels: () => FleetVessel[];
 
-    // ---- LSEG Data Source State ----
+    // ---- Market Data Source State ----
     lsegDataSource: 'live' | 'demo';
     lsegIsLoading: boolean;
     lsegMarketQuotes: MarketQuote[];
@@ -659,7 +628,7 @@ interface OntologyState {
         branchObjects: OntologyObject[];
     } | null;
 
-    // ---- Ripple Effect (signal triage visual feedback) ----
+    // ---- Ripple Effect ----
     highlightedNodeIds: string[];
 
     // ---- Graph Actions ----
@@ -686,7 +655,7 @@ interface OntologyState {
     updateRealtimeScenarioParams: (params: SimulationParams) => void;
     recalculate: () => void;
 
-    // ---- LSEG Data Actions ----
+    // ---- Integration Layer Actions ----
     setLsegDataSource: (source: 'live' | 'demo') => void;
     setLsegIsLoading: (loading: boolean) => void;
     fetchAndBindMarketData: () => Promise<void>;
@@ -699,12 +668,13 @@ interface OntologyState {
     createScenarioBranch: (name: string, branchParams: SimulationParams) => void;
     clearScenarioBranch: () => void;
 
-    // ---- Backward-Compatible Selectors ----
+    // ---- Typed Selectors (subscribe to these from widgets) ----
     selectFleetVessels: () => FleetVessel[];
     selectBrokerReports: () => BrokerReport[];
     selectInsuranceCirculars: () => InsuranceCircular[];
     selectObjectsByType: (type: OntologyObjectType) => OntologyObject[];
     selectLinksForObject: (objectId: string) => OntologyLink[];
+    selectLinkedObjects: (objectId: string) => OntologyObject[];
 
     // ---- Quant-Ontology Selectors (Module 2) ----
     selectHighRiskVessels: () => HighRiskVesselEntry[];
@@ -724,10 +694,7 @@ interface OntologyState {
 const initialParams = BASE_SCENARIOS[0].params;
 
 export const useOntologyStore = create<OntologyState>((set, get) => {
-    // Fleet is built purely from ontology vessels — no legacy FLEET_DATA merge needed
     const initialMergedFleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
-
-    // Compute initial BEVI from mock ontology objects
     const initialBEVI = deriveNewBEVI(INITIAL_BEVI, ONTOLOGY_OBJECTS, []);
 
     return {
@@ -749,7 +716,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         dynamicChartData: calculateDynamicChartData(initialParams),
         dynamicFleetData: calculateDynamicFleetData(initialParams, initialMergedFleet),
 
-        // ---- Derived Risk Getter ----
         getHighRiskVessels: () => {
             const state = get();
             return state.dynamicFleetData.filter(
@@ -757,7 +723,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             );
         },
 
-        // ---- LSEG Data Source ----
+        // ---- Market Data Source ----
         lsegDataSource: 'demo' as const,
         lsegIsLoading: false,
         lsegMarketQuotes: [],
@@ -792,7 +758,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         : o,
                 ),
             }));
-            // Mark BEVI dirty if risk-relevant property changed
             if (key === 'riskScore' || key === 'impactValue' || key === 'congestionPct') {
                 get().markBEVIDirty();
             }
@@ -809,7 +774,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 const newLog = [...state.actionLog, action];
                 let newObjects = state.objects;
 
-                // Handle specific action types
                 switch (action.type) {
                     case 'UpdateRiskLevel': {
                         const newRisk = action.payload.riskScore as number;
@@ -859,12 +823,10 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             get().markBEVIDirty();
         },
 
-        /** Mark BEVI as needing recalculation (deferred to 30-min interval) */
         markBEVIDirty: () => {
             _beviDirty = true;
         },
 
-        /** Interval-gated recalculation — only runs if dirty AND 30 min elapsed */
         recalculateBEVI: () => {
             const now = Date.now();
             if (!_beviDirty && now - _beviLastCalcAt < BEVI_UPDATE_INTERVAL_MS) return;
@@ -873,14 +835,12 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const newBevi = deriveNewBEVI(state.bevi, state.objects, state.intelArticles);
             _beviDirty = false;
             _beviLastCalcAt = now;
-            // Only update if value actually changed (avoids infinite loops)
             if (newBevi.value !== state.bevi.value || newBevi.topFactor !== state.bevi.topFactor) {
                 console.log(`[BEVI] 📊 ${state.bevi.value} → ${newBevi.value} (Δ${newBevi.delta > 0 ? '+' : ''}${newBevi.delta}) | ${newBevi.topFactor}`);
                 set({ bevi: newBevi });
             }
         },
 
-        /** Bypass 30-min gate — used by Force Intelligence Sync */
         forceRecalculateBEVI: () => {
             const state = get();
             const newBevi = deriveNewBEVI(state.bevi, state.objects, state.intelArticles);
@@ -896,7 +856,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const scenario = state.scenarios.find((s) => s.id === id);
             if (scenario) {
                 set({ activeScenarioId: id, simulationParams: { ...scenario.params } });
-                // Trigger recalculation
                 setTimeout(() => get().recalculate(), 0);
             }
         },
@@ -942,71 +901,46 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 scenarios: state.scenarios.map((s) => (s.id === 'realtime' ? { ...s, params } : s)),
             })),
 
-        // ---- LSEG Data Actions ----
+        // ---- Integration Layer Actions ----
         setLsegDataSource: (source) => set({ lsegDataSource: source }),
         setLsegIsLoading: (loading) => set({ lsegIsLoading: loading }),
         setNewsRiskBoost: (boost) => set({ newsRiskBoost: boost }),
 
         fetchAndBindMarketData: async () => {
             const store = get();
-            if (store.lsegIsLoading) return; // Prevent concurrent fetches
+            if (store.lsegIsLoading) return;
             set({ lsegIsLoading: true });
 
             try {
-                // Fetch market data (LSEG → Yahoo → Cache → Mock)
-                const result = await fetchMarketDataWithFallback();
-                const source: 'live' | 'demo' = result.source === 'lseg' ? 'live' : 'demo';
+                const result = await fullSync();
+                const source: 'live' | 'demo' = result.marketSource === 'lseg' ? 'live' : 'demo';
 
-                // Map quotes to scenario params and update realtime scenario
-                const scenarioUpdates = mapLSEGQuotesToScenarioParams(result.quotes);
-
-                // Fetch LSEG news headlines
-                let newsRiskBoost = 0;
-                try {
-                    const lsegNews = await fetchLSEGNewsHeadlines();
-                    if (lsegNews.length > 0) {
-                        // Merge into intel articles
-                        store.addIntelArticles(lsegNews);
-                        // Scan for risk keywords
-                        const headlines = lsegNews.map(a => a.title);
-                        const scanResult = scanHeadlinesForRisk(headlines);
-                        newsRiskBoost = scanResult.riskBoost;
-                    }
-                } catch { /* LSEG news is optional */ }
-
-                // Also scan existing intel articles for risk
-                const existingHeadlines = store.intelArticles.map(a => a.title);
-                if (existingHeadlines.length > 0 && newsRiskBoost === 0) {
-                    const existingScan = scanHeadlinesForRisk(existingHeadlines);
-                    newsRiskBoost = existingScan.riskBoost;
+                // Merge news articles into store
+                if (result.newsArticles.length > 0) {
+                    store.addIntelArticles(result.newsArticles);
                 }
 
-                // Update store
                 set({
                     lsegDataSource: source,
                     lsegIsLoading: false,
-                    lsegMarketQuotes: result.quotes,
-                    lsegError: null,
-                    newsRiskBoost,
+                    lsegMarketQuotes: result.marketQuotes,
+                    lsegError: result.errors.length > 0 ? result.errors[0] : null,
+                    newsRiskBoost: result.newsRiskBoost,
                 });
 
-                // Update realtime scenario params if we're in realtime mode
-                if (store.activeScenarioId === 'realtime' && Object.keys(scenarioUpdates).length > 0) {
-                    const currentParams = store.simulationParams;
-                    const updatedParams = {
-                        ...currentParams,
-                        ...scenarioUpdates,
-                        // Blend news risk into sentiment score
-                        newsSentimentScore: Math.min(100,
-                            (currentParams.newsSentimentScore || 0) * 0.5 + newsRiskBoost * 0.5
-                        ),
-                    };
+                // Update realtime scenario params
+                if (store.activeScenarioId === 'realtime' && Object.keys(result.scenarioParamUpdates).length > 0) {
+                    const updatedParams = applyMarketUpdatesToParams(
+                        store.simulationParams,
+                        result.scenarioParamUpdates,
+                        result.newsRiskBoost,
+                    );
                     store.updateRealtimeScenarioParams(updatedParams);
                     store.setSimulationParams(updatedParams);
                 }
 
                 // Update ontology commodity objects with live prices
-                for (const quote of result.quotes) {
+                for (const quote of result.marketQuotes) {
                     if (quote.symbol === 'LCOc1' || quote.symbol === 'BZ=F') {
                         store.updateObjectProperty('commodity-brent', 'basePrice', quote.price);
                     }
@@ -1015,18 +949,16 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                     }
                 }
 
-                // ── Module 2: Bind QuantMetrics & propagate derived risk ──
+                // Module 2: Bind QuantMetrics & propagate derived risk
                 if (result.quantMetrics && Object.keys(result.quantMetrics).length > 0) {
                     set({ lsegQuantMetrics: result.quantMetrics });
 
-                    // Compute derived risk states from quant + physical data
                     const currentObjects = get().objects;
                     const currentLinks = get().links;
                     const derivedUpdates = computeDerivedRiskStates(
                         currentObjects, result.quantMetrics, currentLinks,
                     );
 
-                    // Apply derived risk updates to ontology objects
                     if (derivedUpdates.length > 0) {
                         set((state) => {
                             let updatedObjects = [...state.objects];
@@ -1046,7 +978,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         console.log(`[OntologyStore] 🔗 Applied ${derivedUpdates.length} derived risk updates from QuantMetrics`);
                     }
 
-                    // Re-compute fleet derived risk with fresh quant metrics
                     const currentState = get();
                     const ontologyFleet = mapOntologyToFleetVessels(currentState.objects);
                     set({
@@ -1068,87 +999,23 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const state = get();
             const { simulationParams, objects } = state;
 
-            // Fleet is now purely derived from ontology objects
+            // Fleet is derived purely from ontology objects
             const ontologyFleet = mapOntologyToFleetVessels(objects);
-            let mergedFleet = [...ontologyFleet];
-
-            // Also include localStorage ontology data (legacy compat)
-            // DEDUP: only add vessels NOT already present in ontologyFleet
-            try {
-                const stored = localStorage.getItem('sidecar_ontology');
-                if (stored) {
-                    const ontologies = JSON.parse(stored);
-                    const formalVesselInstances = ontologies.filter(
-                        (o: any) => o.isActive && o.type === 'object_instance' && o.properties,
-                    );
-                    const legacyVesselItems = ontologies.filter(
-                        (o: any) => o.isActive && o.type === 'factor' && o.subCategory === '자산 (Asset)' && o.vesselData,
-                    );
-
-                    const customFleet: FleetVessel[] = [
-                        ...formalVesselInstances.map((v: any) => {
-                            const props = v.properties || {};
-                            const type = props.type || props.vesselType || props.VesselType || '-';
-                            const loc = props.location || props.Location || props.lat || '-';
-                            const risk = props.risk || props.riskLevel || props.riskScore || 'Low';
-                            let formattedRisk: 'Low' | 'Medium' | 'High' | 'Critical' = 'Low';
-                            if (String(risk).toLowerCase().includes('high')) formattedRisk = 'High';
-                            if (String(risk).toLowerCase().includes('crit') || Number(risk) > 80) formattedRisk = 'Critical';
-                            if (String(risk).toLowerCase().includes('med') || Number(risk) > 50) formattedRisk = 'Medium';
-
-                            return {
-                                vessel_name: v.title || props.name || 'Auto Object',
-                                vessel_type: String(type),
-                                location: String(loc),
-                                riskLevel: formattedRisk,
-                                voyage_info: { departure_port: '-', destination_port: '-', sailed_days: 0, plan_days: 0, last_report_type: 'Ontology Object', last_report_time: v.lastUpdated, timezone: 'UTC' },
-                                speed_and_weather_metrics: { avg_speed: 0, speed_cp: 0, speed_diff: 0, avg_speed_good_wx: 0, still_water_avg_speed_good_wx: 0, avg_curf: 0, avg_wxf: 0 },
-                                consumption_and_rob: { avg_ifo: 0, ifo_cp: 0, ifo_diff: 0, fo_rob: 0, lo_rob: 0, fw_rob: 0, total_consumed: 0 },
-                                compliance: { cii_rating: '-', cii_trend: '-' },
-                            };
-                        }),
-                        ...legacyVesselItems.map((v: any) => ({
-                            vessel_name: v.title || 'Unknown Asset',
-                            vessel_type: v.vesselData.vessel_type || '-',
-                            location: v.vesselData.location || '-',
-                            riskLevel: v.vesselData.riskLevel || 'Low',
-                            voyage_info: { departure_port: '-', destination_port: '-', sailed_days: 0, plan_days: 0, last_report_type: 'Ontology Factor', last_report_time: v.lastUpdated, timezone: 'UTC' },
-                            speed_and_weather_metrics: { avg_speed: 0, speed_cp: 0, speed_diff: 0, avg_speed_good_wx: 0, still_water_avg_speed_good_wx: 0, avg_curf: 0, avg_wxf: 0 },
-                            consumption_and_rob: { avg_ifo: 0, ifo_cp: 0, ifo_diff: 0, fo_rob: 0, lo_rob: 0, fw_rob: 0, total_consumed: 0 },
-                            compliance: { cii_rating: '-', cii_trend: '-' },
-                        })),
-                    ];
-
-                    // Dedup: only add entries not already in ontologyFleet
-                    // Normalize names by stripping emoji prefixes (🚢) and trimming whitespace
-                    const normalize = (n: string) => n.replace(/^[^\w]+/, '').trim();
-                    const existingNames = new Set(mergedFleet.map(v => normalize(v.vessel_name)));
-                    customFleet.forEach(cv => {
-                        if (!existingNames.has(normalize(cv.vessel_name))) {
-                            mergedFleet.push(cv);
-                        }
-                    });
-                }
-            } catch (e) {
-                console.error('Failed to parse ontology fleet data', e);
-            }
 
             set({
                 dynamicChartData: calculateDynamicChartData(simulationParams),
-                dynamicFleetData: calculateDynamicFleetData(simulationParams, mergedFleet, get().lsegQuantMetrics),
+                dynamicFleetData: calculateDynamicFleetData(simulationParams, ontologyFleet, get().lsegQuantMetrics),
             });
         },
 
         // ---- Scenario Branching ----
         createScenarioBranch: (name, branchParams) => {
             const state = get();
-            // Use the INITIAL (default) ontology objects as the base snapshot
             const baseObjects = ONTOLOGY_OBJECTS.map(o => ({
                 ...o,
                 properties: { ...o.properties },
                 metadata: { ...o.metadata },
             }));
-            // Compute branch objects: apply ripple effect from initial params -> branch params
             const branchObjects = computeScenarioBranch(
                 baseObjects,
                 state.links,
@@ -1177,19 +1044,30 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 connectedIds.add(l.targetId);
             });
             set({ highlightedNodeIds: Array.from(connectedIds) });
-            // Clear after 3 seconds
             setTimeout(() => set({ highlightedNodeIds: [] }), 3000);
         },
 
         clearScenarioBranch: () => set({ scenarioBranch: null }),
 
-        // ---- Backward-Compatible Selectors ----
+        // ---- Typed Selectors ----
         selectFleetVessels: () => mapOntologyToFleetVessels(get().objects),
         selectBrokerReports: () => mapOntologyToBrokerReports(get().objects),
         selectInsuranceCirculars: () => mapOntologyToInsuranceCirculars(get().objects),
         selectObjectsByType: (type) => get().objects.filter((o) => o.type === type),
         selectLinksForObject: (objectId) =>
             get().links.filter((l) => l.sourceId === objectId || l.targetId === objectId),
+
+        // NEW: Get all objects linked to a given object
+        selectLinkedObjects: (objectId: string) => {
+            const state = get();
+            const connectedLinks = state.links.filter(l => l.sourceId === objectId || l.targetId === objectId);
+            const linkedIds = new Set<string>();
+            connectedLinks.forEach(l => {
+                if (l.sourceId !== objectId) linkedIds.add(l.sourceId);
+                if (l.targetId !== objectId) linkedIds.add(l.targetId);
+            });
+            return state.objects.filter(o => linkedIds.has(o.id));
+        },
 
         // ---- Quant-Ontology Selectors (Module 2) ----
         selectHighRiskVessels: () => {
@@ -1202,7 +1080,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const state = get();
             if (state.isExecutiveBriefingLoading) return;
 
-            // Read API key from settings
             let apiKey = '';
             try {
                 const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
@@ -1250,11 +1127,9 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
 
 // ============================================================
 // 30-MINUTE BEVI INTERVAL TIMER
-// Periodically flushes dirty flag and recalculates BEVI.
 // ============================================================
 setInterval(() => {
     if (_beviDirty) {
         useOntologyStore.getState().recalculateBEVI();
     }
 }, BEVI_UPDATE_INTERVAL_MS);
-

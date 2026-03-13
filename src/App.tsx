@@ -324,8 +324,6 @@ export default function App() {
               simulationParams={simulationParams}
               dynamicChartData={dynamicChartData}
               dynamicFleetData={dynamicFleetData}
-              brokerReports={brokerReports}
-              insuranceCirculars={insuranceCirculars}
               onScenarioChange={handleScenarioChange}
               onParamsChange={handleParamsChange}
               onSaveScenario={handleSaveScenario}

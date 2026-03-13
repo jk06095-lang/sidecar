@@ -1,129 +1,56 @@
 /**
- * DashboardGrid — 12-column draggable/resizable widget grid.
- * Uses react-grid-layout v2 with localStorage persistence.
- * Edit mode toggle controls drag/resize ability.
+ * DashboardGrid — COP (Common Operational Picture) Layout
+ *
+ * Replaces the 12-widget react-grid-layout with a fixed 3-panel + bottom-bar
+ * Palantir Workshop-style layout:
+ *   Left   (280px)  : Object list (search / type filter / risk-sorted)
+ *   Center (flex-1)  : FleetMapWidget ↔ OntologyGraph toggle
+ *   Right  (400px)  : Object360Panel (slides in on object select)
+ *   Bottom (260px)  : MacroIntelligenceBoard (collapsible)
  */
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import {
-    Responsive,
-    verticalCompactor,
-    type LayoutItem,
-    type Layout,
-    type ResponsiveLayouts,
-} from 'react-grid-layout';
-import { Lock, Unlock, GripVertical } from 'lucide-react';
+    Search, Ship, Anchor, Navigation, Fuel, Zap, Shield, DollarSign,
+    AlertTriangle, FileText, Map, GitBranch, ChevronRight, TrendingUp,
+    Filter, X, Loader2, Route as RouteIcon,
+} from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { SimulationParams, FleetVessel } from '../types';
+import type { SimulationParams, FleetVessel, OntologyObject, OntologyObjectType } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
 
-// Widget imports
+// Widgets
 import FleetMapWidget from './widgets/FleetMapWidget';
-import FleetStatusWidget from './widgets/FleetStatusWidget';
-import GlobalNewsWidget from './widgets/GlobalNewsWidget';
-import CurrencyWidget from './widgets/CurrencyWidget';
-import OilPriceWidget from './widgets/OilPriceWidget';
-import GeopoliticalRiskWidget from './widgets/GeopoliticalRiskWidget';
-import PortCongestionWidget from './widgets/PortCongestionWidget';
-import MarineTelemetryWidget from './widgets/MarineTelemetryWidget';
-import VolatilityIndexWidget from './widgets/VolatilityIndexWidget';
+import Object360Panel from './widgets/Object360Panel';
+import MacroIntelligenceBoard from './widgets/MacroIntelligenceBoard';
 
-// CSS for react-grid-layout
-import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
+// Lazy-load OntologyGraph (heavy D3/force dependency)
+const OntologyGraphView = lazy(() => import('./Ontology'));
 
 // ============================================================
-// WIDTH PROVIDER (manual ResizeObserver — avoids WidthProvider HOC issues)
+// CONSTANTS
 // ============================================================
 
-function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>) {
-    const [width, setWidth] = useState(1200);
-    useEffect(() => {
-        if (!ref.current) return;
-        const ro = new ResizeObserver(entries => {
-            for (const e of entries) setWidth(e.contentRect.width);
-        });
-        ro.observe(ref.current);
-        setWidth(ref.current.clientWidth);
-        return () => ro.disconnect();
-    }, [ref]);
-    return width;
-}
+const LSEG_POLL_INTERVAL_MS = 60_000;
 
-// ============================================================
-// LAYOUT DEFAULTS
-// ============================================================
-
-const STORAGE_KEY = 'sidecar_grid_layout';
-const COLS: Record<string, number> = { xxl: 16, xl: 14, lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 };
-const ROW_HEIGHT = 60;
-const BREAKPOINTS: Record<string, number> = { xxl: 1800, xl: 1400, lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 };
-
-/** Default layout for xxl breakpoint (16 columns — ultrawide / multi-monitor) */
-const DEFAULT_LAYOUT_XXL: LayoutItem[] = [
-    { i: 'bevi', x: 0, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
-    { i: 'fleetMap', x: 4, y: 0, w: 12, h: 6, minW: 4, minH: 4 },
-    { i: 'fleet', x: 0, y: 4, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'hormuzWeather', x: 0, y: 9, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'singaporeWeather', x: 4, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'busanWeather', x: 8, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'suezWeather', x: 12, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'globalNews', x: 0, y: 14, w: 10, h: 6, minW: 4, minH: 4 },
-    { i: 'currency', x: 10, y: 11, w: 6, h: 6, minW: 3, minH: 3 },
-    { i: 'oilPrice', x: 0, y: 20, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'geopoliticalRisk', x: 4, y: 20, w: 4, h: 6, minW: 3, minH: 3 },
-    { i: 'portCongestion', x: 8, y: 17, w: 4, h: 5, minW: 3, minH: 3 },
-];
-
-/** Default layout for xl breakpoint (14 columns — large PC monitor) */
-const DEFAULT_LAYOUT_XL: LayoutItem[] = [
-    { i: 'bevi', x: 0, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
-    { i: 'fleetMap', x: 4, y: 0, w: 10, h: 6, minW: 4, minH: 4 },
-    { i: 'fleet', x: 0, y: 4, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'hormuzWeather', x: 0, y: 9, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'singaporeWeather', x: 4, y: 6, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'busanWeather', x: 9, y: 6, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'suezWeather', x: 4, y: 11, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'globalNews', x: 0, y: 14, w: 9, h: 6, minW: 4, minH: 4 },
-    { i: 'currency', x: 9, y: 11, w: 5, h: 6, minW: 3, minH: 3 },
-    { i: 'oilPrice', x: 0, y: 20, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'geopoliticalRisk', x: 5, y: 20, w: 4, h: 6, minW: 3, minH: 3 },
-    { i: 'portCongestion', x: 9, y: 17, w: 5, h: 5, minW: 3, minH: 3 },
-];
-
-/** Default layout for lg breakpoint (12 columns — standard PC / laptop) */
-const DEFAULT_LAYOUT_LG: LayoutItem[] = [
-    { i: 'bevi', x: 0, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
-    { i: 'fleetMap', x: 4, y: 0, w: 8, h: 6, minW: 4, minH: 4 },
-    { i: 'fleet', x: 0, y: 4, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'hormuzWeather', x: 0, y: 9, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'singaporeWeather', x: 4, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'busanWeather', x: 8, y: 6, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'globalNews', x: 0, y: 14, w: 8, h: 6, minW: 4, minH: 4 },
-    { i: 'currency', x: 8, y: 11, w: 4, h: 6, minW: 3, minH: 3 },
-    { i: 'oilPrice', x: 0, y: 20, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'geopoliticalRisk', x: 4, y: 20, w: 4, h: 6, minW: 3, minH: 3 },
-    { i: 'portCongestion', x: 8, y: 17, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: 'suezWeather', x: 0, y: 25, w: 4, h: 5, minW: 3, minH: 3 },
-];
-
-/** All default layouts keyed by breakpoint */
-const DEFAULT_LAYOUTS: ResponsiveLayouts = {
-    xxl: DEFAULT_LAYOUT_XXL,
-    xl: DEFAULT_LAYOUT_XL,
-    lg: DEFAULT_LAYOUT_LG,
+const TYPE_ICONS: Record<string, React.ReactNode> = {
+    Vessel: <Ship size={13} className="text-cyan-400" />,
+    Port: <Navigation size={13} className="text-purple-400" />,
+    Route: <RouteIcon size={13} className="text-sky-400" />,
+    Commodity: <Fuel size={13} className="text-amber-400" />,
+    MacroEvent: <Zap size={13} className="text-rose-400" />,
+    Market: <TrendingUp size={13} className="text-emerald-400" />,
+    Insurance: <Shield size={13} className="text-orange-400" />,
+    Currency: <DollarSign size={13} className="text-emerald-400" />,
+    RiskFactor: <AlertTriangle size={13} className="text-rose-400" />,
 };
 
-// ============================================================
-// LSEG MARKET DATA POLLING INTERVAL (60s)
-// ============================================================
-const LSEG_POLL_INTERVAL_MS = 60_000;
+const TYPE_FILTERS: OntologyObjectType[] = ['Vessel', 'Port', 'Route', 'Commodity', 'RiskFactor', 'Market', 'Insurance'];
 
 // ============================================================
 // PROPS
 // ============================================================
 
 interface DashboardGridProps {
-    widgetVisibility: Record<string, boolean>;
     simulationParams: SimulationParams;
     dynamicFleetData: FleetVessel[];
     onNavigateTab?: (tab: string) => void;
@@ -133,171 +60,255 @@ interface DashboardGridProps {
 // COMPONENT
 // ============================================================
 
-export default function DashboardGrid({ widgetVisibility, simulationParams, dynamicFleetData, onNavigateTab }: DashboardGridProps) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const containerWidth = useContainerWidth(containerRef);
-    const [editMode, setEditMode] = useState(false);
+export default function DashboardGrid({ simulationParams, dynamicFleetData, onNavigateTab }: DashboardGridProps) {
+    const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+    const [centerView, setCenterView] = useState<'map' | 'graph'>('map');
+    const [macroExpanded, setMacroExpanded] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [typeFilter, setTypeFilter] = useState<OntologyObjectType | 'all'>('all');
+
+    // Store
+    const objects = useOntologyStore(s => s.objects);
     const fetchAndBindMarketData = useOntologyStore(s => s.fetchAndBindMarketData);
 
     // ---- LSEG Data Fetch on Mount + Polling ----
     useEffect(() => {
-        // Initial fetch
         fetchAndBindMarketData();
-
-        // Poll every 60s
-        const interval = setInterval(() => {
-            fetchAndBindMarketData();
-        }, LSEG_POLL_INTERVAL_MS);
-
+        const interval = setInterval(() => fetchAndBindMarketData(), LSEG_POLL_INTERVAL_MS);
         return () => clearInterval(interval);
     }, [fetchAndBindMarketData]);
 
-    // ---- Layout persistence ----
-    const [layouts, setLayouts] = useState<ResponsiveLayouts>(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                const parsed = JSON.parse(saved) as ResponsiveLayouts;
-                // Merge missing widgets into each breakpoint
-                const merged: ResponsiveLayouts = { ...DEFAULT_LAYOUTS };
-                for (const bp of Object.keys(DEFAULT_LAYOUTS) as string[]) {
-                    const savedBp: LayoutItem[] = [...(parsed[bp] || DEFAULT_LAYOUTS[bp] || [])];
-                    const defaultBp = DEFAULT_LAYOUTS[bp] || [];
-                    const savedIds = new Set(savedBp.map((l) => l.i));
-                    const missing = defaultBp.filter(d => !savedIds.has(d.i));
-                    merged[bp] = [...savedBp, ...missing];
-                }
-                return merged;
-            }
-        } catch { /* ignore */ }
-        return { ...DEFAULT_LAYOUTS };
-    });
+    // ---- Filtered & sorted object list ----
+    const filteredObjects = useMemo(() => {
+        let list = objects.filter(o => o.metadata.status === 'active');
 
-    const handleLayoutChange = useCallback((layout: Layout, allLayouts: ResponsiveLayouts) => {
-        setLayouts(allLayouts);
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(allLayouts));
-        } catch { /* ignore */ }
+        if (typeFilter !== 'all') {
+            list = list.filter(o => o.type === typeFilter);
+        }
+
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(o =>
+                o.title.toLowerCase().includes(q) ||
+                o.description?.toLowerCase().includes(q) ||
+                o.type.toLowerCase().includes(q)
+            );
+        }
+
+        // Sort by risk score descending
+        list.sort((a, b) => (Number(b.properties.riskScore) || 0) - (Number(a.properties.riskScore) || 0));
+
+        return list;
+    }, [objects, typeFilter, searchQuery]);
+
+    // ---- Handlers ----
+    const handleObjectSelect = useCallback((id: string) => {
+        setSelectedObjectId(prev => prev === id ? null : id);
     }, []);
 
-    // Filter layouts by visibility for all breakpoints
-    const visibleLayouts = useMemo((): ResponsiveLayouts => {
-        const result: ResponsiveLayouts = {};
-        for (const bp of Object.keys(COLS)) {
-            const bpLayout = layouts[bp] || DEFAULT_LAYOUTS[bp] || DEFAULT_LAYOUT_LG;
-            result[bp] = bpLayout.filter(l => widgetVisibility[l.i] !== false);
-        }
-        return result;
-    }, [layouts, widgetVisibility]);
+    const handleMapVesselClick = useCallback((vessel: FleetVessel) => {
+        // Find the ontology object matching this vessel
+        const match = objects.find(o =>
+            o.type === 'Vessel' && o.title === vessel.vessel_name
+        );
+        if (match) setSelectedObjectId(match.id);
+    }, [objects]);
 
-    // Primary visible layout for rendering children (use the largest available)
-    const visibleLayout = useMemo((): LayoutItem[] => {
-        const source = visibleLayouts.xxl || visibleLayouts.lg || DEFAULT_LAYOUT_LG;
-        return [...source] as LayoutItem[];
-    }, [visibleLayouts]);
+    const handleObject360Navigate = useCallback((id: string) => {
+        setSelectedObjectId(id);
+    }, []);
 
-    // ---- Widget renderer ----
-    const renderWidget = (widgetId: string) => {
-        switch (widgetId) {
-            case 'fleetMap':
-                return <FleetMapWidget vessels={dynamicFleetData} onSelectVessel={() => onNavigateTab?.('ontology')} />;
-            case 'fleet':
-                return <FleetStatusWidget fleetData={dynamicFleetData} />;
-            case 'hormuzWeather':
-                return <MarineTelemetryWidget portName="Hormuz" lat={26.56} lon={56.25} label="Strait of Hormuz Telemetry" />;
-            case 'singaporeWeather':
-                return <MarineTelemetryWidget portName="Singapore" lat={1.26} lon={103.75} label="Singapore Strait Telemetry" />;
-            case 'busanWeather':
-                return <MarineTelemetryWidget portName="Busan" lat={35.08} lon={129.04} label="Busan Port Telemetry" />;
-            case 'suezWeather':
-                return <MarineTelemetryWidget portName="Suez" lat={30.58} lon={32.27} label="Suez Canal Telemetry" />;
-            case 'globalNews':
-                return <GlobalNewsWidget />;
-            case 'currency':
-                return <CurrencyWidget />;
-            case 'oilPrice':
-                return <OilPriceWidget simulationParams={simulationParams} />;
-            case 'geopoliticalRisk':
-                return <GeopoliticalRiskWidget simulationParams={simulationParams} />;
-            case 'portCongestion':
-                return <PortCongestionWidget simulationParams={simulationParams} />;
-            case 'bevi':
-                return <VolatilityIndexWidget />;
-            default:
-                return <div className="flex items-center justify-center h-full text-slate-500 text-xs">Unknown Widget: {widgetId}</div>;
-        }
-    };
+    const handleObject360Close = useCallback(() => {
+        setSelectedObjectId(null);
+    }, []);
 
     return (
-        <div className="relative" ref={containerRef}>
-            {/* Edit Mode Toggle */}
-            <div className="flex items-center justify-end mb-3">
-                <button
-                    onClick={() => setEditMode(!editMode)}
-                    className={cn(
-                        'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border',
-                        editMode
-                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.15)]'
-                            : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:bg-slate-700/50 hover:text-slate-200'
-                    )}
-                >
-                    {editMode ? <Unlock size={13} /> : <Lock size={13} />}
-                    {editMode ? ' 편집 모드' : ' 레이아웃 고정'}
-                </button>
-            </div>
+        <div className="flex flex-col h-full">
+            {/* ---- Main 3-Column Area ---- */}
+            <div className="flex flex-1 min-h-0">
+                {/* ════════════════════════════════════════════
+                    LEFT PANEL — Object Explorer
+                   ════════════════════════════════════════════ */}
+                <div className="w-[280px] shrink-0 flex flex-col border-r border-slate-800/50 bg-slate-950/50">
+                    {/* Search */}
+                    <div className="p-2 border-b border-slate-800/40">
+                        <div className="relative">
+                            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                            <input
+                                type="text"
+                                placeholder="Search objects..."
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                className="w-full bg-slate-900/60 border border-slate-800/50 rounded-lg pl-8 pr-8 py-1.5 text-[11px] text-slate-300 placeholder-slate-600 focus:border-cyan-500/40 focus:outline-none transition-colors"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                                >
+                                    <X size={12} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
 
-            {/* Grid Background (edit mode) */}
-            <div className={cn(
-                "relative rounded-xl transition-all duration-300",
-                editMode && "bg-[radial-gradient(circle,#334155_1px,transparent_1px)] bg-[size:20px_20px] ring-1 ring-amber-500/20 p-2"
-            )}>
-                {containerWidth > 0 && (
-                    <Responsive
-                        className="dashboard-grid"
-                        width={containerWidth}
-                        layouts={visibleLayouts}
-                        breakpoints={BREAKPOINTS}
-                        cols={COLS}
-                        rowHeight={ROW_HEIGHT}
-                        dragConfig={{
-                            enabled: editMode,
-                            handle: '.grid-drag-handle',
-                            bounded: false,
-                            threshold: 3,
-                        }}
-                        resizeConfig={{
-                            enabled: editMode,
-                            handles: ['se'],
-                        }}
-                        compactor={verticalCompactor}
-                        margin={[12, 12] as [number, number]}
-                        containerPadding={[0, 0] as [number, number]}
-                        onLayoutChange={handleLayoutChange}
-                    >
-                        {visibleLayout.map(item => (
-                            <div
-                                key={item.i}
+                    {/* Type Filter Chips */}
+                    <div className="px-2 py-1.5 border-b border-slate-800/40 flex flex-wrap gap-1">
+                        <button
+                            onClick={() => setTypeFilter('all')}
+                            className={cn(
+                                "px-2 py-0.5 rounded text-[9px] font-bold transition-all uppercase tracking-wider",
+                                typeFilter === 'all'
+                                    ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                            )}
+                        >
+                            All ({objects.filter(o => o.metadata.status === 'active').length})
+                        </button>
+                        {TYPE_FILTERS.map(t => {
+                            const count = objects.filter(o => o.type === t && o.metadata.status === 'active').length;
+                            if (count === 0) return null;
+                            return (
+                                <button
+                                    key={t}
+                                    onClick={() => setTypeFilter(typeFilter === t ? 'all' : t)}
+                                    className={cn(
+                                        "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium transition-all",
+                                        typeFilter === t
+                                            ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                                            : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                                    )}
+                                >
+                                    {TYPE_ICONS[t]}
+                                    {count}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Object List */}
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {filteredObjects.map(obj => {
+                            const riskScore = Number(obj.properties.riskScore || 0);
+                            const isSelected = obj.id === selectedObjectId;
+                            const riskColor = riskScore >= 80 ? 'bg-rose-500' : riskScore >= 50 ? 'bg-amber-500' : riskScore >= 30 ? 'bg-cyan-500' : 'bg-emerald-500';
+
+                            return (
+                                <button
+                                    key={obj.id}
+                                    onClick={() => handleObjectSelect(obj.id)}
+                                    className={cn(
+                                        "w-full flex items-center gap-2 px-3 py-2 text-left transition-all border-b border-slate-800/20",
+                                        isSelected
+                                            ? "bg-cyan-500/10 border-l-2 border-l-cyan-400"
+                                            : "hover:bg-slate-800/30 border-l-2 border-l-transparent"
+                                    )}
+                                >
+                                    <div className="shrink-0">{TYPE_ICONS[obj.type] || <FileText size={13} className="text-slate-400" />}</div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className={cn("text-[11px] font-medium truncate", isSelected ? 'text-cyan-300' : 'text-slate-300')}>
+                                            {obj.title}
+                                        </div>
+                                        <div className="text-[9px] text-slate-600 truncate">
+                                            {obj.type} · {`${obj.properties.location || obj.properties.region || obj.description || ''}`?.slice(0, 30)}
+                                        </div>
+                                    </div>
+                                    {/* Risk score badge */}
+                                    <div className="shrink-0 flex items-center gap-1">
+                                        <div className={cn("w-1.5 h-1.5 rounded-full", riskColor)} />
+                                        <span className="text-[10px] font-mono text-slate-500">{riskScore}</span>
+                                    </div>
+                                    <ChevronRight size={12} className={cn("shrink-0 transition-transform", isSelected ? 'text-cyan-400 rotate-90' : 'text-slate-700')} />
+                                </button>
+                            );
+                        })}
+                        {filteredObjects.length === 0 && (
+                            <div className="text-center py-8 text-xs text-slate-600">No objects found</div>
+                        )}
+                    </div>
+
+                    {/* Object count footer */}
+                    <div className="px-3 py-1.5 border-t border-slate-800/40 text-[9px] text-slate-600 font-mono">
+                        {filteredObjects.length} objects · sorted by risk
+                    </div>
+                </div>
+
+                {/* ════════════════════════════════════════════
+                    CENTER PANEL — Map / Graph
+                   ════════════════════════════════════════════ */}
+                <div className="flex-1 flex flex-col min-w-0">
+                    {/* View Toggle */}
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800/40 bg-slate-950/30">
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setCenterView('map')}
                                 className={cn(
-                                    "relative rounded-xl overflow-visible transition-shadow",
-                                    editMode && "ring-1 ring-slate-600/50 hover:ring-cyan-500/40 shadow-lg"
+                                    "flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-medium transition-all",
+                                    centerView === 'map'
+                                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                                        : 'text-slate-500 hover:text-slate-300 border border-transparent'
                                 )}
                             >
-                                {/* Drag Handle (edit mode only) */}
-                                {editMode && (
-                                    <div className="grid-drag-handle absolute top-0 left-0 right-0 z-30 flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/90 border-b border-slate-700/50 cursor-grab active:cursor-grabbing select-none backdrop-blur-sm rounded-t-xl">
-                                        <GripVertical size={14} className="text-slate-500" />
-                                        <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider truncate">{item.i.replace(/([A-Z])/g, ' $1').trim()}</span>
-                                    </div>
+                                <Map size={12} />
+                                Fleet Map
+                            </button>
+                            <button
+                                onClick={() => setCenterView('graph')}
+                                className={cn(
+                                    "flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-medium transition-all",
+                                    centerView === 'graph'
+                                        ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
+                                        : 'text-slate-500 hover:text-slate-300 border border-transparent'
                                 )}
-                                {/* Widget Content */}
-                                <div className={cn("h-full w-full overflow-hidden", editMode && "pt-7")}>
-                                    {renderWidget(item.i)}
+                            >
+                                <GitBranch size={12} />
+                                Knowledge Graph
+                            </button>
+                        </div>
+                        <div className="text-[9px] text-slate-600 font-mono">
+                            {centerView === 'map' ? `${dynamicFleetData.length} vessels` : `${objects.length} nodes`}
+                        </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 relative min-h-0">
+                        {centerView === 'map' ? (
+                            <FleetMapWidget
+                                vessels={dynamicFleetData}
+                                onSelectVessel={handleMapVesselClick}
+                            />
+                        ) : (
+                            <Suspense fallback={
+                                <div className="flex items-center justify-center h-full gap-2 text-slate-500">
+                                    <Loader2 size={16} className="animate-spin" />
+                                    <span className="text-xs">Loading Knowledge Graph...</span>
                                 </div>
-                            </div>
-                        ))}
-                    </Responsive>
+                            }>
+                                <OntologyGraphView />
+                            </Suspense>
+                        )}
+                    </div>
+                </div>
+
+                {/* ════════════════════════════════════════════
+                    RIGHT PANEL — Object 360 (conditional)
+                   ════════════════════════════════════════════ */}
+                {selectedObjectId && (
+                    <Object360Panel
+                        objectId={selectedObjectId}
+                        onClose={handleObject360Close}
+                        onNavigate={handleObject360Navigate}
+                    />
                 )}
             </div>
+
+            {/* ════════════════════════════════════════════
+                BOTTOM PANEL — Macro Intelligence Board
+               ════════════════════════════════════════════ */}
+            <MacroIntelligenceBoard
+                expanded={macroExpanded}
+                onToggle={() => setMacroExpanded(!macroExpanded)}
+            />
         </div>
     );
 }

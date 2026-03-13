@@ -1,193 +1,20 @@
-export interface VoyageInfo {
-  departure_port: string;
-  destination_port: string;
-  sailed_days: number;
-  plan_days: number;
-  last_report_type: string;
-  last_report_time: string;
-  timezone: string;
-}
-
-export interface SpeedMetrics {
-  avg_speed: number;
-  speed_cp: number;
-  speed_diff: number;
-  avg_speed_good_wx: number;
-  still_water_avg_speed_good_wx: number;
-  avg_curf: number;
-  avg_wxf: number;
-}
-
-export interface ConsumptionROB {
-  avg_ifo: number;
-  ifo_cp: number;
-  ifo_diff: number;
-  fo_rob: number;
-  lo_rob: number;
-  fw_rob: number;
-  total_consumed: number;
-}
-
-export interface Compliance {
-  cii_rating: string;
-  cii_trend: string;
-}
-
-export interface FleetVessel {
-  vessel_name: string;
-  vessel_type: string;
-  location: string;
-  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
-  /** Quant engine derived risk level — combines macro indicators + physical asset properties */
-  derivedRiskLevel?: 'SAFE' | 'WARNING' | 'CRITICAL';
-  /** Human-readable risk factor descriptions from quant fusion */
-  riskFactors?: string[];
-  voyage_info: VoyageInfo;
-  speed_and_weather_metrics: SpeedMetrics;
-  consumption_and_rob: ConsumptionROB;
-  compliance: Compliance;
-}
-
-export interface SimulationParams {
-  vlsfoPrice: number;
-  newsSentimentScore: number;
-  awrpRate: number;
-  interestRate: number;
-  supplyChainStress?: number;
-  cyberThreatLevel?: number;
-  naturalDisasterIndex?: number;
-  pandemicRisk?: number;
-  tradeWarIntensity?: number;
-  energyCrisisLevel?: number;
-  [key: string]: number | undefined;
-}
-
-export interface ObjectProperty {
-  id: string; // API Name (camelCase)
-  displayName: string;
-  baseType: 'string' | 'number' | 'boolean' | 'date';
-  isPrimaryKey: boolean;
-  isTitleKey: boolean;
-  mappedColumn?: string;
-}
-
-export interface ObjectTypeDefinition {
-  id: string; // API Name (PascalCase)
-  displayName: string;
-  pluralDisplayName: string;
-  description: string;
-  icon: string;
-  color: string;
-  groups: string[];
-  backingDatasource: string;
-  properties: ObjectProperty[];
-}
-
-
-export interface Scenario {
-  id: string;
-  name: string;
-  description: string;
-  params: SimulationParams;
-  isCustom?: boolean;
-  isRealtime?: boolean;
-  selectedVariableIds?: string[];
-}
-
-export interface VulnerabilityDataPoint {
-  date: string;
-  Base_WS: number;
-  WS_High: number;
-  WS_Low: number;
-  News_Sentiment_Score: number;
-}
-
-export interface ChartDataPoint {
-  date: string;
-  Base_WS: number;
-  WS_High: number;
-  WS_Low: number;
-  News_Sentiment_Score: number;
-  Spread: number;
-}
-
-export interface BrokerReport {
-  source: string;
-  date: string;
-  asset_class: string;
-  current_price_mil_usd: number;
-  wow_change_pct: string;
-  market_sentiment: string;
-}
-
-export interface InsuranceCircular {
-  issuer: string;
-  date: string;
-  title: string;
-  impact: string;
-}
-
-export type Theme = 'dark' | 'light';
-export type Language = 'ko' | 'en';
-
-export interface AppSettings {
-  apiKey: string;
-  theme: Theme;
-  language: Language;
-  osintSources: string[];
-  osintKeywords: string[];
-  // Persistence Tracker thresholds
-  persistenceThresholdMinutes: number;  // default 30
-  persistenceMinArticles: number;       // default 3
-  crisisKeywords: string[];             // custom crisis regex terms
-  pollingIntervalMinutes: number;       // default 10
-}
-
 // ============================================================
-// OSINT INTELLIGENCE ARTICLE (LLM-evaluated)
+// SIDECAR MARITIME COMMAND — ONTOLOGY TYPE SYSTEM
+// Palantir Foundry-Style Ontology Model
+//
+// Core Objects: Vessel, Port, Route, MarketIndicator, RiskEvent
+// Relationships: OntologyLink (directed, weighted edges)
 // ============================================================
 
-/** Actionable parameter extracted by LLM from official circulars/alerts */
-export interface SuggestedAction {
-  targetNodeId: string;      // ontology object id, e.g. 'insurance-war-risk'
-  targetNodeTitle: string;   // human label, e.g. 'War Risk Premium'
-  propertyKey: string;       // e.g. 'rateTo', 'riskScore'
-  newValue: number | string;
-  displayLabel: string;      // e.g. 'War Risk Premium +0.5%'
-  sourceRef: string;         // e.g. 'KP&I Circular CIR-2026-003'
-}
-
-export interface IntelArticle {
-  id: string;
-  title: string;
-  description: string;
-  url: string;
-  source: string;           // e.g. 'AP News', 'Bloomberg', 'Lloyd's List'
-  sourceBadge: string;       // emoji badge e.g. '🔴', '🟠', '⚓'
-  publishedAt: string;
-  fetchedAt: string;
-  // LLM-evaluated fields (null until evaluated)
-  impactScore?: number;      // 0-100
-  riskLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
-  aiInsight?: string;        // 1-liner actionable insight
-  ontologyTags?: string[];   // related ontology keywords e.g. ['Hormuz', 'VLCC', 'BrentOil']
-  evaluated?: boolean;       // LLM evaluation completed
-  dropped?: boolean;         // noise-filtered by LLM
-  // Official source classification
-  category?: 'OSINT' | 'OFFICIAL_CIRCULAR' | 'SECURITY_ALERT';
-  refNumber?: string;        // e.g. 'CIR-2026-003', 'WARNING 042/MAR/2026'
-  suggestedAction?: SuggestedAction;
-  acknowledged?: boolean;    // User has acknowledged this official item
-}
-
 // ============================================================
-// PALANTIR FOUNDRY-STYLE ONTOLOGY LAYER
+// 1. ONTOLOGY OBJECT TYPES — 5 Core Domain Entities
 // ============================================================
 
 /** Semantic object types in the maritime domain ontology */
 export type OntologyObjectType =
   | 'Vessel'
   | 'Port'
+  | 'Route'
   | 'Commodity'
   | 'MacroEvent'
   | 'Scenario'
@@ -196,22 +23,165 @@ export type OntologyObjectType =
   | 'Currency'
   | 'RiskFactor';
 
-/** Vessel-specific properties — required schema for type='Vessel' ontology objects */
+// ============================================================
+// 2. TYPED PROPERTY SCHEMAS — Per-entity structured properties
+// ============================================================
+
+/** Vessel-specific properties — full operational data */
 export interface VesselProperties {
-  fuel: number;           // bunker ROB percentage 0–100
-  freshWater: number;     // fresh water ROB percentage 0–100
-  lubeOil: number;        // lube oil ROB percentage 0–100
-  crewCount: number;      // onboard crew headcount
-  speed: number;          // current speed in knots
-  heading: number;        // heading in degrees 0–360
-  destination: string;    // destination port name
-  eta: string;            // ETA ISO datetime string
+  // Identity
+  vesselType: string;
+  imo?: string;
+  mmsi?: string;
+  callSign?: string;
+  flag?: string;
+  yearBuilt?: number;
+  dwt?: number;
+  loa?: number;
+  beam?: number;
+
+  // Position & Navigation
+  location: string;
+  lat?: number;
+  lng?: number;
+  speed?: number;
+  heading?: number;
+  destination: string;
+  eta?: string;
+
+  // Voyage
+  departurePort?: string;
+  destinationPort?: string;
+  sailedDays?: number;
+  planDays?: number;
+  lastReportType?: string;
+  lastReportTime?: string;
+  timezone?: string;
+
+  // Speed & Weather Performance
+  avgSpeed?: number;
+  speedCp?: number;
+  speedDiff?: number;
+  avgSpeedGoodWx?: number;
+  stillWaterAvgSpeedGoodWx?: number;
+  avgCurf?: number;
+  avgWxf?: number;
+
+  // Fuel & Consumption
+  fuel?: number;            // ROB percentage 0–100
+  freshWater?: number;
+  lubeOil?: number;
+  avgIfo?: number;
+  ifoCp?: number;
+  ifoDiff?: number;
+  foRob?: number;
+  loRob?: number;
+  fwRob?: number;
+  totalConsumed?: number;
+
+  // Compliance
+  ciiRating?: string;
+  ciiTrend?: string;
+  crewCount?: number;
+
+  // Economics
+  cargoValueUsd?: number;
+  charterRate?: number;
+
+  // Quant-Derived (set by engine)
+  bunkerCostRisk?: string;
+  estimatedMargin?: number;
 }
+
+/** Port / Chokepoint properties */
+export interface PortProperties {
+  region: string;
+  lat: number;
+  lng: number;
+  congestionPct?: number;
+  baseWaitDays?: number;
+  dailyTraffic?: number;
+  securityLevel?: string;
+  queuedVessels?: number;
+  annualTEU?: number;
+  oilTransitMbpd?: number;
+  crudeImportPct?: number;
+  bunkerDemandSpike?: string;
+  avgBunkerPriceMt?: number;
+  affectedCargoDays?: number;
+}
+
+/** Route properties — a maritime path between ports */
+export interface RouteProperties {
+  originPortId: string;
+  destinationPortId: string;
+  distanceNm: number;
+  estimatedDays: number;
+  waypoints?: { lat: number; lng: number; name?: string }[];
+  riskZones?: string[];
+  alternativeRouteIds?: string[];
+  fuelCostEstimateUsd?: number;
+  currentStatus?: 'open' | 'restricted' | 'closed';
+}
+
+/** MarketIndicator properties — commodity, asset, freight index */
+export interface MarketIndicatorProperties {
+  basePrice?: number;
+  unit?: string;
+  previousPrice?: number;
+  priceChange?: string;
+  volatility?: number;
+  benchmarkType?: string;
+  weeklyCeiling?: number;
+  weeklyFloor?: number;
+  // Asset valuation
+  source?: string;
+  assetClass?: string;
+  priceMilUsd?: number;
+  wowChangePct?: number;
+  sentiment?: string;
+  // Currency
+  code?: string;
+  baseRate?: number;
+  previousRate?: number;
+  weeklyChange?: string;
+  // Insurance
+  issuer?: string;
+  rateFrom?: number;
+  rateTo?: number;
+  premiumCostPerVlcc?: number;
+  effectiveDate?: string;
+  preNoticeHours?: number;
+  affectedZone?: string;
+}
+
+/** RiskEvent properties — geopolitical, environmental, operational */
+export interface RiskEventProperties {
+  category: 'geopolitical' | 'supply' | 'operational' | 'environmental' | 'cyber' | 'pandemic';
+  severity?: 'low' | 'medium' | 'high' | 'critical';
+  region?: string;
+  lat?: number;
+  lng?: number;
+  threatLevel?: string;
+  lastIncident?: string;
+  affectedVessels?: number;
+  supplyChainImpact?: number;
+  energyImpact?: number;
+  baseImpact?: number;
+  extraCostPerVoyageUsd?: number;
+  extraDays?: number;
+}
+
+// ============================================================
+// 3. ONTOLOGY OBJECT — Universal graph node
+// ============================================================
 
 /** Dynamic property bag for ontology objects — all quant values live here */
 export interface OntologyProperties {
-  [key: string]: string | number | boolean | undefined;
+  [key: string]: string | number | boolean | undefined | object;
   riskScore?: number;
+  impactValue?: number;
+  status?: string;
 }
 
 /** A single node in the ontology graph */
@@ -224,23 +194,30 @@ export interface OntologyObject {
   metadata: {
     createdAt: string;
     updatedAt: string;
-    source: string;      // e.g. 'mock', 'api:frankfurter', 'user'
+    source: string;      // e.g. 'mock', 'api:frankfurter', 'user', 'Noon Report'
     status: 'active' | 'inactive' | 'archived';
   };
 }
 
+// ============================================================
+// 4. ONTOLOGY LINK — Directed, weighted edge
+// ============================================================
+
 /** Typed relationship between two ontology objects */
 export type OntologyLinkRelation =
-  | 'ROUTES_THROUGH'
-  | 'CARRIES'
-  | 'AFFECTED_BY'
-  | 'SUPPLIES'
-  | 'INSURES'
-  | 'PRICED_IN'
-  | 'TRIGGERS'
-  | 'LOCATED_AT'
-  | 'MONITORS'
-  | 'DEPENDS_ON';
+  | 'ROUTES_THROUGH'    // Vessel → Port/Chokepoint
+  | 'CARRIES'           // Vessel → Commodity
+  | 'AFFECTED_BY'       // Object ← RiskEvent
+  | 'SUPPLIES'          // Port → Commodity
+  | 'INSURES'           // Insurance → Vessel
+  | 'PRICED_IN'         // Commodity → Currency
+  | 'TRIGGERS'          // RiskEvent → MarketIndicator cascade
+  | 'LOCATED_AT'        // Vessel → Port (current position)
+  | 'MONITORS'          // Market → Vessel (valuation)
+  | 'DEPENDS_ON'        // RiskFactor → Resource
+  | 'TRANSITS'          // Vessel → Route
+  | 'OPERATES_ON'       // Vessel → Route (active voyage)
+  | 'HEDGES';           // Strategy → MarketIndicator
 
 /** An edge in the ontology graph */
 export interface OntologyLink {
@@ -254,6 +231,10 @@ export interface OntologyLink {
     createdAt?: string;
   };
 }
+
+// ============================================================
+// 5. ONTOLOGY ACTIONS — Business logic mutations
+// ============================================================
 
 /** Business logic action types */
 export type OntologyActionType =
@@ -276,89 +257,276 @@ export interface OntologyAction {
 }
 
 // ============================================================
-// BEVI (Business Environment Volatility Index)
+// 6. SCENARIO & SIMULATION
 // ============================================================
 
-/** Single data point in the BEVI time-series history */
+export interface SimulationParams {
+  vlsfoPrice: number;
+  newsSentimentScore: number;
+  awrpRate: number;
+  interestRate: number;
+  supplyChainStress?: number;
+  cyberThreatLevel?: number;
+  naturalDisasterIndex?: number;
+  pandemicRisk?: number;
+  tradeWarIntensity?: number;
+  energyCrisisLevel?: number;
+  [key: string]: number | undefined;
+}
+
+export interface Scenario {
+  id: string;
+  name: string;
+  description: string;
+  params: SimulationParams;
+  isCustom?: boolean;
+  isRealtime?: boolean;
+  selectedVariableIds?: string[];
+}
+
+// ============================================================
+// 7. CHART DATA
+// ============================================================
+
+export interface VulnerabilityDataPoint {
+  date: string;
+  Base_WS: number;
+  WS_High: number;
+  WS_Low: number;
+  News_Sentiment_Score: number;
+}
+
+export interface ChartDataPoint {
+  date: string;
+  Base_WS: number;
+  WS_High: number;
+  WS_Low: number;
+  News_Sentiment_Score: number;
+  Spread: number;
+}
+
+// ============================================================
+// 8. BACKWARD-COMPATIBLE LEGACY TYPES
+// These exist solely for gradual migration. New code should use
+// OntologyObject with type-specific selectors instead.
+// ============================================================
+
+/** @deprecated Use OntologyObject with type='Vessel' and selectFleetVessels() selector */
+export interface VoyageInfo {
+  departure_port: string;
+  destination_port: string;
+  sailed_days: number;
+  plan_days: number;
+  last_report_type: string;
+  last_report_time: string;
+  timezone: string;
+}
+
+/** @deprecated Use OntologyObject with type='Vessel' */
+export interface SpeedMetrics {
+  avg_speed: number;
+  speed_cp: number;
+  speed_diff: number;
+  avg_speed_good_wx: number;
+  still_water_avg_speed_good_wx: number;
+  avg_curf: number;
+  avg_wxf: number;
+}
+
+/** @deprecated Use OntologyObject with type='Vessel' */
+export interface ConsumptionROB {
+  avg_ifo: number;
+  ifo_cp: number;
+  ifo_diff: number;
+  fo_rob: number;
+  lo_rob: number;
+  fw_rob: number;
+  total_consumed: number;
+}
+
+/** @deprecated Use OntologyObject with type='Vessel' */
+export interface Compliance {
+  cii_rating: string;
+  cii_trend: string;
+}
+
+/** @deprecated Use OntologyObject with type='Vessel' and selectFleetVessels() */
+export interface FleetVessel {
+  vessel_name: string;
+  vessel_type: string;
+  location: string;
+  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
+  derivedRiskLevel?: 'SAFE' | 'WARNING' | 'CRITICAL';
+  riskFactors?: string[];
+  voyage_info: VoyageInfo;
+  speed_and_weather_metrics: SpeedMetrics;
+  consumption_and_rob: ConsumptionROB;
+  compliance: Compliance;
+}
+
+/** @deprecated Use OntologyObject with type='Market' and selectMarketIndicators() */
+export interface BrokerReport {
+  source: string;
+  date: string;
+  asset_class: string;
+  current_price_mil_usd: number;
+  wow_change_pct: string;
+  market_sentiment: string;
+}
+
+/** @deprecated Use OntologyObject with type='Insurance' */
+export interface InsuranceCircular {
+  issuer: string;
+  date: string;
+  title: string;
+  impact: string;
+}
+
+/** @deprecated Legacy Ontology schema definition — replaced by typed OntologyObject */
+export interface ObjectProperty {
+  id: string;
+  displayName: string;
+  baseType: 'string' | 'number' | 'boolean' | 'date';
+  isPrimaryKey: boolean;
+  isTitleKey: boolean;
+  mappedColumn?: string;
+}
+
+/** @deprecated Legacy Ontology schema definition */
+export interface ObjectTypeDefinition {
+  id: string;
+  displayName: string;
+  pluralDisplayName: string;
+  description: string;
+  icon: string;
+  color: string;
+  groups: string[];
+  backingDatasource: string;
+  properties: ObjectProperty[];
+}
+
+// ============================================================
+// 9. APPLICATION SETTINGS
+// ============================================================
+
+export type Theme = 'dark' | 'light';
+export type Language = 'ko' | 'en';
+
+export interface AppSettings {
+  apiKey: string;
+  theme: Theme;
+  language: Language;
+  osintSources: string[];
+  osintKeywords: string[];
+  persistenceThresholdMinutes: number;
+  persistenceMinArticles: number;
+  crisisKeywords: string[];
+  pollingIntervalMinutes: number;
+}
+
+// ============================================================
+// 10. OSINT INTELLIGENCE ARTICLE (LLM-evaluated)
+// ============================================================
+
+/** Actionable parameter extracted by LLM from official circulars/alerts */
+export interface SuggestedAction {
+  targetNodeId: string;
+  targetNodeTitle: string;
+  propertyKey: string;
+  newValue: number | string;
+  displayLabel: string;
+  sourceRef: string;
+}
+
+export interface IntelArticle {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  source: string;
+  sourceBadge: string;
+  publishedAt: string;
+  fetchedAt: string;
+  impactScore?: number;
+  riskLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
+  aiInsight?: string;
+  ontologyTags?: string[];
+  evaluated?: boolean;
+  dropped?: boolean;
+  category?: 'OSINT' | 'OFFICIAL_CIRCULAR' | 'SECURITY_ALERT';
+  refNumber?: string;
+  suggestedAction?: SuggestedAction;
+  acknowledged?: boolean;
+}
+
+// ============================================================
+// 11. BEVI (Business Environment Volatility Index)
+// ============================================================
+
 export interface BEVIHistoryEntry {
   timestamp: string;
   value: number;
 }
 
-/** Derived BEVI state — auto-calculated from ontology + intel articles */
 export interface BEVIState {
-  value: number;                       // 0-100 composite score
-  previousValue: number;               // prior value for trend calc
-  trend: 'up' | 'down' | 'stable';    // direction
-  delta: number;                       // signed change (new - old)
-  topFactor: string;                   // e.g. "견인 요인: 유가 급등"
-  macroRiskAvg: number;                // component 1 raw avg (40%)
-  assetRiskAvg: number;                // component 2 raw avg (30%)
-  intelShockAvg: number;               // component 3 raw avg (30%)
-  history: BEVIHistoryEntry[];         // max 50 entries
+  value: number;
+  previousValue: number;
+  trend: 'up' | 'down' | 'stable';
+  delta: number;
+  topFactor: string;
+  macroRiskAvg: number;
+  assetRiskAvg: number;
+  intelShockAvg: number;
+  history: BEVIHistoryEntry[];
   lastCalculatedAt: string;
 }
 
 // ============================================================
-// QUANT PREPROCESSING METRICS (Module 1)
+// 12. QUANT PREPROCESSING METRICS (Module 1)
 // ============================================================
 
-/** Quant preprocessing metrics — auto-calculated from time-series data */
 export interface QuantMetrics {
-  /** Raw historical closing prices (real time-series) */
   historicalPrices: number[];
-  /** 20-day Simple Moving Average */
   sma20: number;
-  /** 30-day historical volatility (annualized standard deviation) */
   volatility30d: number;
-  /** Z-Score: how many std-devs current price deviates from SMA20 */
   zScore: number;
-  /** true when |zScore| > 2.0 — signals market anomaly */
   riskAlert: boolean;
-  /** Momentum indicator: currentPrice / SMA20 ratio (>1 = bullish, <1 = bearish) */
   momentum: number;
-  /** Price trend direction derived from SMA comparison */
   trend: 'UP' | 'DOWN' | 'STABLE';
-  /** ISO timestamp of last calculation */
   lastCalculatedAt: string;
 }
 
 // ============================================================
-// AIP EXECUTIVE BRIEFING — Structured JSON output from AI Quant Strategist (Module 3)
+// 13. AIP EXECUTIVE BRIEFING (Module 3)
 // ============================================================
 
 export interface AIPExecutiveBriefing {
-  /** Quant-based market crisis assessment */
   marketOutlook: {
     summary: string;
     keyMetrics: { label: string; value: string; trend: 'up' | 'down' | 'stable' | 'critical' }[];
   };
-  /** Fleet-wide Value-at-Risk (VaR) and financial exposure */
   financialImpactVaR: {
     totalVaR: string;
     breakdown: { item: string; amount: string; probability: string }[];
     assessment: string;
   };
-  /** Derivative hedging recommendations with specific ratios */
   hedgingStrategies: {
     strategy: string;
     instrument: string;
     ratio: string;
     rationale: string;
   }[];
-  /** Priority-coded operational directives */
   operationalDirectives: {
     priority: 'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM';
     directive: string;
     responsible: string;
     impact: string;
   }[];
-  /** ISO timestamp of generation */
   generatedAt: string;
 }
 
 // ============================================================
-// STRATEGIC DECISION — C-Level approved action record (Module 4)
+// 14. STRATEGIC DECISION & ACTION LOG (Module 4-5)
 // ============================================================
 
 export interface StrategicDecision {
@@ -366,34 +534,22 @@ export interface StrategicDecision {
   type: 'HEDGING' | 'OPERATIONAL';
   title: string;
   detail: string;
-  /** Auto-generated department-specific directive message */
   departmentMessage: string;
   targetDepartment: string;
   approver: string;
   status: 'PENDING' | 'APPROVED' | 'EXECUTED';
-  /** LSEG quant metrics snapshot as evidence */
   lsegEvidence: Record<string, unknown>;
   executedAt: string;
   scenarioName: string;
 }
 
-// ============================================================
-// STRATEGIC ACTION LOG — Audit Trail for C-Level decisions (Module 5)
-// ============================================================
-
 export interface StrategicActionLog {
   id: string;
-  /** HEDGING = derivative position, OPERATIONAL = fleet/routing action */
   actionType: 'HEDGING' | 'OPERATIONAL';
-  /** Human-readable description of the action */
   description: string;
-  /** Current workflow state */
   status: 'PENDING' | 'EXECUTED';
-  /** C-Level officer who approved the action */
   approvedBy: string;
-  /** ISO timestamp of approval/execution */
   timestamp: string;
-  /** Quant metrics snapshot at the moment of approval — audit evidence */
   justificationMetrics: {
     scenarioName: string;
     vlsfoZScore?: number;
@@ -402,8 +558,6 @@ export interface StrategicActionLog {
     riskAlertCount: number;
     highRiskVesselCount: number;
   };
-  /** Department that received the directive */
   targetDepartment: string;
-  /** Auto-generated message sent to department */
   departmentMessage: string;
 }

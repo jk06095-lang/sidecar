@@ -1,4 +1,4 @@
-import type { Scenario, FleetVessel, VulnerabilityDataPoint, BrokerReport, InsuranceCircular, OntologyObject, OntologyLink } from '../types';
+import type { Scenario, OntologyObject, OntologyLink } from '../types';
 
 // ============================================================
 // BASE SCENARIOS
@@ -163,183 +163,24 @@ export const BASE_SCENARIOS: Scenario[] = [
 export const DEFAULT_PARAMS = BASE_SCENARIOS[0].params;
 
 // ============================================================
-// FLEET ONTOLOGY DATA
-// Canonical fleet derived from ONTOLOGY_OBJECTS vessels.
-// ============================================================
-export const FLEET_DATA: FleetVessel[] = [
-    {
-        vessel_name: 'VL BREEZE',
-        vessel_type: 'Crude Oil Tanker (VLCC)',
-        location: 'Persian Gulf — Ras Laffan OPL',
-        riskLevel: 'High',
-        voyage_info: {
-            departure_port: 'Ras Laffan (Qatar)',
-            destination_port: 'Ulsan (South Korea)',
-            sailed_days: 2,
-            plan_days: 24,
-            last_report_type: 'At Anchor',
-            last_report_time: '2026-03-11T06:00:00',
-            timezone: 'UTC+3',
-        },
-        speed_and_weather_metrics: {
-            avg_speed: 0.1,
-            speed_cp: 14.5,
-            speed_diff: -14.4,
-            avg_speed_good_wx: 15.0,
-            still_water_avg_speed_good_wx: 15.2,
-            avg_curf: 0.0,
-            avg_wxf: 0.0,
-        },
-        consumption_and_rob: {
-            avg_ifo: 52.0,
-            ifo_cp: 55.0,
-            ifo_diff: -3.0,
-            fo_rob: 4100,
-            lo_rob: 55,
-            fw_rob: 310,
-            total_consumed: 104,
-        },
-        compliance: {
-            cii_rating: 'A',
-            cii_trend: 'Stable',
-        },
-    },
-    {
-        vessel_name: 'STAR MARIA',
-        vessel_type: 'Bulk Carrier',
-        location: 'Arabian Sea — En Route to Shinas, Oman',
-        riskLevel: 'Medium',
-        voyage_info: {
-            departure_port: 'Sharjah Anchorage (UAE)',
-            destination_port: 'Shinas (Oman)',
-            sailed_days: 1,
-            plan_days: 2,
-            last_report_type: 'Noon Report',
-            last_report_time: '2026-03-11T08:00:00',
-            timezone: 'UTC+4',
-        },
-        speed_and_weather_metrics: {
-            avg_speed: 11.3,
-            speed_cp: 12.5,
-            speed_diff: -1.2,
-            avg_speed_good_wx: 12.0,
-            still_water_avg_speed_good_wx: 12.3,
-            avg_curf: -0.1,
-            avg_wxf: -0.2,
-        },
-        consumption_and_rob: {
-            avg_ifo: 28.0,
-            ifo_cp: 30.0,
-            ifo_diff: -2.0,
-            fo_rob: 1850,
-            lo_rob: 32,
-            fw_rob: 140,
-            total_consumed: 28,
-        },
-        compliance: {
-            cii_rating: 'B',
-            cii_trend: 'Stable',
-        },
-    },
-];
-
-// ============================================================
-// TIME-SERIES VULNERABILITY DATA (30 days)
-// ============================================================
-export const BASE_VULNERABILITY_DATA: VulnerabilityDataPoint[] = [
-    { date: '02/09', Base_WS: 55, WS_High: 58, WS_Low: 52, News_Sentiment_Score: 12 },
-    { date: '02/10', Base_WS: 56, WS_High: 59, WS_Low: 53, News_Sentiment_Score: 14 },
-    { date: '02/11', Base_WS: 54, WS_High: 57, WS_Low: 51, News_Sentiment_Score: 11 },
-    { date: '02/12', Base_WS: 57, WS_High: 61, WS_Low: 53, News_Sentiment_Score: 18 },
-    { date: '02/13', Base_WS: 55, WS_High: 58, WS_Low: 52, News_Sentiment_Score: 15 },
-    { date: '02/14', Base_WS: 58, WS_High: 62, WS_Low: 54, News_Sentiment_Score: 20 },
-    { date: '02/15', Base_WS: 56, WS_High: 59, WS_Low: 53, News_Sentiment_Score: 16 },
-    { date: '02/16', Base_WS: 59, WS_High: 63, WS_Low: 55, News_Sentiment_Score: 22 },
-    { date: '02/17', Base_WS: 58, WS_High: 62, WS_Low: 54, News_Sentiment_Score: 25 },
-    { date: '02/18', Base_WS: 60, WS_High: 65, WS_Low: 55, News_Sentiment_Score: 30 },
-    { date: '02/19', Base_WS: 62, WS_High: 68, WS_Low: 56, News_Sentiment_Score: 35 },
-    { date: '02/20', Base_WS: 61, WS_High: 67, WS_Low: 55, News_Sentiment_Score: 38 },
-    { date: '02/21', Base_WS: 65, WS_High: 72, WS_Low: 58, News_Sentiment_Score: 45 },
-    { date: '02/22', Base_WS: 63, WS_High: 70, WS_Low: 56, News_Sentiment_Score: 42 },
-    { date: '02/23', Base_WS: 68, WS_High: 78, WS_Low: 58, News_Sentiment_Score: 55 },
-    { date: '02/24', Base_WS: 66, WS_High: 74, WS_Low: 58, News_Sentiment_Score: 48 },
-    { date: '02/25', Base_WS: 70, WS_High: 82, WS_Low: 58, News_Sentiment_Score: 62 },
-    { date: '02/26', Base_WS: 72, WS_High: 88, WS_Low: 56, News_Sentiment_Score: 70 },
-    { date: '02/27', Base_WS: 68, WS_High: 80, WS_Low: 56, News_Sentiment_Score: 58 },
-    { date: '02/28', Base_WS: 75, WS_High: 95, WS_Low: 55, News_Sentiment_Score: 78 },
-    { date: '03/01', Base_WS: 78, WS_High: 102, WS_Low: 54, News_Sentiment_Score: 85 },
-    { date: '03/02', Base_WS: 74, WS_High: 96, WS_Low: 52, News_Sentiment_Score: 80 },
-    { date: '03/03', Base_WS: 80, WS_High: 110, WS_Low: 50, News_Sentiment_Score: 92 },
-    { date: '03/04', Base_WS: 76, WS_High: 100, WS_Low: 52, News_Sentiment_Score: 82 },
-    { date: '03/05', Base_WS: 82, WS_High: 115, WS_Low: 49, News_Sentiment_Score: 95 },
-    { date: '03/06', Base_WS: 79, WS_High: 108, WS_Low: 50, News_Sentiment_Score: 88 },
-    { date: '03/07', Base_WS: 85, WS_High: 120, WS_Low: 50, News_Sentiment_Score: 96 },
-    { date: '03/08', Base_WS: 83, WS_High: 115, WS_Low: 51, News_Sentiment_Score: 90 },
-    { date: '03/09', Base_WS: 80, WS_High: 108, WS_Low: 52, News_Sentiment_Score: 84 },
-    { date: '03/10', Base_WS: 78, WS_High: 104, WS_Low: 52, News_Sentiment_Score: 80 },
-];
-
-// ============================================================
-// MARKET & ASSET VALUATION
-// ============================================================
-export const BROKER_REPORTS: BrokerReport[] = [
-    {
-        source: 'Clarksons',
-        date: '2026-03-06',
-        asset_class: 'VLCC (5-year old)',
-        current_price_mil_usd: 112.5,
-        wow_change_pct: '+1.5',
-        market_sentiment: 'Firm, driven by ton-mile demand increase',
-    },
-    {
-        source: 'SSY',
-        date: '2026-03-06',
-        asset_class: 'Suezmax (5-year old)',
-        current_price_mil_usd: 78.0,
-        wow_change_pct: '+0.8',
-        market_sentiment: 'Stable with upward bias',
-    },
-    {
-        source: 'Fearnleys',
-        date: '2026-03-06',
-        asset_class: 'Aframax (5-year old)',
-        current_price_mil_usd: 62.5,
-        wow_change_pct: '-0.3',
-        market_sentiment: 'Soft, oversupply in Mediterranean',
-    },
-];
-
-// ============================================================
-// RISK & COMPLIANCE NOTICES
-// ============================================================
-export const INSURANCE_CIRCULARS: InsuranceCircular[] = [
-    {
-        issuer: 'H&M Underwriters',
-        date: '2026-03-08',
-        title: '호르무즈 해협 AWRP(추가전쟁보험료) 요율 인상 안내',
-        impact: '해당 수역 진입 선박 선체 가치의 0.05%에서 0.25%로 급등',
-    },
-    {
-        issuer: 'West of England P&I',
-        date: '2026-03-07',
-        title: '중동 수역 확장 위험 지역 고시',
-        impact: '오만만 및 아라비해 북부 추가 지정, 사전 통보 72시간 의무화',
-    },
-];
-
-// ============================================================
-// ONTOLOGY GRAPH — OBJECTS (Nodes)
-// Production Demo Dataset: "Hormuz Crisis Ripple Effect"
+// LINKED OBJECT GRAPH — "Hormuz Crisis Ripple Effect"
 //
-// 16 Nodes across 5 domain tiers:
-//   1. Macro & Geo (3): Hormuz Tension, Brent Crude, War Risk Premium
-//   2. Maritime Assets (2): VLCC Apollo, MSC Isabella
-//   3. Chokepoints & Ports (3): Strait of Hormuz, Busan Port, Singapore Port
-//   4. Financial/Market (4): VLSFO, VLCC 5yr Value, KRW, EUR
-//   5. Risk Factors (2): Supply Chain Disruption, Reroute Cost
+// Storyline:
+//   VL BREEZE (VLCC)가 Ras Laffan에서 원유를 적재 후 울산으로 향하는 중,
+//   호르무즈 해협의 지정학적 긴장이 고조되어 대기 중이다.
+//   이 위기는 유가, 연료비, 보험료, 환율 등에 연쇄적으로 영향을 미치며,
+//   STAR MARIA (벌크선)도 아라비안해를 경유하는 항로에서 영향을 받는다.
+//
+// Graph Structure:
+//   TIER 1 — 거시 리스크 (Macro & Geo)          → triggers cascade
+//   TIER 2 — 해상 자산 (Maritime Assets)         → directly affected
+//   TIER 3 — 항로 & 초크포인트 (Routes & Ports)   → operational bottleneck
+//   TIER 4 — 시장 지표 (Financial & Market)       → cost/revenue impact
+//   TIER 5 — 리스크 팩터 (Risk Factors)           → amplifiers
 // ============================================================
-const NOW = '2026-03-11T10:00:00Z';
-const mockMeta = (source = 'Palantir AIP') => ({
+
+const NOW = '2026-03-13T10:00:00Z';
+const meta = (source = 'Palantir AIP') => ({
     createdAt: NOW,
     updatedAt: NOW,
     source,
@@ -348,7 +189,7 @@ const mockMeta = (source = 'Palantir AIP') => ({
 
 export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     // ================================================================
-    // 🌐 TIER 1: 거시 경제 및 지정학 (Macro & Geo)
+    // 🌐 TIER 1: 거시 경제 및 지정학 (Macro & Geo Events)
     // ================================================================
     {
         id: 'macro-hormuz-tension',
@@ -370,54 +211,11 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             supplyChainImpact: 85,
             energyImpact: 90,
         },
-        metadata: mockMeta(),
-    },
-    {
-        id: 'commodity-brent',
-        type: 'Commodity',
-        title: 'Brent Crude Oil',
-        description: 'International crude benchmark. $92/bbl surge on Hormuz tension + OPEC cuts.',
-        properties: {
-            riskScore: 82,
-            basePrice: 92,
-            unit: '$/bbl',
-            status: '$92/bbl breakout',
-            previousPrice: 78,
-            priceChange: '+17.9%',
-            volatility: 0.22,
-            impactValue: 82,
-            lat: 58.0,
-            lng: 0.0,
-            benchmarkType: 'ICE Brent Futures',
-            weeklyCeiling: 96,
-            weeklyFloor: 84,
-        },
-        metadata: mockMeta('Bloomberg Terminal'),
-    },
-    {
-        id: 'insurance-war-risk',
-        type: 'Insurance',
-        title: 'War Risk Premium (AWRP)',
-        description: 'H&M Underwriters AWRP surcharge: +0.75% of hull value for Persian Gulf entry.',
-        properties: {
-            riskScore: 88,
-            issuer: 'H&M Underwriters / West of England P&I',
-            rateFrom: 0.0005,
-            rateTo: 0.0075,
-            status: '0.75% surcharge',
-            impactValue: 88,
-            lat: 26.0,
-            lng: 56.0,
-            premiumCostPerVlcc: 840000,
-            effectiveDate: '2026-03-08',
-            preNoticeHours: 72,
-            affectedZone: 'Persian Gulf / Strait of Hormuz / Gulf of Oman',
-        },
-        metadata: mockMeta('Lloyd\'s of London'),
+        metadata: meta(),
     },
 
     // ================================================================
-    // 🚢 TIER 2: Maritime Assets
+    // 🚢 TIER 2: Maritime Assets (Vessels)
     // ================================================================
     {
         id: 'vessel-vl-breeze',
@@ -473,7 +271,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             destination: 'Ulsan (South Korea)',
             eta: '2026-04-02T10:00:00Z',
         },
-        metadata: mockMeta('Noon Report'),
+        metadata: meta('Noon Report'),
     },
     {
         id: 'vessel-star-maria',
@@ -529,12 +327,54 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             destination: 'Shinas (Oman)',
             eta: '2026-03-11T18:00:00Z',
         },
-        metadata: mockMeta('Noon Report'),
+        metadata: meta('Noon Report'),
     },
 
     // ================================================================
-    // ⚓ TIER 3: Chokepoints & Ports
+    // ⚓ TIER 3: Routes, Chokepoints & Ports
     // ================================================================
+    {
+        id: 'route-raslaffan-ulsan',
+        type: 'Route',
+        title: 'Ras Laffan — Ulsan (Persian Gulf → Korea East)',
+        description: 'Primary crude import route for South Korean refineries. Transits Hormuz Strait, Indian Ocean, Malacca Strait.',
+        properties: {
+            riskScore: 78,
+            status: 'restricted',
+            impactValue: 78,
+            originPortId: 'chokepoint-hormuz',
+            destinationPortId: 'port-busan',
+            distanceNm: 6400,
+            estimatedDays: 24,
+            riskZones: 'Hormuz TSS, Gulf of Oman HRA',
+            fuelCostEstimateUsd: 1820000,
+            currentStatus: 'restricted',
+            lat: 15.0,
+            lng: 70.0,
+        },
+        metadata: meta('Voyage Planning'),
+    },
+    {
+        id: 'route-sharjah-shinas',
+        type: 'Route',
+        title: 'Sharjah — Shinas (Short-Sea Gulf)',
+        description: 'Short-sea coastal route within Persian Gulf / Gulf of Oman.',
+        properties: {
+            riskScore: 42,
+            status: 'open',
+            impactValue: 42,
+            originPortId: 'chokepoint-hormuz',
+            destinationPortId: 'port-singapore',
+            distanceNm: 180,
+            estimatedDays: 2,
+            riskZones: 'Gulf of Oman coastal',
+            fuelCostEstimateUsd: 45000,
+            currentStatus: 'open',
+            lat: 25.3,
+            lng: 56.5,
+        },
+        metadata: meta('Voyage Planning'),
+    },
     {
         id: 'chokepoint-hormuz',
         type: 'Port',
@@ -556,7 +396,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             impactValue: 92,
             congestionPct: 88,
         },
-        metadata: mockMeta('UKMTO / ONI'),
+        metadata: meta('UKMTO / ONI'),
     },
     {
         id: 'port-busan',
@@ -578,7 +418,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             crudeImportPct: 35,
             affectedCargoDays: 7,
         },
-        metadata: mockMeta('BPCA'),
+        metadata: meta('BPCA'),
     },
     {
         id: 'port-singapore',
@@ -600,12 +440,34 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             bunkerDemandSpike: '+32%',
             avgBunkerPriceMt: 680,
         },
-        metadata: mockMeta('MPA Singapore'),
+        metadata: meta('MPA Singapore'),
     },
 
     // ================================================================
-    // 💰 TIER 4: Financial & Market
+    // 💰 TIER 4: Financial & Market (Commodities, Assets, Currencies, Insurance)
     // ================================================================
+    {
+        id: 'commodity-brent',
+        type: 'Commodity',
+        title: 'Brent Crude Oil',
+        description: 'International crude benchmark. $92/bbl surge on Hormuz tension + OPEC cuts.',
+        properties: {
+            riskScore: 82,
+            basePrice: 92,
+            unit: '$/bbl',
+            status: '$92/bbl breakout',
+            previousPrice: 78,
+            priceChange: '+17.9%',
+            volatility: 0.22,
+            impactValue: 82,
+            lat: 58.0,
+            lng: 0.0,
+            benchmarkType: 'ICE Brent Futures',
+            weeklyCeiling: 96,
+            weeklyFloor: 84,
+        },
+        metadata: meta('Bloomberg Terminal'),
+    },
     {
         id: 'commodity-vlsfo',
         type: 'Commodity',
@@ -623,7 +485,28 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             lat: 1.26,
             lng: 103.84,
         },
-        metadata: mockMeta('Ship & Bunker'),
+        metadata: meta('Ship & Bunker'),
+    },
+    {
+        id: 'insurance-war-risk',
+        type: 'Insurance',
+        title: 'War Risk Premium (AWRP)',
+        description: 'H&M Underwriters AWRP surcharge: +0.75% of hull value for Persian Gulf entry.',
+        properties: {
+            riskScore: 88,
+            issuer: 'H&M Underwriters / West of England P&I',
+            rateFrom: 0.0005,
+            rateTo: 0.0075,
+            status: '0.75% surcharge',
+            impactValue: 88,
+            lat: 26.0,
+            lng: 56.0,
+            premiumCostPerVlcc: 840000,
+            effectiveDate: '2026-03-08',
+            preNoticeHours: 72,
+            affectedZone: 'Persian Gulf / Strait of Hormuz / Gulf of Oman',
+        },
+        metadata: meta('Lloyd\'s of London'),
     },
     {
         id: 'market-vlcc-5yr',
@@ -639,25 +522,25 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             riskScore: 30,
             impactValue: 30,
         },
-        metadata: mockMeta('Clarksons Research'),
+        metadata: meta('Clarksons Research'),
     },
     {
         id: 'currency-krw',
         type: 'Currency',
         title: 'KRW (Korean Won)',
         properties: { code: 'KRW', baseRate: 1420, riskScore: 22, impactValue: 22, previousRate: 1385, weeklyChange: '+2.5%' },
-        metadata: mockMeta('api:frankfurter'),
+        metadata: meta('api:frankfurter'),
     },
     {
         id: 'currency-eur',
         type: 'Currency',
         title: 'EUR (Euro)',
         properties: { code: 'EUR', baseRate: 0.905, riskScore: 15, impactValue: 15, previousRate: 0.918, weeklyChange: '-1.4%' },
-        metadata: mockMeta('api:frankfurter'),
+        metadata: meta('api:frankfurter'),
     },
 
     // ================================================================
-    // ⚠️ TIER 5: Risk Factors
+    // ⚠️ TIER 5: Risk Factors (Amplifiers)
     // ================================================================
     {
         id: 'risk-supply-chain',
@@ -665,7 +548,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
         title: 'Supply Chain Disruption',
         description: 'Hormuz crisis cascading into global energy/logistics supply chain collapse risk.',
         properties: { category: 'supply', baseImpact: 85, riskScore: 75, impactValue: 75 },
-        metadata: mockMeta(),
+        metadata: meta(),
     },
     {
         id: 'risk-reroute-cost',
@@ -673,20 +556,15 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
         title: 'Reroute Cost Increase',
         description: 'Cape reroute adds $2.7M fuel cost + 14 days delay per voyage.',
         properties: { category: 'operational', baseImpact: 70, riskScore: 60, impactValue: 60, extraCostPerVoyageUsd: 2730000, extraDays: 14 },
-        metadata: mockMeta(),
+        metadata: meta(),
     },
 ];
 
 // ============================================================
-// ONTOLOGY GRAPH — LINKS (Edges)
-// "Hormuz Crisis Ripple Effect" — Directed Risk Propagation Graph
+// LINKED OBJECT GRAPH — EDGES
+// "Hormuz Crisis Ripple Effect" — Directed Risk Propagation
 //
-// REFERENTIAL INTEGRITY CHECK:
-//   All sourceId/targetId values exist in ONTOLOGY_OBJECTS above:
-//   macro-hormuz-tension, commodity-brent, insurance-war-risk,
-//   vessel-vl-breeze, vessel-star-maria, chokepoint-hormuz,
-//   port-busan, port-singapore, commodity-vlsfo, market-vlcc-5yr,
-//   currency-krw, currency-eur, risk-supply-chain, risk-reroute-cost
+// All sourceId/targetId values reference ONTOLOGY_OBJECTS above.
 // ============================================================
 export const ONTOLOGY_LINKS: OntologyLink[] = [
     // ── Hormuz Tension → Macro/Financial cascade ──
@@ -695,6 +573,14 @@ export const ONTOLOGY_LINKS: OntologyLink[] = [
     { id: 'link-ht-hormuz', sourceId: 'macro-hormuz-tension', targetId: 'chokepoint-hormuz', relationType: 'AFFECTED_BY', weight: 0.95, metadata: { label: 'threatens navigation' } },
     { id: 'link-ht-vlsfo', sourceId: 'macro-hormuz-tension', targetId: 'commodity-vlsfo', relationType: 'TRIGGERS', weight: 0.80, metadata: { label: 'fuel price spike' } },
     { id: 'link-ht-supply', sourceId: 'macro-hormuz-tension', targetId: 'risk-supply-chain', relationType: 'TRIGGERS', weight: 0.88, metadata: { label: 'supply chain cascade' } },
+
+    // ── Vessels → Routes (OPERATES_ON) ──
+    { id: 'link-vlbreeze-route', sourceId: 'vessel-vl-breeze', targetId: 'route-raslaffan-ulsan', relationType: 'OPERATES_ON', weight: 0.95, metadata: { label: 'active voyage' } },
+    { id: 'link-starmaria-route', sourceId: 'vessel-star-maria', targetId: 'route-sharjah-shinas', relationType: 'OPERATES_ON', weight: 0.90, metadata: { label: 'active voyage' } },
+
+    // ── Routes → Chokepoints (TRANSITS) ──
+    { id: 'link-route1-hormuz', sourceId: 'route-raslaffan-ulsan', targetId: 'chokepoint-hormuz', relationType: 'TRANSITS', weight: 0.90, metadata: { label: 'transits Hormuz Strait' } },
+    { id: 'link-route2-hormuz', sourceId: 'route-sharjah-shinas', targetId: 'chokepoint-hormuz', relationType: 'TRANSITS', weight: 0.60, metadata: { label: 'near Hormuz zone' } },
 
     // ── Strait of Hormuz → Vessel delays ──
     { id: 'link-hormuz-vlbreeze', sourceId: 'chokepoint-hormuz', targetId: 'vessel-vl-breeze', relationType: 'AFFECTED_BY', weight: 0.90, metadata: { label: 'forces delay of transit' } },
@@ -732,3 +618,11 @@ export const ONTOLOGY_LINKS: OntologyLink[] = [
     // ── Cross-tier amplifiers ──
     { id: 'link-brent-vlsfo', sourceId: 'commodity-brent', targetId: 'commodity-vlsfo', relationType: 'TRIGGERS', weight: 0.85, metadata: { label: 'crude price drives bunker fuel price' } },
 ];
+
+// ============================================================
+// INITIAL ONTOLOGY GRAPH — Convenience export
+// ============================================================
+export const INITIAL_ONTOLOGY_GRAPH = {
+    objects: ONTOLOGY_OBJECTS,
+    links: ONTOLOGY_LINKS,
+};

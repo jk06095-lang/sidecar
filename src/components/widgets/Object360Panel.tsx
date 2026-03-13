@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, TrendingDown, AlertTriangle, Zap, DollarSign, Link2 } from 'lucide-react';
+import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, TrendingDown, AlertTriangle, Zap, DollarSign, Link2, Newspaper, BarChart3, Route as RouteIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
 import ActionWizard, { getActionsForType } from './ActionWizard';
@@ -19,6 +19,7 @@ interface Object360PanelProps {
 const TYPE_ICONS: Record<string, React.ReactNode> = {
     Vessel: <Ship size={16} className="text-cyan-400" />,
     Port: <Navigation size={16} className="text-purple-400" />,
+    Route: <RouteIcon size={16} className="text-sky-400" />,
     Commodity: <Fuel size={16} className="text-amber-400" />,
     MacroEvent: <Zap size={16} className="text-rose-400" />,
     Market: <TrendingUp size={16} className="text-emerald-400" />,
@@ -26,6 +27,8 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
     Currency: <DollarSign size={16} className="text-emerald-400" />,
     RiskFactor: <AlertTriangle size={16} className="text-rose-400" />,
     Scenario: <FileText size={16} className="text-sky-400" />,
+    MarketIndicator: <BarChart3 size={16} className="text-emerald-400" />,
+    RiskEvent: <AlertTriangle size={16} className="text-rose-400" />,
 };
 
 const RISK_COLORS = {
@@ -53,6 +56,9 @@ const RELATION_LABELS: Record<string, string> = {
     LOCATED_AT: '위치',
     MONITORS: '자산가치 모니터링',
     DEPENDS_ON: '의존',
+    TRANSITS: '통항',
+    OPERATES_ON: '운항',
+    HEDGES: '헤지',
 };
 
 // ============================================================
@@ -248,6 +254,12 @@ function Object360PanelInner({ obj, objectId, objects, links, onClose, onNavigat
                         )}
                     </div>
                 </div>
+
+                {/* Linked News */}
+                <LinkedNewsSection objectId={objectId} />
+
+                {/* Market Exposure */}
+                <MarketExposureSection objectId={objectId} />
 
                 {/* Metadata */}
                 <div className="p-4">
@@ -450,7 +462,7 @@ function VesselWidget({ obj }: { obj: OntologyObject }) {
             <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
                 <div className="flex items-center justify-between mb-2">
                     <span className="text-[10px] text-slate-400">항해 진행</span>
-                    <span className="text-xs text-cyan-400 font-mono font-bold">{p.sailedDays || 0}/{p.planDays || 0}d</span>
+                    <span className="text-xs text-cyan-400 font-mono font-bold">{String(p.sailedDays || 0)}/{String(p.planDays || 0)}d</span>
                 </div>
                 <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
                     <div
@@ -459,7 +471,7 @@ function VesselWidget({ obj }: { obj: OntologyObject }) {
                     />
                 </div>
                 <div className="flex justify-between mt-1.5 text-[9px] text-slate-500 font-mono">
-                    <span>{p.departurePort}</span>
+                    <span>{`${p.departurePort || '-'}`}</span>
                     <span>{destination}</span>
                 </div>
                 <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/30">
@@ -574,7 +586,7 @@ function InsuranceWidget({ obj }: { obj: OntologyObject }) {
                 {p.preNoticeHours && (
                     <div className="flex items-center justify-between">
                         <span className="text-xs text-slate-400">사전 통보</span>
-                        <span className="text-xs text-amber-400 font-mono">{p.preNoticeHours}시간</span>
+                        <span className="text-xs text-amber-400 font-mono">{`${p.preNoticeHours}`}시간</span>
                     </div>
                 )}
             </div>
@@ -650,3 +662,117 @@ function ImpactBar({ label, value, color }: { label: string; value: number; colo
         </div>
     );
 }
+
+// ============================================================
+// LINKED NEWS SECTION
+// ============================================================
+function LinkedNewsSection({ objectId }: { objectId: string }) {
+    const objects = useOntologyStore(s => s.objects);
+    const articles = useOntologyStore(s => s.intelArticles);
+
+    const obj = objects.find(o => o.id === objectId);
+    if (!obj) return null;
+
+    const keywords = [
+        obj.title.toLowerCase(),
+        ...(obj.type === 'Vessel' ? [String(obj.properties.vesselType || '').toLowerCase()] : []),
+        ...(obj.type === 'Port' ? [String(obj.properties.region || '').toLowerCase()] : []),
+    ].filter(Boolean);
+
+    const matched = articles.filter(a => {
+        if (a.dropped) return false;
+        const titleLower = a.title.toLowerCase();
+        const descLower = (a.description || '').toLowerCase();
+        return keywords.some(kw => kw.length > 2 && (titleLower.includes(kw) || descLower.includes(kw)));
+    }).slice(0, 5);
+
+    if (matched.length === 0) return null;
+
+    return (
+        <div className="p-4 border-b border-slate-800/50">
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <Newspaper size={12} /> Linked Intel <span className="text-slate-600 font-mono">({matched.length})</span>
+            </h3>
+            <div className="space-y-1.5">
+                {matched.map(a => (
+                    <div key={a.id} className="px-3 py-2 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 transition-colors">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-[9px]">{a.sourceBadge || '📰'}</span>
+                            <span className="text-[9px] text-slate-500">{a.source}</span>
+                            <span className={cn("ml-auto text-[8px] px-1 py-0.5 rounded font-bold",
+                                a.riskLevel === 'Critical' ? 'bg-rose-500/15 text-rose-400' :
+                                    a.riskLevel === 'High' ? 'bg-amber-500/15 text-amber-400' :
+                                        'bg-slate-700/50 text-slate-400'
+                            )}>{a.riskLevel}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-300 line-clamp-2 leading-tight">{a.title}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// MARKET EXPOSURE SECTION
+// ============================================================
+function MarketExposureSection({ objectId }: { objectId: string }) {
+    const objects = useOntologyStore(s => s.objects);
+    const links = useOntologyStore(s => s.links);
+    const quantMetrics = useOntologyStore(s => s.lsegQuantMetrics);
+    const quotes = useOntologyStore(s => s.lsegMarketQuotes);
+
+    const connectedLinks = links.filter(l => l.sourceId === objectId || l.targetId === objectId);
+    const linkedMarketIds = new Set<string>();
+    connectedLinks.forEach(l => {
+        const otherId = l.sourceId === objectId ? l.targetId : l.sourceId;
+        const other = objects.find(o => o.id === otherId);
+        if (other && (other.type === 'Commodity' || other.type === 'Market' || other.type === 'Currency' || other.type === 'Insurance')) {
+            linkedMarketIds.add(otherId);
+        }
+    });
+
+    const linkedMarkets = objects.filter(o => linkedMarketIds.has(o.id));
+    if (linkedMarkets.length === 0) return null;
+
+    return (
+        <div className="p-4 border-b border-slate-800/50">
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <BarChart3 size={12} /> Market Exposure <span className="text-slate-600 font-mono">({linkedMarkets.length})</span>
+            </h3>
+            <div className="space-y-2">
+                {linkedMarkets.map(m => {
+                    const ric = String(m.properties.ric || m.properties.symbol || '');
+                    const metric = ric ? quantMetrics[ric] : undefined;
+                    const quote = quotes.find(q => q.symbol === ric);
+                    const isAlert = metric?.riskAlert;
+
+                    return (
+                        <div key={m.id} className={cn(
+                            "px-3 py-2 rounded-lg border transition-colors",
+                            isAlert ? "bg-rose-950/20 border-rose-500/30" : "bg-slate-800/30 border-slate-700/20"
+                        )}>
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] text-slate-300 font-medium">{m.title}</span>
+                                {isAlert && <span className="text-[8px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400 font-bold">⚠ ALERT</span>}
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] font-mono">
+                                {quote && (
+                                    <>
+                                        <span className="text-slate-200 font-bold">{quote.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                                        <span className={quote.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                            {quote.change >= 0 ? '+' : ''}{quote.changePercent?.toFixed(2)}%
+                                        </span>
+                                    </>
+                                )}
+                                {metric && <span className="text-slate-500">Z={metric.zScore.toFixed(1)} {metric.trend}</span>}
+                                {!quote && <span className="text-slate-600">{`${m.properties.basePrice || m.properties.baseRate || '-'}`}</span>}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+

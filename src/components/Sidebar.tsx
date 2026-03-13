@@ -42,10 +42,10 @@ function loadFavoritesLocal(): FavoriteEntry[] {
 // 4-PILLAR NAVIGATION
 // ============================================================
 const NAV_PILLARS = [
-  { id: 'workspace', label: 'Workspace', labelKo: '통합 관제', icon: LayoutDashboard },
-  { id: 'ontology', label: 'Ontology', labelKo: '데이터베이스', icon: Database },
-  { id: 'scenario', label: 'AIP Scenario', labelKo: '시뮬레이션', icon: Activity },
-  { id: 'action-center', label: 'Action Center', labelKo: '결재/보고', icon: Gavel },
+  { id: 'workspace', label: 'Fleet Control', labelKo: '① Fleet 관제', icon: LayoutDashboard },
+  { id: 'ontology', label: 'Ontology Data', labelKo: '② Ontology 데이터', icon: Database },
+  { id: 'scenario', label: 'Quant Simulation', labelKo: '③ 퀀트 시뮬레이션', icon: Activity },
+  { id: 'action-center', label: 'Action & Report', labelKo: '④ Action 결재', icon: Gavel },
 ] as const;
 
 export default function Sidebar({

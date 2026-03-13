@@ -8,7 +8,7 @@
  *  Tab 4: 문서 에디터 (IntegratedEditor)
  *  Tab 5: Data Lineage (DataLineagePanel)
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
     FileCheck, CheckCircle2, FileText, Edit3, GitBranch,
     Gavel, Clock, ArrowRight, Shield, Sparkles,
@@ -45,6 +45,14 @@ export default function ActionCenter() {
     const submitForApproval = useActionStore(s => s.submitForApproval);
     const approveAndExecute = useActionStore(s => s.approveAndExecute);
     const rejectAction = useActionStore(s => s.rejectAction);
+    const lastVIDocId = useActionStore(s => s.lastVoyageInstructionDocId);
+
+    // Auto-navigate to editor tab when a Voyage Instruction is generated
+    useEffect(() => {
+        if (lastVIDocId) {
+            setActiveTab('editor');
+        }
+    }, [lastVIDocId]);
 
     const pendingCount = draftActions.length + pendingApproval.length;
 

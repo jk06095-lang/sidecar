@@ -931,3 +931,112 @@ export async function generateContextualStrategies(
         throw new Error(`전략 제안 생성 실패: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
 }
+
+// ============================================================
+// MODULE 5: MARITIME STRATEGY GENERATOR
+// Takes quant P&L results and generates concrete maritime
+// alternatives (e.g. Cape reroute + eco speed combos)
+// ============================================================
+
+export interface QuantSummaryForAI {
+    vesselName: string;
+    tce: number;
+    tceDelta: number;
+    voyagePnL: number;
+    voyagePnLDelta: number;
+    voyageDays: number;
+    totalBunkerMT: number;
+    dailyFuelMT: number;
+    bunkerCostPerDay: number;
+}
+
+export async function generateMaritimeStrategies(
+    quantResults: QuantSummaryForAI[],
+    scenarioName: string,
+    currentParams: { vlsfoPrice: number; speedDelta: number; voyageDistance: number; capeReroute: number; freightRateWS: number },
+): Promise<AIStrategicProposal[]> {
+    const prompt = JSON.stringify({
+        scenarioName, currentParams, quantResults,
+        instruction: 'You are a maritime quant strategist. Based on the current voyage P&L results, generate 3-5 concrete alternative strategies. Each MUST include: specific speed adjustment, route decision (Suez vs Cape), expected bunker savings in USD, TCE change $/day. Use Korean. Return JSON array: id, actionType (OPERATIONAL|HEDGING), title, description, rationale, confidence (0-1), estimatedImpactUsd, targetDepartment, departmentMessage, priority, vesselTargets.',
+    });
+
+    try {
+        const raw = await bffGenerate(prompt, 'gemini-2.5-flash', 0.3);
+        const cleaned = cleanMarkdownFences(raw);
+        const parsed = JSON.parse(cleaned);
+        const arr = Array.isArray(parsed) ? parsed : (parsed.strategies || parsed.proposals || [parsed]);
+
+        return arr.map((p: Record<string, unknown>) => ({
+            id: String(p.id || `strat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+            actionType: (p.actionType === 'HEDGING' ? 'HEDGING' : 'OPERATIONAL') as 'HEDGING' | 'OPERATIONAL',
+            title: String(p.title || ''),
+            description: String(p.description || ''),
+            rationale: String(p.rationale || ''),
+            confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0.7)),
+            estimatedImpactUsd: Number(p.estimatedImpactUsd) || 0,
+            targetDepartment: String(p.targetDepartment || '운항팀'),
+            departmentMessage: String(p.departmentMessage || ''),
+            priority: (['IMMEDIATE', 'SHORT_TERM', 'MEDIUM_TERM'].includes(String(p.priority)) ? String(p.priority) : 'SHORT_TERM') as AIStrategicProposal['priority'],
+            vesselTargets: Array.isArray(p.vesselTargets) ? p.vesselTargets.map(String) : [],
+        }));
+    } catch (err) {
+        console.error('[GeminiService] Maritime strategy generation failed:', err);
+        throw new Error(`해운 전략 생성 실패: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+}
+
+// ============================================================
+// MODULE 6: VOYAGE INSTRUCTION GENERATOR
+// Produces a formal captain Voyage Instruction markdown
+// from an approved StrategicActionLog
+// ============================================================
+
+export async function generateVoyageInstruction(
+    action: {
+        description: string;
+        targetDepartment: string;
+        departmentMessage: string;
+        approvedBy: string;
+        estimatedImpactUsd?: number;
+        executedAt?: string;
+        confidence?: number;
+    },
+    vesselName = 'FLEET VESSEL',
+): Promise<string> {
+    const nowISO = new Date().toISOString();
+    const viNum = `VI-${nowISO.slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 999).toString().padStart(3, '0')}`;
+
+    const prompt = [
+        'You are a maritime ops officer. Generate a formal Voyage Instruction in Korean markdown.',
+        `Action: ${action.description}`,
+        `Dept: ${action.targetDepartment} | Msg: ${action.departmentMessage}`,
+        `Approved: ${action.approvedBy} | Impact: $${(action.estimatedImpactUsd || 0).toLocaleString()}`,
+        `Doc#: ${viNum} | Vessel: ${vesselName}`,
+        'Include: route, speed order (kn/RPM), bunker budget (MT VLSFO), ETA, special instructions, safety, signature block.',
+    ].join('\n');
+
+    try {
+        return await bffGenerate(prompt, 'gemini-2.5-flash', 0.2);
+    } catch (err) {
+        console.error('[GeminiService] Voyage Instruction generation failed:', err);
+        return [
+            `# VOYAGE INSTRUCTION No. ${viNum}`,
+            '',
+            `**발행일시**: ${new Date().toLocaleString('ko-KR')}`,
+            `**선박**: ${vesselName}  |  **결재자**: ${action.approvedBy}`,
+            '',
+            '---',
+            '',
+            `## 1. 지시 내용\n\n${action.description}`,
+            '',
+            `## 2. 세부 사항\n\n${action.departmentMessage}`,
+            '',
+            `## 3. 예상 재무 영향\n\n${(action.estimatedImpactUsd || 0) >= 0 ? '+' : ''}$${Math.abs(action.estimatedImpactUsd || 0).toLocaleString()} USD`,
+            '',
+            `## 4. 승인 정보\n\n- 결재자: ${action.approvedBy}\n- 결재일시: ${action.executedAt || nowISO}\n- AI 신뢰도: ${Math.round((action.confidence || 0) * 100)}%`,
+            '',
+            '---',
+            '*본 지시서는 SIDECAR AIP 시스템에 의해 자동 생성되었습니다.*',
+        ].join('\n');
+    }
+}

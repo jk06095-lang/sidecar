@@ -35,6 +35,8 @@ interface ActionStoreState {
     executedActions: StrategicActionLog[];
     /** Active toast notifications */
     toasts: ActionToast[];
+    /** Last generated Voyage Instruction document ID (for auto-navigation) */
+    lastVoyageInstructionDocId: string | null;
 
     // ---- Lifecycle Actions ----
 
@@ -81,6 +83,7 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
     pendingApproval: [],
     executedActions: [],
     toasts: [],
+    lastVoyageInstructionDocId: null,
 
     // ─── Import AI Proposals → DRAFT ───
     importProposals: (proposals, scenarioName) => {
@@ -199,6 +202,35 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
         };
         set(s => ({ toasts: [...s.toasts, toast] }));
         setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== toast.id) })), 6000);
+
+        // ── Auto-generate Voyage Instruction document ──
+        try {
+            const { generateVoyageInstruction } = await import('../services/geminiService');
+            const { doc: firestoreDoc, setDoc } = await import('firebase/firestore');
+            const { db } = await import('../lib/firebase');
+
+            const viContent = await generateVoyageInstruction(executed, executed.description.split(' ')[0] || 'FLEET VESSEL');
+            const viDocId = `vi_${Date.now()}`;
+            await setDoc(firestoreDoc(db, 'app/editor/documents', viDocId), {
+                title: `항로 지시서 — ${executed.description.slice(0, 40)}`,
+                content: viContent,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
+            set({ lastVoyageInstructionDocId: viDocId });
+
+            const viToast: ActionToast = {
+                id: `toast-vi-${Date.now()}`,
+                message: '📋 항로 변경 지시서(Voyage Instruction)가 자동 생성되었습니다.',
+                department: '문서 에디터',
+                type: 'info',
+                timestamp: Date.now(),
+            };
+            set(s => ({ toasts: [...s.toasts, viToast] }));
+            setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== viToast.id) })), 8000);
+        } catch (viErr) {
+            console.error('[ActionStore] Voyage Instruction generation failed:', viErr);
+        }
     },
 
     // ─── PENDING_APPROVAL → DRAFT (rejection) ───

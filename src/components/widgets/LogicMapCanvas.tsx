@@ -148,15 +148,26 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
 
         if (linkMode) {
             if (linkMode !== id) {
-                const edgeId = `edge-${Date.now()}`;
                 const exists = edges.some(
                     edge => (edge.source === linkMode && edge.target === id) ||
                         (edge.source === id && edge.target === linkMode)
                 );
                 if (!exists) {
-                    const nextEdges = [...edges, { id: edgeId, source: linkMode, target: id, label: '' }];
-                    setEdges(nextEdges);
-                    autoSave(nodes, nextEdges);
+                    const sourceNode = nodes.find(n => n.id === linkMode);
+                    const targetNode = nodes.find(n => n.id === id);
+
+                    // Auto-causal chain: risk/variable → vessel
+                    if (sourceNode && targetNode &&
+                        (sourceNode.type === 'trigger' || sourceNode.type === 'variable') &&
+                        targetNode.type === 'vessel') {
+                        generateCausalChain(sourceNode, targetNode);
+                    } else {
+                        // Normal edge
+                        const edgeId = `edge-${Date.now()}`;
+                        const nextEdges = [...edges, { id: edgeId, source: linkMode, target: id, label: '' }];
+                        setEdges(nextEdges);
+                        autoSave(nodes, nextEdges);
+                    }
                 }
             }
             setLinkMode(null);
@@ -173,6 +184,98 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
             offsetX: e.clientX - rect.left - node.x,
             offsetY: e.clientY - rect.top - node.y,
         });
+    };
+
+    // ── Auto Causal Chain Generator ──
+    // When a risk/variable node is linked to a vessel, auto-generate:
+    //   [trigger/variable] → [condition] → [action] → [outcome] → [vessel]
+    const generateCausalChain = (source: ProcessNode, target: ProcessNode) => {
+        const ts = Date.now();
+        const variableId = source.variableId;
+        const varMeta = variableId ? VARIABLE_MAP.get(variableId) : null;
+
+        // Generate contextual labels based on the variable type
+        let conditionText = '위험 임계치 초과';
+        let actionText = '대응 조치 발동';
+        let outcomeText = 'P&L 영향';
+        let condLabel = 'triggers';
+        let actionLabel = 'activates';
+        let outcomeLabel = 'impacts';
+
+        if (variableId === 'suezRisk' || source.text.includes('수에즈')) {
+            conditionText = '수에즈 위험 > 60%';
+            actionText = '희망봉(COGH) 우회';
+            outcomeText = '+3,200nm / 연료비 증가';
+            condLabel = 'exceeds threshold';
+            actionLabel = 'reroutes via';
+            outcomeLabel = 'raises OPEX';
+        } else if (variableId === 'hormuzRisk' || source.text.includes('호르무즈')) {
+            conditionText = '호르무즈 봉쇄 위험 ↑';
+            actionText = '긴급 항로 변경';
+            outcomeText = 'WS 운임 ↑ / 지연 +8d';
+            condLabel = 'threatens chokepoint';
+            actionLabel = 'triggers';
+            outcomeLabel = 'raises TCE';
+        } else if (variableId === 'vlsfoPrice' || source.text.includes('VLSFO')) {
+            conditionText = '벙커유 급등 감지';
+            actionText = '감속 운항 전환 (-2kn)';
+            outcomeText = '연료 소모 -33% / 항해일수 ↑';
+            condLabel = 'price spike';
+            actionLabel = 'slow steaming';
+            outcomeLabel = 'reduces bunker';
+        } else if (variableId === 'carbonTax' || source.text.includes('탄소')) {
+            conditionText = 'EU ETS 단가 > €80';
+            actionText = 'ECA 규제 대응';
+            outcomeText = 'OPEX +$' + Math.round(45 * 65 * 3.114).toLocaleString() + '/항차';
+            condLabel = 'regulation';
+            actionLabel = 'compliance';
+            outcomeLabel = 'raises OPEX';
+        } else if (variableId === 'awrpRate' || source.text.includes('전쟁보험')) {
+            conditionText = 'AWRP 보험료율 ↑';
+            actionText = '보험 재심사 요청';
+            outcomeText = 'OPEX 일일 +$' + Math.round(0.04 / 100 * 95_000_000 / 365).toLocaleString();
+            condLabel = 'premium increase';
+            actionLabel = 'reassess';
+            outcomeLabel = 'raises OPEX';
+        } else if (varMeta) {
+            conditionText = `${varMeta.nameKo} 변동 감지`;
+            actionText = `${varMeta.nameKo} 대응`;
+            outcomeText = `${target.text} P&L 변동`;
+        }
+
+        // Position chain nodes between source and target
+        const startX = source.x;
+        const endX = target.x;
+        const startY = source.y;
+        const endY = target.y;
+        const stepX = (endX - startX) / 4;
+        const stepY = (endY - startY) / 4;
+
+        const condNode: ProcessNode = {
+            id: `node-${ts}-cond`, x: startX + stepX, y: startY + stepY,
+            type: 'condition', text: conditionText,
+        };
+        const actNode: ProcessNode = {
+            id: `node-${ts}-action`, x: startX + stepX * 2, y: startY + stepY * 2,
+            type: 'action', text: actionText,
+        };
+        const outNode: ProcessNode = {
+            id: `node-${ts}-outcome`, x: startX + stepX * 3, y: startY + stepY * 3,
+            type: 'outcome', text: outcomeText,
+        };
+
+        const newNodes = [...nodes, condNode, actNode, outNode];
+        const newEdges = [
+            ...edges,
+            { id: `edge-${ts}-1`, source: source.id, target: condNode.id, label: condLabel },
+            { id: `edge-${ts}-2`, source: condNode.id, target: actNode.id, label: actionLabel },
+            { id: `edge-${ts}-3`, source: actNode.id, target: outNode.id, label: outcomeLabel },
+            { id: `edge-${ts}-4`, source: outNode.id, target: target.id, label: 'impacts' },
+        ];
+
+        setNodes(newNodes);
+        setEdges(newEdges);
+        autoSave(newNodes, newEdges);
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {

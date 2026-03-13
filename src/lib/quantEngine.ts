@@ -143,7 +143,15 @@ export function generateQuantMetrics(
 }
 
 // ============================================================
-// PART B — MARITIME P&L PIPELINE
+// PART B — MARITIME P&L PIPELINE (Real Formulas)
+//
+// Key formulas:
+//   Sea Days       = voyageDistance / (designSpeed + speedDelta) / 24
+//   Daily Fuel     = baseFuelConsumption × ((designSpeed + speedDelta) / designSpeed)³
+//   Bunker Cost    = vlsfo × dailyFuel × seaDays
+//   Freight Rev    = (WS / 100) × flatRate × cargoMT
+//   TCE            = (Freight Revenue − Voyage Costs) / Sea Days
+//   Voyage P&L     = TCE × seaDays − OPEX × totalDays − delayPenalty
 // ============================================================
 
 /**
@@ -174,8 +182,12 @@ export interface VesselPnL {
     awrpCost: number;
     /** Carbon tax cost — $ total */
     carbonCost: number;
-    /** Voyage duration in days */
+    /** Voyage duration in days (sea days) */
     voyageDays: number;
+    /** Total bunker consumption (mt) */
+    totalBunkerMT: number;
+    /** Daily fuel consumption (mt/day) */
+    dailyFuelMT: number;
 }
 
 /**
@@ -196,46 +208,85 @@ export interface ScenarioPnLResult {
     };
 }
 
-// ── Constants ──
-const VLCC_FLAT_RATE = 19.80;         // $/mt Worldscale flat rate (Persian Gulf → East)
-const BASE_CARGO_MT = 270_000;        // VLCC standard cargo (mt)
-const BASE_WS = 55;                   // Worldscale baseline
-const BASE_SEA_DAYS = 20;             // Typical PG→East voyage
-const BASE_CANAL_FEE = 150_000;       // Suez transit fee ($)
-const CAPE_REROUTE_EXTRA_DAYS = 12;   // Extra days for Cape of Good Hope reroute
-const BASE_CREW_COST_PER_DAY = 8_500; // $/day crew + M&R
-const HULL_VALUE_USD = 95_000_000;    // Estimated VLCC hull value for AWRP calculation
-const CO2_EMISSION_PER_DAY = 85;      // tCO₂/day at sea for VLCC
-const DELAY_PENALTY_PER_DAY = 35_000; // Demurrage/opportunity cost $/day
+// ── Vessel Design Constants (VLCC class) ──
+const DESIGN_SPEED_KNOTS = 14.5;          // Design speed (knots)
+const BASE_FUEL_CONSUMPTION_MT = 65;      // mt/day at design speed (VLCC VLSFO main engine)
+const VLCC_FLAT_RATE = 19.80;             // $/mt Worldscale flat rate (PG → East)
+const SUEZ_CANAL_FEE = 400_000;           // Suez transit fee ($) — VLCC laden
+const CAPE_REROUTE_EXTRA_NM = 3_200;      // Extra nautical miles via Cape of Good Hope
+const BASE_CREW_COST_PER_DAY = 8_500;     // $/day crew + M&R + insurance base
+const HULL_VALUE_USD = 95_000_000;        // VLCC hull value for AWRP calc
+const CO2_EMISSION_FACTOR = 3.114;        // tCO₂ per metric ton of VLSFO burned (IMO)
+const DELAY_PENALTY_PER_DAY = 35_000;     // Demurrage/opportunity cost $/day
+
+/**
+ * Compute sea days from distance, speed, and reroute.
+ *
+ *   seaDays = totalDistance / (actualSpeed × 24)
+ *   where totalDistance = voyageDistance + (capeReroute ? CAPE_REROUTE_EXTRA_NM : 0)
+ *   and   actualSpeed = designSpeed + speedDelta (clamped to min 8 knots)
+ */
+export function computeSeaDays(params: SimulationParams): number {
+    const voyageDistance = params.voyageDistance ?? 6500;
+    const speedDelta = params.speedDelta ?? 0;
+    const capeReroute = (params.capeReroute ?? 0) >= 1;
+    const suezRisk = (params.suezRisk ?? 0) / 100;
+
+    // Auto-trigger Cape reroute if Suez risk > 60% and not already set
+    const effectiveCapeReroute = capeReroute || suezRisk > 0.6;
+
+    const totalDistance = voyageDistance + (effectiveCapeReroute ? CAPE_REROUTE_EXTRA_NM : 0);
+    const actualSpeed = Math.max(8, DESIGN_SPEED_KNOTS + speedDelta);
+
+    return totalDistance / (actualSpeed * 24);
+}
+
+/**
+ * Compute daily fuel consumption using the Admiralty cubic law.
+ *
+ *   dailyFuel = baseFuel × (actualSpeed / designSpeed)³
+ *
+ * This is the standard naval architecture approximation —
+ * fuel consumption scales with the cube of speed.
+ */
+export function computeDailyFuel(params: SimulationParams): number {
+    const speedDelta = params.speedDelta ?? 0;
+    const actualSpeed = Math.max(8, DESIGN_SPEED_KNOTS + speedDelta);
+    const speedRatio = actualSpeed / DESIGN_SPEED_KNOTS;
+
+    return BASE_FUEL_CONSUMPTION_MT * Math.pow(speedRatio, 3);
+}
 
 /**
  * Compute Time Charter Equivalent (TCE) in $/day.
  *
- * TCE = (Freight Revenue − Voyage Costs) / Sea Days
- * Freight Revenue = WS × Flat Rate × Cargo
- * Voyage Costs = Bunker + Canal Fees
+ *   TCE = (Freight Revenue − Voyage Costs) / Sea Days
+ *
+ *   Freight Revenue = (WS / 100) × flatRate × cargoMT × geoMultiplier
+ *   Voyage Costs    = (dailyFuel × vlsfo × seaDays) + canalFee
  */
-export function computeTCE(params: SimulationParams, baseWS: number = BASE_WS): number {
+export function computeTCE(params: SimulationParams): number {
     const vlsfo = params.vlsfoPrice ?? 620;
-    const hormuzRisk = (params.hormuzRisk ?? 0) / 100; // 0–1
-    const suezRisk = (params.suezRisk ?? 0) / 100;     // 0–1
+    const ws = params.freightRateWS ?? 55;
+    const cargoMT = params.cargoVolume ?? 270_000;
+    const hormuzRisk = (params.hormuzRisk ?? 0) / 100;
+    const suezRisk = (params.suezRisk ?? 0) / 100;
+    const capeReroute = (params.capeReroute ?? 0) >= 1;
+    const effectiveCapeReroute = capeReroute || suezRisk > 0.6;
 
-    // WS adjusts upward with geopolitical risk (supply disruption → higher rates)
-    const wsMultiplier = 1 + hormuzRisk * 0.6 + suezRisk * 0.3;
-    const effectiveWS = baseWS * wsMultiplier;
+    // Geopolitical premium on freight rates (supply disruption → higher WS)
+    const geoMultiplier = 1 + hormuzRisk * 0.6 + suezRisk * 0.3;
+    const effectiveWS = ws * geoMultiplier;
 
-    // Freight revenue
-    const freightRevenue = (effectiveWS / 100) * VLCC_FLAT_RATE * BASE_CARGO_MT;
+    // Revenue
+    const freightRevenue = (effectiveWS / 100) * VLCC_FLAT_RATE * cargoMT;
 
-    // Bunker cost: VLCC burns ~75mt/day at sea
-    const bunkerConsumption = 75; // mt/day
-    const seaDays = BASE_SEA_DAYS + (suezRisk > 0.5 ? CAPE_REROUTE_EXTRA_DAYS : 0);
-    const bunkerCost = vlsfo * bunkerConsumption * seaDays;
+    // Voyage costs  
+    const seaDays = computeSeaDays(params);
+    const dailyFuel = computeDailyFuel(params);
+    const bunkerCost = vlsfo * dailyFuel * seaDays;
+    const canalFee = effectiveCapeReroute ? 0 : SUEZ_CANAL_FEE;
 
-    // Canal fee (waived if rerouted via Cape)
-    const canalFee = suezRisk > 0.5 ? 0 : BASE_CANAL_FEE;
-
-    // TCE
     const voyageCosts = bunkerCost + canalFee;
     const tce = (freightRevenue - voyageCosts) / seaDays;
 
@@ -245,21 +296,23 @@ export function computeTCE(params: SimulationParams, baseWS: number = BASE_WS): 
 /**
  * Compute daily OPEX (Operating Expenditure) in $/day.
  *
- * OPEX = Crew/M&R + AWRP Insurance + Carbon Tax
+ *   OPEX = Crew/M&R + AWRP Insurance + Carbon Tax
  */
 export function computeOPEX(params: SimulationParams): number {
-    const awrpRate = params.awrpRate ?? 0.04;       // percentage
-    const carbonTax = params.carbonTax ?? 45;       // €/tCO₂
-    const crewSupply = (params.crewSupply ?? 15) / 100; // 0–1
+    const awrpRate = params.awrpRate ?? 0.04;
+    const carbonTax = params.carbonTax ?? 45;
+    const crewSupply = (params.crewSupply ?? 15) / 100;
 
     // Crew & maintenance — increases with crew shortage
     const crewCost = BASE_CREW_COST_PER_DAY * (1 + crewSupply * 0.25);
 
-    // AWRP — Additional War Risk Premium (annualized, prorated to daily)
+    // AWRP — Additional War Risk Premium (annualized → daily)
     const awrpDaily = (awrpRate / 100) * HULL_VALUE_USD / 365;
 
-    // Carbon tax — EU ETS
-    const carbonDaily = carbonTax * CO2_EMISSION_PER_DAY;
+    // Carbon tax — EU ETS (based on actual daily fuel burn)
+    const dailyFuel = computeDailyFuel(params);
+    const dailyCO2 = dailyFuel * CO2_EMISSION_FACTOR;
+    const carbonDaily = carbonTax * dailyCO2;
 
     return Math.round(crewCost + awrpDaily + carbonDaily);
 }
@@ -268,50 +321,44 @@ export function computeOPEX(params: SimulationParams): number {
  * Compute additional delay days from scenario risk factors.
  */
 export function computeDelayDays(params: SimulationParams): number {
-    const portCongestion = (params.portCongestion ?? 20) / 100;   // 0–1
-    const hormuzRisk = (params.hormuzRisk ?? 15) / 100;           // 0–1
-    const suezRisk = (params.suezRisk ?? 10) / 100;               // 0–1
-    const seaState = (params.seaStateIndex ?? 20) / 100;           // 0–1
+    const portCongestion = (params.portCongestion ?? 20) / 100;
+    const hormuzRisk = (params.hormuzRisk ?? 15) / 100;
+    const seaState = (params.seaStateIndex ?? 20) / 100;
     const supplyChainStress = (params.supplyChainStress ?? 25) / 100;
 
     // Port congestion → waiting days (max ~10 days)
     const portDelay = portCongestion * 10;
 
-    // Chokepoint reroute → fixed 12 days if risk > 50%
-    const rerouteDelay = suezRisk > 0.5 ? CAPE_REROUTE_EXTRA_DAYS : (hormuzRisk > 0.7 ? 8 : hormuzRisk * 5);
+    // Hormuz chokepoint → up to 8 days disruption
+    const hormuzDelay = hormuzRisk > 0.7 ? 8 : hormuzRisk * 5;
 
     // Weather → up to 4 extra days
     const weatherDelay = seaState * 4;
 
-    // Supply chain → up to 3 extra days (waiting for cargo, documentation)
+    // Supply chain → up to 3 extra days
     const scDelay = supplyChainStress * 3;
 
-    return Math.round((portDelay + rerouteDelay + weatherDelay + scDelay) * 10) / 10;
+    return Math.round((portDelay + hormuzDelay + weatherDelay + scDelay) * 10) / 10;
 }
 
 /**
  * Compute full voyage P&L for a single vessel.
  *
- * Voyage P&L = TCE × Voyage Days − OPEX × Total Days − Delay Penalty
+ *   Voyage P&L = TCE × seaDays − OPEX × totalDays − delayPenalty
  */
 export function computeVoyagePnL(
     params: SimulationParams,
-    baseTce?: number,
-    baseOpex?: number,
-    baseVoyageDays: number = BASE_SEA_DAYS,
+    tce?: number,
+    opex?: number,
 ): number {
-    const tce = baseTce ?? computeTCE(params);
-    const opex = baseOpex ?? computeOPEX(params);
+    const effectiveTce = tce ?? computeTCE(params);
+    const effectiveOpex = opex ?? computeOPEX(params);
+    const seaDays = computeSeaDays(params);
     const delayDays = computeDelayDays(params);
-    const totalDays = baseVoyageDays + delayDays;
+    const totalDays = seaDays + delayDays;
 
-    // Revenue from TCE covers sea days
-    const revenue = tce * baseVoyageDays;
-
-    // OPEX covers all days (at sea + delay)
-    const totalOpex = opex * totalDays;
-
-    // Delay penalty (demurrage / opportunity cost)
+    const revenue = effectiveTce * seaDays;
+    const totalOpex = effectiveOpex * totalDays;
     const delayPenalty = delayDays * DELAY_PENALTY_PER_DAY;
 
     return Math.round(revenue - totalOpex - delayPenalty);
@@ -323,18 +370,12 @@ export function computeVoyagePnL(
 
 /**
  * Run full fleet-level P&L simulation comparing base vs branch params.
- *
- * @param baseParams - Baseline scenario parameters (defaults / current state)
- * @param branchParams - Modified scenario parameters (user adjustments)
- * @param fleet - Fleet vessels to evaluate
- * @returns ScenarioPnLResult with per-vessel and fleet aggregates
  */
 export function runScenarioPnL(
     baseParams: SimulationParams,
     branchParams: SimulationParams,
     fleet: FleetVessel[],
 ): ScenarioPnLResult {
-    // Use fleet vessels, or create a synthetic VLCC if fleet is empty
     const effectiveFleet = fleet.length > 0 ? fleet : [{
         vessel_name: 'FLEET AVG (VLCC)',
         vessel_type: 'VLCC',
@@ -342,22 +383,26 @@ export function runScenarioPnL(
     } as FleetVessel];
 
     const vessels: VesselPnL[] = effectiveFleet.map(v => {
-        // Baseline
+        // ── Baseline calculation ──
         const baseTce = computeTCE(baseParams);
         const baseOpex = computeOPEX(baseParams);
+        const baseSeaDays = computeSeaDays(baseParams);
         const baseDelay = computeDelayDays(baseParams);
         const basePnL = computeVoyagePnL(baseParams, baseTce, baseOpex);
 
-        // Branch (modified scenario)
+        // ── Branch (user-modified) calculation ──
         const branchTce = computeTCE(branchParams);
         const branchOpex = computeOPEX(branchParams);
+        const branchSeaDays = computeSeaDays(branchParams);
         const branchDelay = computeDelayDays(branchParams);
         const branchPnL = computeVoyagePnL(branchParams, branchTce, branchOpex);
 
         const vlsfo = branchParams.vlsfoPrice ?? 620;
         const awrpRate = branchParams.awrpRate ?? 0.04;
         const carbonTax = branchParams.carbonTax ?? 45;
-        const voyageDays = BASE_SEA_DAYS + branchDelay;
+        const dailyFuel = computeDailyFuel(branchParams);
+        const totalBunker = dailyFuel * branchSeaDays;
+        const dailyCO2 = dailyFuel * CO2_EMISSION_FACTOR;
 
         return {
             vesselName: v.vessel_name,
@@ -370,16 +415,18 @@ export function runScenarioPnL(
             delayDaysDelta: branchDelay - baseDelay,
             voyagePnL: branchPnL,
             voyagePnLDelta: branchPnL - basePnL,
-            bunkerCostPerDay: Math.round(vlsfo * 75),
-            awrpCost: Math.round((awrpRate / 100) * HULL_VALUE_USD * voyageDays / 365),
-            carbonCost: Math.round(carbonTax * CO2_EMISSION_PER_DAY * voyageDays),
-            voyageDays: Math.round(voyageDays * 10) / 10,
+            bunkerCostPerDay: Math.round(vlsfo * dailyFuel),
+            awrpCost: Math.round((awrpRate / 100) * HULL_VALUE_USD * branchSeaDays / 365),
+            carbonCost: Math.round(carbonTax * dailyCO2 * branchSeaDays),
+            voyageDays: Math.round(branchSeaDays * 10) / 10,
+            totalBunkerMT: Math.round(totalBunker),
+            dailyFuelMT: Math.round(dailyFuel * 10) / 10,
         };
     });
 
     // Fleet aggregates
     const n = vessels.length || 1;
-    const totalRevenueDelta = vessels.reduce((s, v) => s + v.tceDelta * BASE_SEA_DAYS, 0);
+    const totalRevenueDelta = vessels.reduce((s, v) => s + v.tceDelta * v.voyageDays, 0);
     const totalOpexDelta = vessels.reduce((s, v) => s + v.opexDelta * v.voyageDays, 0);
     const totalDelayDaysDelta = vessels.reduce((s, v) => s + v.delayDaysDelta, 0);
     const netPnLDelta = vessels.reduce((s, v) => s + v.voyagePnLDelta, 0);
@@ -397,3 +444,4 @@ export function runScenarioPnL(
         },
     };
 }
+

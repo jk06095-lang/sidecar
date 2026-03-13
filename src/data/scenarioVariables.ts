@@ -86,6 +86,11 @@ export const SCENARIO_VARIABLE_CATALOG: ScenarioVariable[] = [
     { id: 'shippingStockIdx', name: 'Shipping Stock Index', nameKo: '해운주 지수', category: 'finance', unit: '/100', min: 0, max: 100, step: 1, defaultValue: 55, description: '글로벌 해운사 주가 종합 지수', icon: 'BarChart3', color: 'text-green-500' },
 
     // ── Maritime & Climate ──
+    { id: 'speedDelta', name: 'Speed Adjustment', nameKo: '선속 조절', category: 'maritime', unit: 'knot', min: -3, max: 3, step: 0.5, defaultValue: 0, description: '기본 설계 속도 대비 증감 (감속→연비↑, 가속→도착↓)', icon: 'Gauge', color: 'text-cyan-400' },
+    { id: 'capeReroute', name: 'Cape of Good Hope', nameKo: '희망봉 우회', category: 'maritime', unit: '0/1', min: 0, max: 1, step: 1, defaultValue: 0, description: '수에즈 운하 대신 희망봉(COGH) 우회 여부 (1=우회)', icon: 'Map', color: 'text-cyan-500' },
+    { id: 'voyageDistance', name: 'Route Distance', nameKo: '항로 거리', category: 'maritime', unit: 'nm', min: 1000, max: 20000, step: 100, defaultValue: 6500, description: '편도 항해 거리 (해리, Nautical Miles)', icon: 'Route', color: 'text-cyan-300' },
+    { id: 'cargoVolume', name: 'Cargo Volume', nameKo: '화물 적재량', category: 'maritime', unit: 'mt', min: 50000, max: 320000, step: 5000, defaultValue: 270000, description: '항차별 화물 적재량 (메트릭톤)', icon: 'Package', color: 'text-cyan-400' },
+    { id: 'freightRateWS', name: 'Freight Rate (WS)', nameKo: 'WS 운임 지수', category: 'maritime', unit: 'WS', min: 20, max: 200, step: 1, defaultValue: 55, description: 'Worldscale 운임 지수 (화주-선주 합의 용선료 기준)', icon: 'TrendingUp', color: 'text-cyan-600' },
     { id: 'naturalDisasterIndex', name: 'Natural Disaster', nameKo: '천재지변 지수', category: 'maritime', unit: '/100', min: 0, max: 100, step: 1, defaultValue: 5, description: '태풍/지진/쓰나미/홍수 물리적 위험', icon: 'CloudLightning', color: 'text-cyan-400' },
     { id: 'seaStateIndex', name: 'Sea State Index', nameKo: '해상 상태 지수', category: 'maritime', unit: '/100', min: 0, max: 100, step: 1, defaultValue: 20, description: '파고/풍속/해류 악화 종합지수', icon: 'Waves', color: 'text-cyan-300' },
     { id: 'typhoonRisk', name: 'Typhoon Risk', nameKo: '태풍 리스크', category: 'maritime', unit: '/100', min: 0, max: 100, step: 1, defaultValue: 10, description: '서태평양 태풍 활동 강도/빈도', icon: 'CloudLightning', color: 'text-cyan-500' },
@@ -111,6 +116,6 @@ export const VARIABLE_MAP = new Map(SCENARIO_VARIABLE_CATALOG.map(v => [v.id, v]
 
 // Default variable IDs that every new scenario starts with
 export const DEFAULT_VARIABLE_IDS = [
-    'vlsfoPrice', 'newsSentimentScore', 'awrpRate', 'interestRate',
-    'supplyChainStress', 'energyCrisisLevel',
+    'vlsfoPrice', 'freightRateWS', 'speedDelta', 'voyageDistance', 'capeReroute',
+    'suezRisk', 'awrpRate', 'carbonTax',
 ];

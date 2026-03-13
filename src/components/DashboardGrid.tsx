@@ -36,15 +36,11 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
     Vessel: <Ship size={13} className="text-cyan-400" />,
     Port: <Navigation size={13} className="text-purple-400" />,
     Route: <RouteIcon size={13} className="text-sky-400" />,
-    Commodity: <Fuel size={13} className="text-amber-400" />,
-    MacroEvent: <Zap size={13} className="text-rose-400" />,
-    Market: <TrendingUp size={13} className="text-emerald-400" />,
-    Insurance: <Shield size={13} className="text-orange-400" />,
-    Currency: <DollarSign size={13} className="text-emerald-400" />,
-    RiskFactor: <AlertTriangle size={13} className="text-rose-400" />,
+    MarketIndicator: <TrendingUp size={13} className="text-emerald-400" />,
+    RiskEvent: <AlertTriangle size={13} className="text-rose-400" />,
 };
 
-const TYPE_FILTERS: OntologyObjectType[] = ['Vessel', 'Port', 'Route', 'Commodity', 'RiskFactor', 'Market', 'Insurance'];
+const TYPE_FILTERS: OntologyObjectType[] = ['Vessel', 'Port', 'Route', 'MarketIndicator', 'RiskEvent'];
 
 // ============================================================
 // PROPS

@@ -15,13 +15,25 @@ export type OntologyObjectType =
   | 'Vessel'
   | 'Port'
   | 'Route'
-  | 'Commodity'
-  | 'MacroEvent'
-  | 'Scenario'
-  | 'Market'
-  | 'Insurance'
-  | 'Currency'
-  | 'RiskFactor';
+  | 'MarketIndicator'
+  | 'RiskEvent';
+
+/**
+ * Legacy type aliases — maps old fragmented types to the new 5-entity model.
+ * Used for backward compatibility during migration.
+ */
+export type LegacyObjectType = 'Commodity' | 'MacroEvent' | 'Scenario' | 'Market' | 'Insurance' | 'Currency' | 'RiskFactor';
+
+/** Maps legacy type names to their new canonical ontology type */
+export const LEGACY_TYPE_MAP: Record<LegacyObjectType, OntologyObjectType> = {
+  Commodity: 'MarketIndicator',
+  Market: 'MarketIndicator',
+  Insurance: 'MarketIndicator',
+  Currency: 'MarketIndicator',
+  MacroEvent: 'RiskEvent',
+  RiskFactor: 'RiskEvent',
+  Scenario: 'RiskEvent', // edge case — scenarios shouldn't be graph nodes
+};
 
 // ============================================================
 // 2. TYPED PROPERTY SCHEMAS — Per-entity structured properties
@@ -217,7 +229,9 @@ export type OntologyLinkRelation =
   | 'DEPENDS_ON'        // RiskFactor → Resource
   | 'TRANSITS'          // Vessel → Route
   | 'OPERATES_ON'       // Vessel → Route (active voyage)
-  | 'HEDGES';           // Strategy → MarketIndicator
+  | 'HEDGES'            // Strategy → MarketIndicator
+  | 'CONSUMES_FUEL'     // Vessel → MarketIndicator (fuel consumption)
+  | 'EXPOSES_TO';       // RiskEvent → Vessel (risk exposure)
 
 /** An edge in the ontology graph */
 export interface OntologyLink {

@@ -3,8 +3,8 @@ import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, Trendi
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
 import ActionWizard, { getActionsForType } from './ActionWizard';
-import { getCachedSanctionsCheck } from '../../services/maritimeService';
-import type { SanctionsResult } from '../../services/maritimeService';
+import { getCachedSanctionsCheck } from '../../services/maritimeIntegrationService';
+import type { SanctionsResult } from '../../services/maritimeIntegrationService';
 import type { OntologyObject, OntologyLink, OntologyActionType } from '../../types';
 
 interface Object360PanelProps {
@@ -58,7 +58,8 @@ const RELATION_LABELS: Record<string, string> = {
     DEPENDS_ON: '의존',
     TRANSITS: '통항',
     OPERATES_ON: '운항',
-    HEDGES: '헤지',
+    CONSUMES_FUEL: '연료 소비',
+    EXPOSES_TO: '리스크 노출',
 };
 
 // ============================================================
@@ -285,11 +286,8 @@ function TypeSpecificWidget({ obj }: { obj: OntologyObject }) {
     switch (obj.type) {
         case 'Vessel': return <VesselWidget obj={obj} />;
         case 'Port': return <PortWidget obj={obj} />;
-        case 'MacroEvent': return <MacroEventWidget obj={obj} />;
-        case 'Market': return <MarketWidget obj={obj} />;
-        case 'Insurance': return <InsuranceWidget obj={obj} />;
-        case 'Commodity': return <CommodityWidget obj={obj} />;
-        case 'RiskFactor': return <RiskFactorWidget obj={obj} />;
+        case 'RiskEvent': return <RiskEventWidget obj={obj} />;
+        case 'MarketIndicator': return <MarketIndicatorWidget obj={obj} />;
         default: return null;
     }
 }
@@ -516,114 +514,54 @@ function PortWidget({ obj }: { obj: OntologyObject }) {
     );
 }
 
-function MacroEventWidget({ obj }: { obj: OntologyObject }) {
+function RiskEventWidget({ obj }: { obj: OntologyObject }) {
     const p = obj.properties;
     return (
         <div className="p-4 border-b border-slate-800/50">
             <h3 className="text-[10px] font-bold text-rose-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Zap size={12} /> Macro Event Impact
+                <Zap size={12} /> Risk Event
             </h3>
             <div className="grid grid-cols-2 gap-2">
                 <MiniCard label="Category" value={String(p.category || '-')} color="text-slate-200" />
                 <MiniCard label="Severity" value={String(p.severity || '-')} color={
                     p.severity === 'critical' ? 'text-rose-400' : p.severity === 'high' ? 'text-amber-400' : 'text-slate-300'
                 } />
-                <MiniCard label="Supply Chain" value={`${p.supplyChainImpact || 0}%`} color="text-amber-400" />
-                <MiniCard label="Energy Impact" value={`${p.energyImpact || 0}%`} color="text-orange-400" />
+                <MiniCard label="Impact" value={String(p.baseImpact || p.supplyChainImpact || 0)} color="text-amber-400" />
+                <MiniCard label="Energy" value={`${p.energyImpact || 0}%`} color="text-orange-400" />
             </div>
             <div className="mt-3 space-y-2">
-                <ImpactBar label="공급망 충격" value={Number(p.supplyChainImpact || 0)} color="amber" />
-                <ImpactBar label="에너지 영향" value={Number(p.energyImpact || 0)} color="orange" />
+                <ImpactBar label="영향도" value={Number(p.baseImpact || p.supplyChainImpact || 0)} color="amber" />
                 <ImpactBar label="리스크 점수" value={Number(p.riskScore || 0)} color="rose" />
             </div>
         </div>
     );
 }
 
-function MarketWidget({ obj }: { obj: OntologyObject }) {
+function MarketIndicatorWidget({ obj }: { obj: OntologyObject }) {
     const p = obj.properties;
-    const change = Number(p.wowChangePct || 0);
+    const change = Number(p.wowChangePct || p.weeklyChange || 0);
     return (
         <div className="p-4 border-b border-slate-800/50">
             <h3 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <TrendingUp size={12} /> Asset Valuation
-            </h3>
-            <div className="bg-slate-800/50 rounded-lg p-4">
-                <div className="text-[10px] text-slate-500 mb-1">{String(p.source || '-')} · {String(p.assetClass || '-')}</div>
-                <div className="flex items-baseline gap-3">
-                    <span className="text-2xl font-bold text-slate-100 font-mono">${Number(p.priceMilUsd || 0)}M</span>
-                    <span className={cn('flex items-center gap-0.5 text-sm font-bold font-mono', change >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
-                        {change >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                        {change >= 0 ? '+' : ''}{change}%
-                    </span>
-                </div>
-                <div className="text-xs text-slate-400 mt-2">{String(p.sentiment || '-')}</div>
-            </div>
-        </div>
-    );
-}
-
-function InsuranceWidget({ obj }: { obj: OntologyObject }) {
-    const p = obj.properties;
-    return (
-        <div className="p-4 border-b border-slate-800/50">
-            <h3 className="text-[10px] font-bold text-orange-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Shield size={12} /> Insurance Circular
-            </h3>
-            <div className="bg-slate-800/50 rounded-lg p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">발행자</span>
-                    <span className="text-xs text-slate-200 font-medium">{String(p.issuer || '-')}</span>
-                </div>
-                {p.rateFrom !== undefined && p.rateTo !== undefined && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-400">요율 변경</span>
-                        <span className="text-xs text-emerald-400 font-mono">{(Number(p.rateFrom) * 100).toFixed(2)}%</span>
-                        <span className="text-xs text-slate-500">→</span>
-                        <span className="text-xs text-rose-400 font-mono font-bold">{(Number(p.rateTo) * 100).toFixed(2)}%</span>
-                    </div>
-                )}
-                {p.preNoticeHours && (
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-400">사전 통보</span>
-                        <span className="text-xs text-amber-400 font-mono">{`${p.preNoticeHours}`}시간</span>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
-
-function CommodityWidget({ obj }: { obj: OntologyObject }) {
-    const p = obj.properties;
-    return (
-        <div className="p-4 border-b border-slate-800/50">
-            <h3 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Fuel size={12} /> Commodity Price
+                <TrendingUp size={12} /> Market Indicator
             </h3>
             <div className="bg-slate-800/50 rounded-lg p-4">
                 <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-slate-100 font-mono">{String(p.basePrice || '-')}</span>
-                    <span className="text-sm text-slate-400">{String(p.unit || '')}</span>
+                    <span className="text-2xl font-bold text-slate-100 font-mono">
+                        {String(p.basePrice || p.priceMilUsd || p.baseRate || '-')}
+                    </span>
+                    <span className="text-sm text-slate-400">{String(p.unit || p.code || '')}</span>
                 </div>
-                <div className="mt-2 text-xs text-slate-500">변동성: <span className="text-amber-400 font-mono">{((Number(p.volatility || 0)) * 100).toFixed(1)}%</span></div>
+                {change !== 0 && (
+                    <div className={cn('flex items-center gap-0.5 text-sm font-bold font-mono mt-1', change >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                        {change >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                        {typeof change === 'string' ? change : `${change >= 0 ? '+' : ''}${change}%`}
+                    </div>
+                )}
+                {p.volatility && <div className="mt-2 text-xs text-slate-500">변동성: <span className="text-amber-400 font-mono">{((Number(p.volatility || 0)) * 100).toFixed(1)}%</span></div>}
+                {p.issuer && <div className="mt-2 text-xs text-slate-400">발행자: {String(p.issuer)}</div>}
+                {p.sentiment && <div className="text-xs text-slate-400 mt-1">{String(p.sentiment)}</div>}
             </div>
-        </div>
-    );
-}
-
-function RiskFactorWidget({ obj }: { obj: OntologyObject }) {
-    const p = obj.properties;
-    return (
-        <div className="p-4 border-b border-slate-800/50">
-            <h3 className="text-[10px] font-bold text-rose-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <AlertTriangle size={12} /> Risk Factor
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-                <MiniCard label="범주" value={String(p.category || '-')} color="text-slate-200" />
-                <MiniCard label="기본 영향도" value={String(p.baseImpact || 0)} color="text-rose-400" />
-            </div>
-            <ImpactBar label="영향도" value={Number(p.baseImpact || 0)} color="rose" />
         </div>
     );
 }
@@ -727,7 +665,7 @@ function MarketExposureSection({ objectId }: { objectId: string }) {
     connectedLinks.forEach(l => {
         const otherId = l.sourceId === objectId ? l.targetId : l.sourceId;
         const other = objects.find(o => o.id === otherId);
-        if (other && (other.type === 'Commodity' || other.type === 'Market' || other.type === 'Currency' || other.type === 'Insurance')) {
+        if (other && other.type === 'MarketIndicator') {
             linkedMarketIds.add(otherId);
         }
     });

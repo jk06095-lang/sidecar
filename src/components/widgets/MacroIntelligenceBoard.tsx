@@ -201,7 +201,7 @@ function MarketTab() {
 // ============================================================
 function FXTab() {
     const objects = useOntologyStore(s => s.objects);
-    const currencies = objects.filter(o => o.type === 'Currency');
+    const currencies = objects.filter(o => o.type === 'MarketIndicator' && o.properties.code != null);
     const simulationParams = useOntologyStore(s => s.simulationParams);
 
     return (
@@ -273,7 +273,7 @@ function IntelTab() {
 function GeoRiskTab() {
     const objects = useOntologyStore(s => s.objects);
     const riskFactors = objects.filter(o =>
-        o.type === 'RiskFactor' || o.type === 'MacroEvent'
+        o.type === 'RiskEvent'
     ).sort((a, b) => (Number(b.properties.riskScore) || 0) - (Number(a.properties.riskScore) || 0));
 
     return (

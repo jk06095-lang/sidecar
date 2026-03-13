@@ -27,7 +27,7 @@ import {
     fullSync,
     applyMarketUpdatesToParams,
 } from '../services/maritimeIntegrationService';
-import type { MarketQuote } from '../services/marketDataService';
+import type { MarketQuote } from '../services/maritimeIntegrationService';
 
 // ============================================================
 // INTERNAL: VULNERABILITY BASE DATA (for chart calculation)
@@ -225,7 +225,7 @@ const BEVI_UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 let _beviDirty = false;
 let _beviLastCalcAt = 0;
 
-const MACRO_TYPES: Set<string> = new Set(['RiskFactor', 'Commodity', 'Insurance', 'MacroEvent']);
+const MACRO_TYPES: Set<string> = new Set(['RiskEvent', 'MarketIndicator']);
 const ASSET_TYPES: Set<string> = new Set(['Port', 'Vessel']);
 
 interface BEVIComponentResult {
@@ -379,7 +379,7 @@ function mapOntologyToFleetVessels(objects: OntologyObject[]): FleetVessel[] {
 
 function mapOntologyToBrokerReports(objects: OntologyObject[]): BrokerReport[] {
     return objects
-        .filter((o) => o.type === 'Market' && o.metadata.status === 'active')
+        .filter((o) => o.type === 'MarketIndicator' && o.metadata.status === 'active' && o.properties.priceMilUsd != null)
         .map((o) => ({
             source: String(o.properties.source || '-'),
             date: o.metadata.updatedAt.split('T')[0],
@@ -392,7 +392,7 @@ function mapOntologyToBrokerReports(objects: OntologyObject[]): BrokerReport[] {
 
 function mapOntologyToInsuranceCirculars(objects: OntologyObject[]): InsuranceCircular[] {
     return objects
-        .filter((o) => o.type === 'Insurance' && o.metadata.status === 'active')
+        .filter((o) => o.type === 'MarketIndicator' && o.metadata.status === 'active' && o.properties.issuer != null)
         .map((o) => ({
             issuer: String(o.properties.issuer || '-'),
             date: String(o.properties.effectiveDate || o.metadata.updatedAt.split('T')[0]),
@@ -433,7 +433,7 @@ function computeDerivedRiskStates(
 
     const alertedMarketIds = new Set<string>();
     for (const obj of objects) {
-        if (obj.type === 'Commodity' || obj.type === 'Market') {
+        if (obj.type === 'MarketIndicator') {
             const ric = String(obj.properties.ric || obj.properties.symbol || '');
             if (ric && quantMetrics[ric]?.riskAlert) {
                 alertedMarketIds.add(obj.id);

@@ -45,13 +45,9 @@ interface OntologyGraphProps {
 const TYPE_CONFIG: Record<string, { color: string; icon: string; baseRadius: number }> = {
     Vessel: { color: '#06b6d4', icon: '⛴', baseRadius: 22 },
     Port: { color: '#a855f7', icon: '⚓', baseRadius: 20 },
-    Commodity: { color: '#f59e0b', icon: '🛢', baseRadius: 18 },
-    MacroEvent: { color: '#ef4444', icon: '⚡', baseRadius: 24 },
-    Scenario: { color: '#3b82f6', icon: '📋', baseRadius: 18 },
-    Market: { color: '#10b981', icon: '📈', baseRadius: 18 },
-    Insurance: { color: '#f97316', icon: '🛡', baseRadius: 18 },
-    Currency: { color: '#22d3ee', icon: '💱', baseRadius: 16 },
-    RiskFactor: { color: '#f43f5e', icon: '⚠', baseRadius: 20 },
+    Route: { color: '#38bdf8', icon: '🧭', baseRadius: 18 },
+    MarketIndicator: { color: '#10b981', icon: '📊', baseRadius: 18 },
+    RiskEvent: { color: '#ef4444', icon: '⚡', baseRadius: 24 },
 };
 
 function getRiskColor(score: number): string {
@@ -119,7 +115,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     // ============================================================
     useEffect(() => {
         // Initialize: show seed nodes (Vessel + MacroEvent + a few key ports)
-        const seedTypes: OntologyObjectType[] = ['Vessel', 'MacroEvent'];
+        const seedTypes: OntologyObjectType[] = ['Vessel', 'RiskEvent'];
         const seedIds = new Set<string>();
 
         const newNodes: GraphNode[] = [];
@@ -256,7 +252,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     // COLLAPSE NODE (alt+click): hide non-seed connected nodes
     // ============================================================
     const collapseNode = useCallback((nodeId: string) => {
-        const seedTypes: OntologyObjectType[] = ['Vessel', 'MacroEvent'];
+        const seedTypes: OntologyObjectType[] = ['Vessel', 'RiskEvent'];
 
         setExpandedIds((prev) => {
             const next = new Set(prev);
@@ -791,7 +787,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     };
 
     const handleCollapseAll = () => {
-        const seedTypes: OntologyObjectType[] = ['Vessel', 'MacroEvent'];
+        const seedTypes: OntologyObjectType[] = ['Vessel', 'RiskEvent'];
         setGraphNodes((prev) =>
             prev.map((n) => ({
                 ...n,

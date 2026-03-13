@@ -10,7 +10,7 @@ import TopTabBar, { type Notification } from './components/TopTabBar';
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
 import { useOntologyStore } from './store/ontologyStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
-import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/marketDataService';
+import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/maritimeIntegrationService';
 import {
   migrateLocalStorageToFirestore,
   loadSettings as firestoreLoadSettings,

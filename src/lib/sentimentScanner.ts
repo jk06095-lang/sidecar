@@ -264,7 +264,7 @@ export function generateContextualRiskAnalysis(
     const hormuzScore = (hormuzRisk?.properties.riskScore as number) || 0;
 
     const insuranceRisk = ontologyObjects.find(o =>
-        o.type === 'Insurance' && (o.properties.riskScore as number) >= 60
+        o.type === 'MarketIndicator' && o.properties.issuer != null && (o.properties.riskScore as number) >= 60
     );
 
     const hasConflictKeywords = keywordScan.matchedKeywords.some(

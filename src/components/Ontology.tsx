@@ -9,7 +9,7 @@ import { cn } from '../lib/utils';
 import OntologyGraph from './widgets/OntologyGraph';
 import Object360Panel from './widgets/Object360Panel';
 import ObjectTypeWizard from './widgets/ObjectTypeWizard';
-import { VESSEL_PRESETS, FLAG_OPTIONS } from '../services/maritimeService';
+import { VESSEL_PRESETS, FLAG_OPTIONS } from '../services/maritimeIntegrationService';
 import type { ObjectTypeDefinition } from '../types';
 
 interface OntologyItem {

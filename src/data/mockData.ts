@@ -193,7 +193,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     // ================================================================
     {
         id: 'macro-hormuz-tension',
-        type: 'RiskFactor',
+        type: 'RiskEvent',
         title: 'Hormuz Tension',
         description: 'IRGC maritime activity surge + US carrier group deployment. UKMTO Level 3.',
         properties: {
@@ -448,7 +448,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     // ================================================================
     {
         id: 'commodity-brent',
-        type: 'Commodity',
+        type: 'MarketIndicator',
         title: 'Brent Crude Oil',
         description: 'International crude benchmark. $92/bbl surge on Hormuz tension + OPEC cuts.',
         properties: {
@@ -470,7 +470,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     },
     {
         id: 'commodity-vlsfo',
-        type: 'Commodity',
+        type: 'MarketIndicator',
         title: 'VLSFO',
         description: 'IMO 2020 compliant bunker fuel. $680/mt on crude surge + demand spike.',
         properties: {
@@ -489,7 +489,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     },
     {
         id: 'insurance-war-risk',
-        type: 'Insurance',
+        type: 'MarketIndicator',
         title: 'War Risk Premium (AWRP)',
         description: 'H&M Underwriters AWRP surcharge: +0.75% of hull value for Persian Gulf entry.',
         properties: {
@@ -510,7 +510,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     },
     {
         id: 'market-vlcc-5yr',
-        type: 'Market',
+        type: 'MarketIndicator',
         title: 'VLCC (5-year old) Asset Value',
         description: 'Clarksons VLCC 5yr valuation. Rising on Hormuz crisis premium.',
         properties: {
@@ -526,14 +526,14 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     },
     {
         id: 'currency-krw',
-        type: 'Currency',
+        type: 'MarketIndicator',
         title: 'KRW (Korean Won)',
         properties: { code: 'KRW', baseRate: 1420, riskScore: 22, impactValue: 22, previousRate: 1385, weeklyChange: '+2.5%' },
         metadata: meta('api:frankfurter'),
     },
     {
         id: 'currency-eur',
-        type: 'Currency',
+        type: 'MarketIndicator',
         title: 'EUR (Euro)',
         properties: { code: 'EUR', baseRate: 0.905, riskScore: 15, impactValue: 15, previousRate: 0.918, weeklyChange: '-1.4%' },
         metadata: meta('api:frankfurter'),
@@ -544,7 +544,7 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     // ================================================================
     {
         id: 'risk-supply-chain',
-        type: 'RiskFactor',
+        type: 'RiskEvent',
         title: 'Supply Chain Disruption',
         description: 'Hormuz crisis cascading into global energy/logistics supply chain collapse risk.',
         properties: { category: 'supply', baseImpact: 85, riskScore: 75, impactValue: 75 },
@@ -552,11 +552,115 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
     },
     {
         id: 'risk-reroute-cost',
-        type: 'RiskFactor',
+        type: 'RiskEvent',
         title: 'Reroute Cost Increase',
         description: 'Cape reroute adds $2.7M fuel cost + 14 days delay per voyage.',
         properties: { category: 'operational', baseImpact: 70, riskScore: 60, impactValue: 60, extraCostPerVoyageUsd: 2730000, extraDays: 14 },
         metadata: meta(),
+    },
+
+    // ================================================================
+    // 🚢 TIER 2 (addendum): HANA PIONEER — LNG Carrier
+    // ================================================================
+    {
+        id: 'vessel-hana-pioneer',
+        type: 'Vessel',
+        title: 'HANA PIONEER',
+        description: 'LNG Carrier 174K CBM. 대한민국 국적. Ras Laffan → Incheon LNG 수송.',
+        properties: {
+            vesselType: 'LNG Carrier',
+            location: 'Persian Gulf — Ras Laffan LNG Terminal',
+            riskScore: 68,
+            status: 'Loading LNG at Ras Laffan',
+            departurePort: 'Ras Laffan (Qatar)',
+            destinationPort: 'Incheon LNG Terminal (South Korea)',
+            sailedDays: 0,
+            planDays: 22,
+            avgSpeed: 0,
+            speedCp: 19.5,
+            avgIfo: 135.0,
+            foRob: 5200,
+            loRob: 48,
+            fwRob: 280,
+            totalConsumed: 0,
+            ciiRating: 'A',
+            ciiTrend: 'Improving',
+            lastReportType: 'At Berth',
+            lastReportTime: '2026-03-13T02:00:00',
+            timezone: 'UTC+3',
+            ifoCp: 140.0,
+            speedDiff: 0,
+            ifoDiff: -5.0,
+            avgSpeedGoodWx: 19.0,
+            stillWaterAvgSpeedGoodWx: 19.5,
+            avgCurf: 0.0,
+            avgWxf: 0.0,
+            cargoValueUsd: 65000000,
+            charterRate: 95000,
+            dwt: 87000,
+            imo: '9800112',
+            mmsi: '441378000',
+            callSign: 'D7ZB',
+            flag: 'Republic of Korea',
+            yearBuilt: 2023,
+            loa: 299,
+            beam: 46,
+            impactValue: 68,
+            lat: 25.9,
+            lng: 51.5,
+            fuel: 95,
+            freshWater: 88,
+            lubeOil: 91,
+            crewCount: 27,
+            heading: 0,
+            destination: 'Incheon LNG Terminal',
+            eta: '2026-04-04T06:00:00Z',
+        },
+        metadata: meta('Noon Report'),
+    },
+
+    // ================================================================
+    // ⚓ TIER 3 (addendum): Doha — Incheon LNG Route + Incheon Port
+    // ================================================================
+    {
+        id: 'route-doha-incheon',
+        type: 'Route',
+        title: 'Ras Laffan — Incheon (LNG Corridor)',
+        description: 'Primary LNG import route for South Korea. Transits Hormuz, Indian Ocean, Malacca Strait, East China Sea.',
+        properties: {
+            riskScore: 75,
+            status: 'restricted',
+            impactValue: 75,
+            originPortId: 'chokepoint-hormuz',
+            destinationPortId: 'port-incheon',
+            distanceNm: 6600,
+            estimatedDays: 22,
+            riskZones: 'Hormuz TSS, Gulf of Oman HRA, Malacca Strait',
+            fuelCostEstimateUsd: 2400000,
+            currentStatus: 'restricted',
+            lat: 18.0,
+            lng: 72.0,
+        },
+        metadata: meta('Voyage Planning'),
+    },
+    {
+        id: 'port-incheon',
+        type: 'Port',
+        title: 'Incheon LNG Terminal',
+        description: 'Korea 2nd largest LNG import terminal. KOGAS operated. Receiving 60% of national LNG demand.',
+        properties: {
+            riskScore: 30,
+            region: 'KR',
+            status: 'Normal operations',
+            baseWaitDays: 1.5,
+            lat: 37.45,
+            lng: 126.58,
+            congestionPct: 42,
+            impactValue: 30,
+            annualTEU: 3200000,
+            crudeImportPct: 0,
+        },
+        metadata: meta('KOGAS'),
     },
 ];
 
@@ -577,26 +681,39 @@ export const ONTOLOGY_LINKS: OntologyLink[] = [
     // ── Vessels → Routes (OPERATES_ON) ──
     { id: 'link-vlbreeze-route', sourceId: 'vessel-vl-breeze', targetId: 'route-raslaffan-ulsan', relationType: 'OPERATES_ON', weight: 0.95, metadata: { label: 'active voyage' } },
     { id: 'link-starmaria-route', sourceId: 'vessel-star-maria', targetId: 'route-sharjah-shinas', relationType: 'OPERATES_ON', weight: 0.90, metadata: { label: 'active voyage' } },
+    { id: 'link-hana-route', sourceId: 'vessel-hana-pioneer', targetId: 'route-doha-incheon', relationType: 'OPERATES_ON', weight: 0.95, metadata: { label: 'LNG loading voyage' } },
 
     // ── Routes → Chokepoints (TRANSITS) ──
     { id: 'link-route1-hormuz', sourceId: 'route-raslaffan-ulsan', targetId: 'chokepoint-hormuz', relationType: 'TRANSITS', weight: 0.90, metadata: { label: 'transits Hormuz Strait' } },
     { id: 'link-route2-hormuz', sourceId: 'route-sharjah-shinas', targetId: 'chokepoint-hormuz', relationType: 'TRANSITS', weight: 0.60, metadata: { label: 'near Hormuz zone' } },
+    { id: 'link-route3-hormuz', sourceId: 'route-doha-incheon', targetId: 'chokepoint-hormuz', relationType: 'TRANSITS', weight: 0.92, metadata: { label: 'LNG corridor transits Hormuz' } },
 
     // ── Strait of Hormuz → Vessel delays ──
     { id: 'link-hormuz-vlbreeze', sourceId: 'chokepoint-hormuz', targetId: 'vessel-vl-breeze', relationType: 'AFFECTED_BY', weight: 0.90, metadata: { label: 'forces delay of transit' } },
     { id: 'link-hormuz-starmaria', sourceId: 'chokepoint-hormuz', targetId: 'vessel-star-maria', relationType: 'AFFECTED_BY', weight: 0.70, metadata: { label: 'wait for safe passage' } },
+    { id: 'link-hormuz-hana', sourceId: 'chokepoint-hormuz', targetId: 'vessel-hana-pioneer', relationType: 'AFFECTED_BY', weight: 0.88, metadata: { label: 'LNG transit delay risk' } },
 
     // ── Cost factors → Vessel impact ──
     { id: 'link-brent-vlbreeze', sourceId: 'commodity-brent', targetId: 'vessel-vl-breeze', relationType: 'TRIGGERS', weight: 0.75, metadata: { label: 'increases voyage cost' } },
     { id: 'link-brent-starmaria', sourceId: 'commodity-brent', targetId: 'vessel-star-maria', relationType: 'TRIGGERS', weight: 0.65, metadata: { label: 'increases voyage cost' } },
     { id: 'link-wrp-vlbreeze', sourceId: 'insurance-war-risk', targetId: 'vessel-vl-breeze', relationType: 'INSURES', weight: 0.85, metadata: { label: 'AWRP surcharge applied' } },
     { id: 'link-wrp-starmaria', sourceId: 'insurance-war-risk', targetId: 'vessel-star-maria', relationType: 'INSURES', weight: 0.60, metadata: { label: 'AWRP surcharge applied' } },
-    { id: 'link-vlsfo-vlbreeze', sourceId: 'commodity-vlsfo', targetId: 'vessel-vl-breeze', relationType: 'CARRIES', weight: 0.75, metadata: { label: 'fuel cost impact' } },
-    { id: 'link-vlsfo-starmaria', sourceId: 'commodity-vlsfo', targetId: 'vessel-star-maria', relationType: 'CARRIES', weight: 0.80, metadata: { label: 'fuel cost impact' } },
+    { id: 'link-wrp-hana', sourceId: 'insurance-war-risk', targetId: 'vessel-hana-pioneer', relationType: 'INSURES', weight: 0.82, metadata: { label: 'AWRP surcharge — high-value LNG cargo' } },
+
+    // ── Vessel → Fuel consumption (CONSUMES_FUEL) ──
+    { id: 'link-vlbreeze-vlsfo', sourceId: 'vessel-vl-breeze', targetId: 'commodity-vlsfo', relationType: 'CONSUMES_FUEL', weight: 0.85, metadata: { label: 'VLCC fuel consumption' } },
+    { id: 'link-starmaria-vlsfo', sourceId: 'vessel-star-maria', targetId: 'commodity-vlsfo', relationType: 'CONSUMES_FUEL', weight: 0.80, metadata: { label: 'bulk carrier fuel consumption' } },
+    { id: 'link-hana-vlsfo', sourceId: 'vessel-hana-pioneer', targetId: 'commodity-vlsfo', relationType: 'CONSUMES_FUEL', weight: 0.70, metadata: { label: 'LNG carrier dual-fuel consumption' } },
+
+    // ── Risk exposure (EXPOSES_TO) ──
+    { id: 'link-ht-vlbreeze-exp', sourceId: 'macro-hormuz-tension', targetId: 'vessel-vl-breeze', relationType: 'EXPOSES_TO', weight: 0.92, metadata: { label: 'VLCC in direct threat zone' } },
+    { id: 'link-ht-starmaria-exp', sourceId: 'macro-hormuz-tension', targetId: 'vessel-star-maria', relationType: 'EXPOSES_TO', weight: 0.75, metadata: { label: 'near Hormuz operational area' } },
+    { id: 'link-ht-hana-exp', sourceId: 'macro-hormuz-tension', targetId: 'vessel-hana-pioneer', relationType: 'EXPOSES_TO', weight: 0.90, metadata: { label: 'LNG carrier in Persian Gulf' } },
 
     // ── Vessel → Port arrival impact ──
     { id: 'link-vlbreeze-busan', sourceId: 'vessel-vl-breeze', targetId: 'port-busan', relationType: 'ROUTES_THROUGH', weight: 0.80, metadata: { label: 'crude delivery to Ulsan/Busan' } },
     { id: 'link-starmaria-singapore', sourceId: 'vessel-star-maria', targetId: 'port-singapore', relationType: 'ROUTES_THROUGH', weight: 0.70, metadata: { label: 'bulk transit via Singapore' } },
+    { id: 'link-hana-incheon', sourceId: 'vessel-hana-pioneer', targetId: 'port-incheon', relationType: 'ROUTES_THROUGH', weight: 0.90, metadata: { label: 'LNG delivery to Incheon Terminal' } },
 
     // ── Reroute cost factor ──
     { id: 'link-reroute-starmaria', sourceId: 'risk-reroute-cost', targetId: 'vessel-star-maria', relationType: 'DEPENDS_ON', weight: 0.85, metadata: { label: 'delay risk from Gulf tensions' } },
@@ -605,6 +722,7 @@ export const ONTOLOGY_LINKS: OntologyLink[] = [
     // ── Supply chain cascade ──
     { id: 'link-supply-busan', sourceId: 'risk-supply-chain', targetId: 'port-busan', relationType: 'AFFECTED_BY', weight: 0.72, metadata: { label: 'crude import delay' } },
     { id: 'link-supply-singapore', sourceId: 'risk-supply-chain', targetId: 'port-singapore', relationType: 'AFFECTED_BY', weight: 0.68, metadata: { label: 'transshipment bottleneck' } },
+    { id: 'link-supply-incheon', sourceId: 'risk-supply-chain', targetId: 'port-incheon', relationType: 'AFFECTED_BY', weight: 0.65, metadata: { label: 'LNG supply delay' } },
 
     // ── Market valuation impact ──
     { id: 'link-market-vlbreeze', sourceId: 'market-vlcc-5yr', targetId: 'vessel-vl-breeze', relationType: 'MONITORS', weight: 0.50, metadata: { label: 'asset valuation benchmark' } },

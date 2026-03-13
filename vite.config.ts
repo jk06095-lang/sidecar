@@ -14,29 +14,6 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
-      proxy: {
-        // LSEG Workspace Desktop App — local proxy to bypass CORS
-        '/lseg-api': {
-          target: 'http://localhost:9060',
-          changeOrigin: true,
-          rewrite: (path: string) => path.replace(/^\/lseg-api/, ''),
-          configure: (proxy) => {
-            proxy.on('error', (err) => {
-              console.warn('[Vite Proxy] LSEG connection failed:', err.message);
-            });
-          },
-        },
-        // Vercel Serverless Proxy — local dev forwarding
-        '/api/proxy': {
-          target: 'http://localhost:3000',
-          changeOrigin: true,
-          configure: (proxy) => {
-            proxy.on('error', (err) => {
-              console.warn('[Vite Proxy] API Proxy connection failed:', err.message);
-            });
-          },
-        },
-      },
     },
   };
 });

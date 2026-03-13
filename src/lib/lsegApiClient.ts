@@ -1,7 +1,10 @@
 /**
- * LSEG API Client — Queue, Throttle, Cache & Retry
+ * LSEG API Client — Queue, Throttle, Cache & Retry (BFF Proxy)
  *
- * Core safety layer for LSEG Data API (Workspace-based).
+ * Core safety layer for LSEG Data API.
+ * All requests are routed through /api/proxy (Vercel Serverless BFF)
+ * so that API keys are never exposed to the browser.
+ *
  * Constraints:
  *   - Max 1 request per second (sequential queue)
  *   - Daily 10,000 request hard limit (9,500 soft cap)
@@ -225,22 +228,11 @@ async function executeRequest(options: LSEGRequestOptions): Promise<LSEGResponse
 
     const { method = 'GET', endpoint, params, body } = options;
 
-    // Build URL
-    let url = `/lseg-api${endpoint}`;
-    if (params && method === 'GET') {
-        const searchParams = new URLSearchParams();
-        Object.entries(params).forEach(([k, v]) => searchParams.set(k, String(v)));
-        url += `?${searchParams.toString()}`;
-    }
-
-    // Add API key header
-    const apiKey = import.meta.env.VITE_LSEG_API_KEY;
+    // BFF proxy URL — all requests go through our own backend
+    const proxyUrl = '/api/proxy';
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
     };
-    if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-    }
 
     // Attempt with retry (max 1 retry)
     let lastError: Error | null = null;
@@ -259,10 +251,19 @@ async function executeRequest(options: LSEGRequestOptions): Promise<LSEGResponse
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-            const response = await fetch(url, {
-                method,
+            // Route through BFF proxy — send endpoint, params, method, body
+            // The serverless function injects API keys server-side
+            const response = await fetch(proxyUrl, {
+                method: 'POST',
                 headers,
-                body: body ? JSON.stringify(body) : undefined,
+                body: JSON.stringify({
+                    endpoint,
+                    params: params ? Object.fromEntries(
+                        Object.entries(params).map(([k, v]) => [k, String(v)])
+                    ) : undefined,
+                    method,
+                    body,
+                }),
                 signal: controller.signal,
             });
 
@@ -343,21 +344,22 @@ export function lsegPost<T = unknown>(
 }
 
 /**
- * Check if LSEG Workspace is reachable (lightweight health check).
- * Returns true if the proxy can reach localhost:9060.
+ * Check if the BFF proxy is reachable (lightweight health check).
+ * Sends a minimal request to /api/proxy and checks for a valid response.
  */
 export async function isLSEGAvailable(): Promise<boolean> {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        const res = await fetch('/lseg-api/api/status', {
+        const res = await fetch('/api/proxy?endpoint=/api/status', {
             method: 'GET',
             signal: controller.signal,
         });
 
         clearTimeout(timeoutId);
-        return res.ok;
+        // Even a 401/403 from upstream means our proxy is working
+        return res.status !== 502;
     } catch {
         return false;
     }

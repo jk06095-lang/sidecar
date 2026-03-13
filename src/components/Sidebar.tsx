@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
-  Home, Newspaper, Settings, Anchor, FileText,
-  Activity, Menu, Zap,
-  Database, Shield, TrendingUp, Server, CheckCircle2,
-  Star, Edit2, Check, X, Trash2, Globe, LogOut,
-  ChevronRight, ChevronDown as ChevronDownIcon, FolderOpen, Folder, Copy, RefreshCw, Save, Plus
+  LayoutDashboard, Settings, Anchor,
+  Activity, Menu, Database, Gavel,
+  Star, Edit2, Check, X, Trash2, LogOut,
+  ChevronRight, ChevronDown as ChevronDownIcon, FolderOpen, Folder, Copy,
+  FileCheck, Clock,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario } from '../types';
@@ -14,6 +14,7 @@ import {
   type FavoriteEntry,
 } from '../services/firestoreService';
 import { logout } from './AuthGate';
+import { useActionStore } from '../store/actionStore';
 
 interface SidebarProps {
   activeTab: string;
@@ -37,6 +38,16 @@ function loadFavoritesLocal(): FavoriteEntry[] {
   } catch { return []; }
 }
 
+// ============================================================
+// 4-PILLAR NAVIGATION
+// ============================================================
+const NAV_PILLARS = [
+  { id: 'workspace', label: 'Workspace', labelKo: '통합 관제', icon: LayoutDashboard },
+  { id: 'ontology', label: 'Ontology', labelKo: '데이터베이스', icon: Database },
+  { id: 'scenario', label: 'AIP Scenario', labelKo: '시뮬레이션', icon: Activity },
+  { id: 'action-center', label: 'Action Center', labelKo: '결재/보고', icon: Gavel },
+] as const;
+
 export default function Sidebar({
   activeTab,
   setActiveTab,
@@ -58,6 +69,10 @@ export default function Sidebar({
     favorites: true,
   });
 
+  // Action store counts for badge
+  const pendingCount = useActionStore(s => s.draftActions.length + s.pendingApproval.length);
+  const executedCount = useActionStore(s => s.executedActions.length);
+
   // Hydrate from Firestore on mount
   useEffect(() => {
     firestoreLoadFavorites().then(remote => {
@@ -69,7 +84,7 @@ export default function Sidebar({
   useEffect(() => firestoreSaveFavorites(favorites), [favorites]);
 
   const navItemClass =
-    `flex items-center gap-3 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 cursor-pointer transition-all duration-200 rounded-lg ${isMinimized ? 'justify-center mx-3' : 'px-4 mx-2'}`;
+    `flex items-center gap-3 py-2.5 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 cursor-pointer transition-all duration-200 rounded-lg ${isMinimized ? 'justify-center mx-3' : 'px-4 mx-2'}`;
   const activeClass = 'bg-slate-800/80 text-cyan-400 font-medium shadow-inner';
 
   const getRiskColor = (scenario: Scenario) => {
@@ -193,66 +208,79 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Main Navigation */}
+      {/* ════════════ 4-PILLAR NAVIGATION ════════════ */}
       <div className="py-3 border-b border-slate-800/50 space-y-1">
-        <div title="대시보드" className={cn(navItemClass, activeTab === 'home' && activeClass)} onClick={() => setActiveTab('home')}>
-          <Home size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>대시보드</span>}
-        </div>
-        <div title="보고서" className={cn(navItemClass, activeTab === 'reports' && activeClass)} onClick={() => setActiveTab('reports')}>
-          <FileText size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>보고서</span>}
-        </div>
-        <div title="INTELLIGENCE DB" className={cn(navItemClass, activeTab === 'news' && activeClass, "relative")} onClick={() => setActiveTab('news')}>
-          <Newspaper size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && (
-            <>
-              <span>INTELLIGENCE DB</span>
-              <span className="ml-auto bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">Live</span>
-            </>
-          )}
-          {isMinimized && <div className="absolute top-1 right-2 w-2 h-2 bg-emerald-500 rounded-full border border-slate-950"></div>}
-        </div>
-        <div title="시나리오" className={cn(navItemClass, activeTab === 'scenario-builder' && activeClass)} onClick={() => setActiveTab('scenario-builder')}>
-          <Activity size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>시나리오</span>}
-        </div>
-        <div title="온톨로지" className={cn(navItemClass, activeTab === 'ontology' && activeClass)} onClick={() => setActiveTab('ontology')}>
-          <Database size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>온톨로지</span>}
-        </div>
-        <div title="데이터 분석" className={cn(navItemClass, activeTab === 'data-analysis' && activeClass)} onClick={() => setActiveTab('data-analysis')}>
-          <TrendingUp size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>데이터 분석</span>}
-        </div>
-        <div title="에디터" className={cn(navItemClass, activeTab === 'editor' && activeClass)} onClick={() => setActiveTab('editor')}>
-          <Database size={isMinimized ? 20 : 16} className="shrink-0" />
-          {!isMinimized && <span>에디터</span>}
-        </div>
-
+        {NAV_PILLARS.map(pillar => {
+          const Icon = pillar.icon;
+          const isActive = activeTab === pillar.id;
+          return (
+            <div
+              key={pillar.id}
+              title={`${pillar.labelKo} (${pillar.label})`}
+              className={cn(navItemClass, isActive && activeClass)}
+              onClick={() => setActiveTab(pillar.id)}
+            >
+              <Icon size={isMinimized ? 20 : 16} className="shrink-0" />
+              {!isMinimized && (
+                <div className="flex items-center justify-between flex-1 min-w-0">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-semibold tracking-wide">{pillar.labelKo}</span>
+                    <span className="text-[8px] text-slate-600 uppercase tracking-widest">{pillar.label}</span>
+                  </div>
+                  {/* Action Center badges */}
+                  {pillar.id === 'action-center' && pendingCount > 0 && (
+                    <span className="ml-auto text-[8px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full animate-pulse">
+                      {pendingCount}
+                    </span>
+                  )}
+                  {pillar.id === 'action-center' && executedCount > 0 && pendingCount === 0 && (
+                    <span className="ml-auto text-[8px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full">
+                      {executedCount}
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Minimized badge */}
+              {isMinimized && pillar.id === 'action-center' && pendingCount > 0 && (
+                <div className="absolute top-0.5 right-1 w-2 h-2 bg-amber-500 rounded-full border border-slate-950 animate-pulse" />
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Dynamic Interaction Area */}
       <div className={cn("flex-1 overflow-y-auto px-3 py-3 space-y-3", isMinimized && "hidden")}>
-        {activeTab === 'home' && (
+        {activeTab === 'workspace' && (
           <div className="bg-cyan-950/30 border border-cyan-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={12} /> 대시보드 로드맵</h5>
+            <h5 className="text-[11px] font-bold text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><LayoutDashboard size={12} /> 통합 관제</h5>
             <ul className="text-xs text-slate-400 space-y-2">
-              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>현재 시나리오 기반 실시간 모니터링 중입니다.</span></li>
+              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>실시간 대시보드 · 데이터 분석 · Intelligence DB</span></li>
               <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>우측 상단에서 AI 브리핑을 생성하세요.</span></li>
             </ul>
           </div>
         )}
-        {activeTab === 'reports' && (
-          <div className="bg-indigo-950/30 border border-indigo-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-indigo-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><FileText size={12} /> 템플릿 & 액션</h5>
-            <button className="w-full text-left text-xs bg-slate-800/50 hover:bg-slate-700 p-2 rounded text-slate-300 transition-colors mb-2">📄 이사회 보고용 템플릿</button>
-            <button className="w-full text-left text-xs bg-slate-800/50 hover:bg-slate-700 p-2 rounded text-slate-300 transition-colors">📊 PPT/Word 추출 양식</button>
+
+        {activeTab === 'action-center' && (
+          <div className="space-y-2">
+            <div className="bg-violet-950/30 border border-violet-900/50 rounded-lg p-3">
+              <h5 className="text-[11px] font-bold text-violet-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Gavel size={12} /> Action Center</h5>
+              <div className="space-y-1.5 text-[10px]">
+                <div className="flex items-center gap-2 text-slate-400">
+                  <FileCheck size={10} className="text-amber-400" />
+                  <span>결재 대기: <strong className="text-amber-300">{pendingCount}건</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-400">
+                  <Clock size={10} className="text-emerald-400" />
+                  <span>실행 완료: <strong className="text-emerald-300">{executedCount}건</strong></span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
         {/* ═══ SCENARIO FILE TREE ═══ */}
-        {activeTab === 'scenario-builder' && (
+        {activeTab === 'scenario' && (
           <div className="space-y-1">
             {/* Favorites */}
             <FolderHeader label="즐겨찾기" count={favScenarios.length} catKey="favorites" icon={<Star size={10} className="text-amber-400" />} />
@@ -326,16 +354,8 @@ export default function Sidebar({
 
         {activeTab === 'ontology' && (
           <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-emerald-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Shield size={12} /> 온톨로지 규칙</h5>
+            <h5 className="text-[11px] font-bold text-emerald-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Database size={12} /> 온톨로지 규칙</h5>
             <p className="text-[10px] text-slate-400 leading-relaxed mb-2">추가된 지식은 AI 에이전트의 상황 판단(환각 억제)과 보고서 초안 생성 시 최우선 컨텍스트로 적용됩니다.</p>
-            <div className="text-[10px] flex items-center gap-1 text-emerald-500 bg-emerald-950/50 px-2 py-1 rounded inline-flex border border-emerald-900"><CheckCircle2 size={10} /> 실시간 동기화 됨</div>
-          </div>
-        )}
-
-        {activeTab === 'news' && (
-          <div className="bg-rose-950/30 border border-rose-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-rose-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Globe size={12} /> 트렌드 & 스크랩</h5>
-            <p className="text-[10px] text-slate-400 leading-relaxed">핀(Bookmark) 된 모든 기사는 지식 베이스(Ontology) 시장 전망 탭으로 전송됩니다.</p>
           </div>
         )}
       </div>

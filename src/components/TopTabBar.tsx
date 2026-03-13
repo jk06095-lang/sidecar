@@ -8,17 +8,21 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-// Tab label registry
+// Tab label registry — 4-Pillar Architecture
 const TAB_LABELS: Record<string, string> = {
-    home: '대시보드',
-    reports: '보고서',
-    news: 'INTELLIGENCE DB',
-    'scenario-builder': '시나리오',
-    ontology: '온톨로지',
-    'data-analysis': '데이터 분석',
-    'api-manager': '외부 API',
-    editor: '에디터',
+    workspace: 'Workspace 통합관제',
+    ontology: 'Ontology 데이터베이스',
+    scenario: 'AIP Scenario',
+    'action-center': 'Action Center 결재/보고',
     settings: 'SETTINGS',
+    // Legacy mapping (backward compat)
+    home: 'Workspace 통합관제',
+    reports: 'Action Center',
+    news: 'Workspace',
+    'scenario-builder': 'AIP Scenario',
+    'data-analysis': 'Workspace',
+    editor: 'Action Center',
+    'api-manager': 'Action Center',
 };
 
 export interface Notification {

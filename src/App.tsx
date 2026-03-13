@@ -1,15 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
 import Home from './components/Home';
 import SettingsModal from './components/SettingsModal';
-import News from './components/News';
 import Ontology from './components/Ontology';
-import Reports from './components/Reports';
-
 import ScenarioBuilder from './components/ScenarioBuilder';
-import DataAnalysis from './components/DataAnalysis';
-import IntegratedEditor from './components/IntegratedEditor';
 import TopTabBar, { type Notification } from './components/TopTabBar';
+
+// Lazy-load Action Center (heavy composite component)
+const ActionCenter = lazy(() => import('./components/ActionCenter'));
 import { useOntologyStore } from './store/ontologyStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
 import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/marketDataService';
@@ -22,12 +20,12 @@ import {
 } from './services/firestoreService';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, setActiveTab] = useState('workspace');
   const [isSidebarMinimized, setIsSidebarMinimized] = useState(false);
   const realtimeOverrideRef = useRef(false);
 
   // Open tabs management (browser-like)
-  const [openTabs, setOpenTabs] = useState<string[]>(['home']);
+  const [openTabs, setOpenTabs] = useState<string[]>(['workspace']);
 
   // Notification system
   const [notifications, setNotifications] = useState<Notification[]>([
@@ -76,12 +74,12 @@ export default function App() {
   }, []);
 
   const handleTabClose = useCallback((tab: string) => {
-    if (tab === 'home') return; // Can't close home
+    if (tab === 'workspace') return; // Can't close workspace
     setOpenTabs(prev => {
       const next = prev.filter(t => t !== tab);
       if (activeTab === tab) {
         const idx = prev.indexOf(tab);
-        const newActive = next[Math.min(idx, next.length - 1)] || 'home';
+        const newActive = next[Math.min(idx, next.length - 1)] || 'workspace';
         setActiveTab(newActive);
       }
       return next;
@@ -316,7 +314,8 @@ export default function App() {
           onClearNotifications={handleClearNotifications}
         />
         <main className="flex-1 overflow-hidden">
-          {activeTab === 'home' && (
+          {/* ════════ PILLAR 1: WORKSPACE ════════ */}
+          {activeTab === 'workspace' && (
             <Home
               scenarios={scenarios}
               activeScenario={activeScenario}
@@ -330,18 +329,12 @@ export default function App() {
               onNavigateTab={handleSetActiveTab}
             />
           )}
-          {activeTab === 'reports' && <Reports />}
-          {activeTab === 'news' && <News />}
+
+          {/* ════════ PILLAR 2: ONTOLOGY ════════ */}
           {activeTab === 'ontology' && <Ontology />}
 
-          {activeTab === 'data-analysis' && (
-            <DataAnalysis
-              simulationParams={simulationParams}
-              dynamicChartData={dynamicChartData}
-              dynamicFleetData={dynamicFleetData}
-            />
-          )}
-          {activeTab === 'scenario-builder' && (
+          {/* ════════ PILLAR 3: AIP SCENARIO ════════ */}
+          {(activeTab === 'scenario' || activeTab === 'scenario-builder') && (
             <ScenarioBuilder
               scenarios={scenarios}
               activeScenarioId={activeScenarioId}
@@ -355,14 +348,16 @@ export default function App() {
               settings={settings}
             />
           )}
-          {activeTab === 'editor' && <IntegratedEditor />}
-          {activeTab !== 'home' && activeTab !== 'reports' && activeTab !== 'news' && activeTab !== 'ontology' && activeTab !== 'scenario-builder' && activeTab !== 'data-analysis' && activeTab !== 'editor' && (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <h1 className="text-xl font-semibold text-slate-400 capitalize">{activeTab.replace('-', ' ')}</h1>
-                <p className="mt-2 text-sm text-slate-600">이 섹션은 개발 예정입니다.</p>
+
+          {/* ════════ PILLAR 4: ACTION CENTER ════════ */}
+          {activeTab === 'action-center' && (
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-full">
+                <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
               </div>
-            </div>
+            }>
+              <ActionCenter />
+            </Suspense>
           )}
         </main>
       </div>

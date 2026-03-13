@@ -417,6 +417,11 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
 
                 // Module 2: Red dashed animated link between quant-risk-alerted nodes
                 const isBothQuantRisk = source.isQuantRiskAlert && target.isQuantRiskAlert;
+                // Part 3: Risk propagation edge — one side is risk-alerted market, other is vessel
+                const isRiskPropagation = !isBothQuantRisk && (
+                    (source.isQuantRiskAlert && target.type === 'Vessel') ||
+                    (target.isQuantRiskAlert && source.type === 'Vessel')
+                );
 
                 ctx.beginPath();
                 const cp1x = source.x + (target.x - source.x) / 3;
@@ -429,12 +434,48 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 if (isBothQuantRisk) {
                     // Animated red dashed line for risk-linked pairs
                     ctx.strokeStyle = `rgba(255, 23, 68, ${0.4 + Math.sin(t * 4) * 0.2})`;
-                    ctx.lineWidth = 2;
+                    ctx.lineWidth = 3;
                     ctx.setLineDash([6, 4]);
-                    ctx.lineDashOffset = -t * 30; // animated scroll
+                    ctx.lineDashOffset = -t * 30;
                     ctx.stroke();
                     ctx.setLineDash([]);
                     ctx.lineDashOffset = 0;
+                } else if (isRiskPropagation) {
+                    // Part 3: Thicker animated red-orange gradient for risk propagation to vessels
+                    // Background glow stroke
+                    ctx.save();
+                    ctx.strokeStyle = `rgba(239, 68, 68, ${0.08 + Math.sin(t * 2) * 0.05})`;
+                    ctx.lineWidth = 10;
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Foreground animated dashed line
+                    ctx.beginPath();
+                    ctx.moveTo(source.x, source.y);
+                    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, target.x, target.y);
+                    const riskGrad = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
+                    riskGrad.addColorStop(0, `rgba(239, 68, 68, ${0.5 + Math.sin(t * 3) * 0.2})`);
+                    riskGrad.addColorStop(0.5, `rgba(249, 115, 22, ${0.6 + Math.sin(t * 3 + 1) * 0.2})`);
+                    riskGrad.addColorStop(1, `rgba(239, 68, 68, ${0.5 + Math.sin(t * 3 + 2) * 0.2})`);
+                    ctx.strokeStyle = riskGrad;
+                    ctx.lineWidth = 4;
+                    ctx.setLineDash([8, 5]);
+                    ctx.lineDashOffset = -t * 40;
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.lineDashOffset = 0;
+
+                    // "RISK" label at midpoint
+                    const midX = (source.x + target.x) / 2;
+                    const midY = (source.y + target.y) / 2;
+                    ctx.font = 'bold 8px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#0f172aDD';
+                    const lbl = '⚡ RISK';
+                    const lblW = ctx.measureText(lbl).width;
+                    ctx.fillRect(midX - lblW / 2 - 4, midY - 6, lblW + 8, 14);
+                    ctx.fillStyle = `rgba(239, 68, 68, ${0.7 + Math.sin(t * 3) * 0.3})`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(lbl, midX, midY + 4);
                 } else {
                     const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
                     const opacityMultiplier = isConnectedToSelected || isHovered ? 1 : 0.35;

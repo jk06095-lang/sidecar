@@ -38,6 +38,10 @@ export interface FleetVessel {
   vessel_type: string;
   location: string;
   riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
+  /** Quant engine derived risk level — combines macro indicators + physical asset properties */
+  derivedRiskLevel?: 'SAFE' | 'WARNING' | 'CRITICAL';
+  /** Human-readable risk factor descriptions from quant fusion */
+  riskFactors?: string[];
   voyage_info: VoyageInfo;
   speed_and_weather_metrics: SpeedMetrics;
   consumption_and_rob: ConsumptionROB;

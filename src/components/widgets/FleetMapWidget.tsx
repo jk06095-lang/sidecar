@@ -1,15 +1,17 @@
 /**
  * FleetMapWidget — Satellite map showing real-time fleet vessel positions
  * Uses Leaflet with ESRI World Imagery satellite tiles (free, no API key).
- * Vessel positions derived from location strings in FLEET_DATA.
- * 
- * FIX: Tooltip now uses delayed-hide pattern so users can mouse onto the
- * bubble menu and click "상세 조회" without it disappearing.
+ *
+ * [Part 3] derivedRiskLevel from quant engine drives:
+ *   - CRITICAL → intense red pulse, double-ring animation, ⚠ badge
+ *   - WARNING  → amber pulse, single-ring
+ *   - SAFE     → default color
+ * Tooltip shows riskFactors with root cause descriptions.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2 } from 'lucide-react';
+import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2, AlertTriangle } from 'lucide-react';
 import type { FleetVessel } from '../../types';
 
 // Location string → coordinates mapping
@@ -49,7 +51,6 @@ function resolveCoords(location: string): [number, number] {
             return coords;
         }
     }
-    // Default: center of Indian Ocean
     return [15.0, 65.0];
 }
 
@@ -58,6 +59,13 @@ const RISK_COLORS: Record<string, string> = {
     Medium: '#f59e0b',
     High: '#ef4444',
     Critical: '#dc2626',
+};
+
+// Derived risk level → visual config
+const DERIVED_RISK_CONFIG: Record<string, { color: string; pulseClass: string; badge: string }> = {
+    CRITICAL: { color: '#ef4444', pulseClass: 'derived-pulse-critical', badge: '⚠ CRITICAL' },
+    WARNING: { color: '#f59e0b', pulseClass: 'derived-pulse-warning', badge: '⚡ WARNING' },
+    SAFE: { color: '', pulseClass: '', badge: '' },
 };
 
 interface FleetMapWidgetProps {
@@ -90,7 +98,6 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
         }, 300);
     }, [clearHideTimer]);
 
-    // Cleanup timers on unmount
     useEffect(() => {
         return () => clearHideTimer();
     }, [clearHideTimer]);
@@ -105,15 +112,11 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
             attributionControl: false,
         });
 
-        // ESRI World Imagery — free satellite tiles, no API key
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             maxZoom: 18,
         }).addTo(map);
 
-        // Zoom control top-right
         L.control.zoom({ position: 'topright' }).addTo(map);
-
-        // Styles
         L.control.attribution({ position: 'bottomright', prefix: '' }).addTo(map);
 
         leafletMap.current = map;
@@ -129,35 +132,60 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
         const map = leafletMap.current;
         if (!map) return;
 
-        // Clear old markers
         markersRef.current.forEach(m => m.remove());
         markersRef.current = [];
 
         vessels.forEach((vessel) => {
             const coords = resolveCoords(vessel.location);
-            const color = RISK_COLORS[vessel.riskLevel] || '#3b82f6';
+            const baseColor = RISK_COLORS[vessel.riskLevel] || '#3b82f6';
+
+            // Determine visual config from derived risk
+            const derivedCfg = DERIVED_RISK_CONFIG[vessel.derivedRiskLevel || 'SAFE'];
+            const markerColor = derivedCfg.color || baseColor;
+            const isCritical = vessel.derivedRiskLevel === 'CRITICAL';
+            const isWarning = vessel.derivedRiskLevel === 'WARNING';
+            const hasDerivedRisk = isCritical || isWarning;
+
+            // Build marker HTML with derived risk visual enhancements
+            const outerGlow = isCritical
+                ? `box-shadow:0 0 16px ${markerColor}CC, 0 0 32px ${markerColor}60, 0 0 48px ${markerColor}30;`
+                : isWarning
+                    ? `box-shadow:0 0 12px ${markerColor}99, 0 0 24px ${markerColor}40;`
+                    : `box-shadow:0 0 12px ${markerColor}80, 0 0 24px ${markerColor}30;`;
+
+            const animClass = hasDerivedRisk ? derivedCfg.pulseClass : '';
+            const riskBadgeHtml = hasDerivedRisk
+                ? `<div style="
+                    position:absolute;top:-32px;right:-12px;
+                    background:${markerColor}20;border:1px solid ${markerColor}80;
+                    color:${markerColor};font-size:8px;font-weight:800;
+                    padding:1px 4px;border-radius:3px;white-space:nowrap;
+                    pointer-events:none;letter-spacing:0.5px;
+                ">${derivedCfg.badge}</div>`
+                : '';
 
             const icon = L.divIcon({
                 className: '',
                 html: `
-                    <div style="position:relative;cursor:pointer;">
+                    <div style="position:relative;cursor:pointer;" class="${animClass}">
                         <div style="
                             width:32px;height:32px;border-radius:50%;
-                            background:radial-gradient(circle, ${color}40, ${color}10);
-                            border:2px solid ${color};
+                            background:radial-gradient(circle, ${markerColor}40, ${markerColor}10);
+                            border:${isCritical ? '3' : '2'}px solid ${markerColor};
                             display:flex;align-items:center;justify-content:center;
-                            box-shadow:0 0 12px ${color}80, 0 0 24px ${color}30;
+                            ${outerGlow}
                             animation: pulse-ring 2s ease-out infinite;
                         ">
-                            <div style="width:10px;height:10px;border-radius:50%;background:${color};"></div>
+                            <div style="width:${isCritical ? '12' : '10'}px;height:${isCritical ? '12' : '10'}px;border-radius:50%;background:${markerColor};"></div>
                         </div>
                         <div style="
                             position:absolute;top:-24px;left:50%;transform:translateX(-50%);
-                            background:#0f172a;border:1px solid ${color}60;
+                            background:#0f172a;border:1px solid ${markerColor}60;
                             color:white;font-size:9px;font-weight:600;
                             padding:2px 6px;border-radius:4px;white-space:nowrap;
                             pointer-events:none;
                         ">${vessel.vessel_name}</div>
+                        ${riskBadgeHtml}
                     </div>
                 `,
                 iconSize: [32, 32],
@@ -179,7 +207,6 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                 }
             });
 
-            // Use scheduleHide instead of immediate hide
             marker.on('mouseout', () => scheduleHide());
             marker.on('click', () => onSelectVessel?.(vessel));
 
@@ -192,6 +219,10 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
         setTimeout(() => leafletMap.current?.invalidateSize(), 300);
     }, [isExpanded]);
 
+    // Count derived risk vessels
+    const criticalCount = vessels.filter(v => v.derivedRiskLevel === 'CRITICAL').length;
+    const warningCount = vessels.filter(v => v.derivedRiskLevel === 'WARNING').length;
+
     return (
         <div className={`relative bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden transition-all duration-300 h-full flex flex-col ${isExpanded ? 'col-span-2 row-span-2' : ''}`}>
             {/* Header */}
@@ -203,6 +234,14 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                     <span className="text-xs font-bold text-white tracking-wide">FLEET TRACKER</span>
                     <span className="text-[9px] text-slate-400 font-mono ml-1">LIVE</span>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    {/* Derived Risk Summary Badge */}
+                    {(criticalCount > 0 || warningCount > 0) && (
+                        <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5 bg-rose-500/10 border border-rose-500/30 rounded text-[8px] font-bold text-rose-400">
+                            <AlertTriangle size={8} />
+                            {criticalCount > 0 && <span>{criticalCount} CRITICAL</span>}
+                            {warningCount > 0 && <span className="text-amber-400">{warningCount} WARNING</span>}
+                        </div>
+                    )}
                 </div>
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
@@ -220,19 +259,19 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                 style={{ minHeight: '0' }}
             />
 
-            {/* Hover tooltip — now with pointer-events-auto and delayed hide */}
+            {/* Hover tooltip with riskFactors */}
             {hoveredVessel && (
                 <div
                     className="absolute z-[1001]"
                     style={{
-                        left: Math.min(tooltipPos.x + 12, (mapRef.current?.clientWidth || 600) - 260),
-                        top: Math.max(tooltipPos.y - 140, 40),
+                        left: Math.min(tooltipPos.x + 12, (mapRef.current?.clientWidth || 600) - 280),
+                        top: Math.max(tooltipPos.y - 160, 40),
                         pointerEvents: 'auto',
                     }}
                     onMouseEnter={clearHideTimer}
                     onMouseLeave={scheduleHide}
                 >
-                    <div className="bg-slate-900/95 border border-slate-600 rounded-xl p-3 shadow-2xl backdrop-blur-sm min-w-[240px]">
+                    <div className="bg-slate-900/95 border border-slate-600 rounded-xl p-3 shadow-2xl backdrop-blur-sm min-w-[260px]">
                         <div className="flex items-center gap-2 mb-2">
                             <Anchor size={14} className="text-cyan-400" />
                             <span className="text-white font-bold text-sm">{hoveredVessel.vessel_name}</span>
@@ -271,7 +310,27 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                                 </div>
                             </div>
                         </div>
-                        {/* Clickable Detail Button */}
+
+                        {/* Derived Risk Factors — Part 3 */}
+                        {hoveredVessel.riskFactors && hoveredVessel.riskFactors.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-rose-800/30">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <AlertTriangle size={9} className={hoveredVessel.derivedRiskLevel === 'CRITICAL' ? 'text-rose-400' : 'text-amber-400'} />
+                                    <span className={`text-[9px] font-bold ${hoveredVessel.derivedRiskLevel === 'CRITICAL' ? 'text-rose-400' : 'text-amber-400'}`}>
+                                        파생 리스크: {hoveredVessel.derivedRiskLevel}
+                                    </span>
+                                </div>
+                                <ul className="space-y-0.5">
+                                    {hoveredVessel.riskFactors.map((factor, i) => (
+                                        <li key={i} className="text-[9px] text-slate-400 pl-3 relative">
+                                            <span className="absolute left-0 top-[5px] w-1 h-1 rounded-full bg-rose-400/60"></span>
+                                            {factor}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
                         <button
                             onClick={() => {
                                 onSelectVessel?.(hoveredVessel);
@@ -285,19 +344,36 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                 </div>
             )}
 
-            {/* Vessel count badge */}
+            {/* Vessel count badge with risk summary */}
             <div className="absolute bottom-3 left-3 z-[400] bg-slate-900/80 border border-slate-700/60 rounded-lg px-2.5 py-1 flex items-center gap-1.5">
                 <Anchor size={10} className="text-cyan-400" />
                 <span className="text-[10px] text-white font-mono font-bold">{vessels.length}</span>
                 <span className="text-[9px] text-slate-400">vessels tracked</span>
+                {criticalCount > 0 && (
+                    <span className="text-[9px] text-rose-400 font-bold ml-1">· {criticalCount} ⚠</span>
+                )}
             </div>
 
-            {/* CSS for pulse animation */}
+            {/* CSS for pulse animations */}
             <style>{`
                 @keyframes pulse-ring {
                     0% { box-shadow: 0 0 12px var(--ring-color, rgba(59,130,246,0.5)), 0 0 0 0 var(--ring-color, rgba(59,130,246,0.4)); }
                     70% { box-shadow: 0 0 12px var(--ring-color, rgba(59,130,246,0.5)), 0 0 0 8px transparent; }
                     100% { box-shadow: 0 0 12px var(--ring-color, rgba(59,130,246,0.5)), 0 0 0 0 transparent; }
+                }
+                @keyframes derived-critical-pulse {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.12); opacity: 0.85; }
+                }
+                @keyframes derived-warning-pulse {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.06); opacity: 0.92; }
+                }
+                .derived-pulse-critical {
+                    animation: derived-critical-pulse 1.2s ease-in-out infinite;
+                }
+                .derived-pulse-warning {
+                    animation: derived-warning-pulse 2s ease-in-out infinite;
                 }
             `}</style>
         </div>

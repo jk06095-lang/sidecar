@@ -76,16 +76,42 @@ function calculateDynamicChartData(params: SimulationParams): ChartDataPoint[] {
     });
 }
 
-function calculateDynamicFleetData(params: SimulationParams, baseFleet: FleetVessel[]): FleetVessel[] {
+function calculateDynamicFleetData(
+    params: SimulationParams,
+    baseFleet: FleetVessel[],
+    quantMetrics?: Record<string, QuantMetrics>,
+): FleetVessel[] {
     const { newsSentimentScore, awrpRate } = params;
 
+    // Geopolitical risk zones — polygons simplified as location string matches
+    const RISK_ZONES: { keywords: string[]; label: string }[] = [
+        { keywords: ['hormuz', 'persian gulf', 'fujairah', 'oman', 'shinas', 'sharjah', 'muscat', 'dammam'], label: '호르무즈 해협 지정학적 위기' },
+        { keywords: ['red sea', 'bab el', 'aden', 'jeddah', 'yemen', 'houthi'], label: '홍해 지정학적 위험 구역' },
+        { keywords: ['suez'], label: '수에즈 운하 봉쇄 리스크' },
+    ];
+
+    // Large fuel-intensive vessel types
+    const LARGE_VESSEL_TYPES = new Set(['vlcc', 'suezmax', 'aframax', 'capesize', 'lng carrier', 'lngc']);
+    // Bulk carrier types affected by BDI
+    const BULK_TYPES = new Set(['capesize', 'panamax', 'supramax', 'handysize', 'bulk carrier', 'bulker']);
+
+    // Extract quant metrics for maritime-critical indicators
+    const vlsfoMetrics = quantMetrics?.['VLSFO380'] || quantMetrics?.['LCOc1'] || quantMetrics?.['BZ=F'];
+    const bdiMetrics = quantMetrics?.['BADI'] || quantMetrics?.['^BDIY'];
+
     return baseFleet.map((vessel) => {
+        const locLower = vessel.location.toLowerCase();
+        const typeLower = vessel.vessel_type.toLowerCase();
+        const factors: string[] = [];
+        let derivedLevel: 'SAFE' | 'WARNING' | 'CRITICAL' = 'SAFE';
+
+        // ── 1. Geopolitical Zone Risk ──
         const isMiddleEast =
-            vessel.location.toLowerCase().includes('hormuz') ||
-            vessel.location.toLowerCase().includes('middle east') ||
-            vessel.location.toLowerCase().includes('persian gulf') ||
-            vessel.location.toLowerCase().includes('fujairah') ||
-            vessel.location.toLowerCase().includes('oman');
+            locLower.includes('hormuz') ||
+            locLower.includes('middle east') ||
+            locLower.includes('persian gulf') ||
+            locLower.includes('fujairah') ||
+            locLower.includes('oman');
 
         let riskLevel = vessel.riskLevel;
 
@@ -101,7 +127,64 @@ function calculateDynamicFleetData(params: SimulationParams, baseFleet: FleetVes
             if (riskLevel === 'Low') riskLevel = 'Medium';
         }
 
-        return { ...vessel, riskLevel };
+        for (const zone of RISK_ZONES) {
+            if (zone.keywords.some(kw => locLower.includes(kw))) {
+                if (derivedLevel === 'SAFE') derivedLevel = 'WARNING';
+                if (awrpRate > 0.08 || newsSentimentScore > 70) derivedLevel = 'CRITICAL';
+                factors.push(zone.label);
+            }
+        }
+
+        // ── 2. Fuel Price Risk (VLSFO/Brent Z-Score) ──
+        if (vlsfoMetrics?.riskAlert) {
+            const isLargeVessel = LARGE_VESSEL_TYPES.has(typeLower);
+            const isLongVoyage = vessel.voyage_info.plan_days > 20 || vessel.voyage_info.sailed_days > 15;
+
+            if (isLargeVessel || isLongVoyage) {
+                derivedLevel = 'CRITICAL';
+                factors.push(
+                    `VLSFO 유가 급등으로 인한 연료비 악화 (Z=${vlsfoMetrics.zScore.toFixed(1)}, ` +
+                    `${isLargeVessel ? '대형선박' : '장거리 항해'})`
+                );
+            } else {
+                if (derivedLevel === 'SAFE') derivedLevel = 'WARNING';
+                factors.push(`유가 변동성 경계 (Z=${vlsfoMetrics.zScore.toFixed(1)})`);
+            }
+        }
+
+        // ── 3. Freight Rate Risk (BDI Trend + Z-Score) ──
+        if (bdiMetrics) {
+            const isBulk = BULK_TYPES.has(typeLower);
+            // Ballast detection: speed near 0 or location contains "ballast" keywords
+            const isBallast = vessel.speed_and_weather_metrics.avg_speed < 5;
+
+            if (bdiMetrics.trend === 'DOWN' && bdiMetrics.zScore < -2.0) {
+                if (isBulk) {
+                    derivedLevel = 'CRITICAL';
+                    factors.push(`BDI 운임 폭락 중 (Z=${bdiMetrics.zScore.toFixed(1)}, ${isBallast ? '공선(Ballast) 상태' : '벌크선 마진 악화'})`);
+                } else if (isBallast) {
+                    if (derivedLevel === 'SAFE') derivedLevel = 'WARNING';
+                    factors.push(`운임 하락 구간 공선 운항 (BDI Z=${bdiMetrics.zScore.toFixed(1)})`);
+                }
+            } else if (bdiMetrics.trend === 'DOWN' && bdiMetrics.zScore < -1.0 && isBulk) {
+                if (derivedLevel === 'SAFE') derivedLevel = 'WARNING';
+                factors.push(`BDI 하락 추세 주의 (Z=${bdiMetrics.zScore.toFixed(1)})`);
+            }
+        }
+
+        // ── 4. Compound Risk Escalation ──
+        // If multiple factors, escalate to CRITICAL
+        if (factors.length >= 3 && derivedLevel === 'WARNING') {
+            derivedLevel = 'CRITICAL';
+            factors.push('복합 리스크 에스컬레이션');
+        }
+
+        return {
+            ...vessel,
+            riskLevel,
+            derivedRiskLevel: derivedLevel,
+            riskFactors: factors.length > 0 ? factors : undefined,
+        };
     });
 }
 
@@ -556,6 +639,7 @@ interface OntologyState {
     simulationParams: SimulationParams;
     dynamicChartData: ChartDataPoint[];
     dynamicFleetData: FleetVessel[];
+    getHighRiskVessels: () => FleetVessel[];
 
     // ---- LSEG Data Source State ----
     lsegDataSource: 'live' | 'demo';
@@ -664,6 +748,14 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         simulationParams: { ...initialParams },
         dynamicChartData: calculateDynamicChartData(initialParams),
         dynamicFleetData: calculateDynamicFleetData(initialParams, initialMergedFleet),
+
+        // ---- Derived Risk Getter ----
+        getHighRiskVessels: () => {
+            const state = get();
+            return state.dynamicFleetData.filter(
+                v => v.derivedRiskLevel === 'WARNING' || v.derivedRiskLevel === 'CRITICAL'
+            );
+        },
 
         // ---- LSEG Data Source ----
         lsegDataSource: 'demo' as const,
@@ -953,6 +1045,17 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         });
                         console.log(`[OntologyStore] 🔗 Applied ${derivedUpdates.length} derived risk updates from QuantMetrics`);
                     }
+
+                    // Re-compute fleet derived risk with fresh quant metrics
+                    const currentState = get();
+                    const ontologyFleet = mapOntologyToFleetVessels(currentState.objects);
+                    set({
+                        dynamicFleetData: calculateDynamicFleetData(
+                            currentState.simulationParams,
+                            ontologyFleet,
+                            result.quantMetrics,
+                        ),
+                    });
                 }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Unknown market data error';
@@ -1032,7 +1135,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
 
             set({
                 dynamicChartData: calculateDynamicChartData(simulationParams),
-                dynamicFleetData: calculateDynamicFleetData(simulationParams, mergedFleet),
+                dynamicFleetData: calculateDynamicFleetData(simulationParams, mergedFleet, get().lsegQuantMetrics),
             });
         },
 

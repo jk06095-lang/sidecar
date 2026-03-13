@@ -1,9 +1,86 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Copy, Download, Presentation, ChevronLeft, ChevronRight, ExternalLink, Link2, ArrowLeft, Shield, Anchor, Maximize2 } from 'lucide-react';
+import { X, Copy, Download, Presentation, ChevronLeft, ChevronRight, ExternalLink, Link2, ArrowLeft, Shield, Anchor, Maximize2, Send, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { OntologyObject, OntologyLink, AIPExecutiveBriefing } from '../types';
+import type { OntologyObject, OntologyLink, AIPExecutiveBriefing, StrategicActionLog } from '../types';
 import SkeletonLoader from './widgets/SkeletonLoader';
 import StrategicActionPanel from './widgets/StrategicActionPanel';
+import { useActionStore } from '../store/actionStore';
+import { useOntologyStore } from '../store/ontologyStore';
+
+// ============================================================
+// BULK DISPATCH BUTTON — Sends all AI strategies to actionStore
+// ============================================================
+function BulkDispatchButton({ briefing }: { briefing: AIPExecutiveBriefing }) {
+    const [dispatched, setDispatched] = useState(false);
+    const dispatchActions = useActionStore(s => s.dispatchActions);
+    const lsegQuantMetrics = useOntologyStore(s => s.lsegQuantMetrics);
+    const dynamicFleetData = useOntologyStore(s => s.dynamicFleetData);
+
+    const handleDispatch = () => {
+        const vlsfo = lsegQuantMetrics['VLSFO380'] || lsegQuantMetrics['LCOc1'] || lsegQuantMetrics['BZ=F'];
+        const bdi = lsegQuantMetrics['BADI'] || lsegQuantMetrics['^BDIY'];
+        const justification = {
+            scenarioName: 'Current Scenario',
+            vlsfoZScore: vlsfo?.zScore,
+            bdiZScore: bdi?.zScore,
+            volatility30d: vlsfo?.volatility30d,
+            riskAlertCount: Object.values(lsegQuantMetrics).filter(m => m.riskAlert).length,
+            highRiskVesselCount: dynamicFleetData.filter(v => v.derivedRiskLevel === 'CRITICAL' || v.derivedRiskLevel === 'WARNING').length,
+        };
+
+        const actions: StrategicActionLog[] = [
+            ...briefing.hedgingStrategies.map((h, i) => ({
+                id: `dispatch-hedge-${Date.now()}-${i}`,
+                actionType: 'HEDGING' as const,
+                description: h.strategy,
+                status: 'PENDING' as const,
+                approvedBy: '',
+                timestamp: new Date().toISOString(),
+                justificationMetrics: justification,
+                targetDepartment: '트레이딩/재무팀',
+                departmentMessage: `${h.instrument} / ${h.ratio} — ${h.rationale}`,
+            })),
+            ...briefing.operationalDirectives.map((d, i) => ({
+                id: `dispatch-op-${Date.now()}-${i}`,
+                actionType: 'OPERATIONAL' as const,
+                description: d.directive,
+                status: 'PENDING' as const,
+                approvedBy: '',
+                timestamp: new Date().toISOString(),
+                justificationMetrics: justification,
+                targetDepartment: d.responsible,
+                departmentMessage: d.impact,
+            })),
+        ];
+
+        dispatchActions(actions);
+        setDispatched(true);
+    };
+
+    const totalActions = briefing.hedgingStrategies.length + briefing.operationalDirectives.length;
+
+    return (
+        <div className="my-6 flex items-center justify-center">
+            <button
+                onClick={handleDispatch}
+                disabled={dispatched || totalActions === 0}
+                title="전체 전략을 액션 패널로 전송"
+                className={cn(
+                    'flex items-center gap-2 px-6 py-3 text-[11px] font-bold rounded-xl transition-all',
+                    dispatched
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 cursor-default'
+                        : 'bg-gradient-to-r from-violet-600 to-rose-600 hover:from-violet-500 hover:to-rose-500 text-white shadow-lg shadow-violet-900/30 hover:shadow-violet-900/50'
+                )}
+            >
+                {dispatched ? (
+                    <><Zap size={14} /> {totalActions}건 전략 → 액션 패널 전송 완료</>
+                ) : (
+                    <><Send size={14} /> 🚀 전체 전략 → 액션 패널로 전송 ({totalActions}건)</>
+                )}
+            </button>
+        </div>
+    );
+}
 
 // Badge color mapping by ontology object type
 const BADGE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -982,6 +1059,10 @@ export default function BriefingModal({
                                         ) : executiveBriefing ? (
                                             <>
                                                 {renderExecutiveBriefing(executiveBriefing)}
+
+                                                {/* Module 5: Bulk dispatch button */}
+                                                <BulkDispatchButton briefing={executiveBriefing} />
+
                                                 <StrategicActionPanel briefing={executiveBriefing} />
                                             </>
                                         ) : (

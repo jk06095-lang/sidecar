@@ -1,18 +1,24 @@
 /**
- * StrategicActionPanel — Module 4: C-Level Action Wizard
- * 
- * Renders AI-generated hedgingStrategies + operationalDirectives from 
+ * StrategicActionPanel — Module 5: C-Level Action Wizard + Live Ticker
+ *
+ * Renders AI-generated hedgingStrategies + operationalDirectives from
  * AIPExecutiveBriefing as actionable items with [Execute] buttons.
- * On execution, generates department-specific directive messages and
- * persists to Firestore strategic_decisions collection.
+ * On execution, persists audit trail via actionStore → Firestore.
+ *
+ * Features:
+ *   - PENDING actions from actionStore rendered as glassmorphism cards
+ *   - Spinner loading on execute → EXECUTED state
+ *   - Toast notification via actionStore
+ *   - Live ticker scrolling recent executed directives
+ *   - Firestore audit trail with justificationMetrics snapshot
  */
 
-import React, { useState, useCallback } from 'react';
-import { Check, Loader2, Shield, TrendingDown, Anchor, ArrowRight, Zap, Clock } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Check, Loader2, Shield, TrendingDown, Anchor, ArrowRight, Zap, Clock, Send, AlertTriangle, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import type { AIPExecutiveBriefing, StrategicDecision } from '../../types';
-import { saveStrategicDecision } from '../../services/firestoreService';
+import type { AIPExecutiveBriefing, StrategicActionLog } from '../../types';
 import { useOntologyStore } from '../../store/ontologyStore';
+import { useActionStore } from '../../store/actionStore';
 
 // ============================================================
 // DEPARTMENT MESSAGE GENERATORS
@@ -89,6 +95,34 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
     const [expandedId, setExpandedId] = useState<string | null>(null);
 
     const lsegQuantMetrics = useOntologyStore((s) => s.lsegQuantMetrics);
+    const dynamicFleetData = useOntologyStore((s) => s.dynamicFleetData);
+
+    // actionStore subscriptions
+    const dispatchActions = useActionStore((s) => s.dispatchActions);
+    const executeAction = useActionStore((s) => s.executeAction);
+    const pendingActions = useActionStore((s) => s.pendingActions);
+    const executedActions = useActionStore((s) => s.executedActions);
+    const toasts = useActionStore((s) => s.toasts);
+    const dismissToast = useActionStore((s) => s.dismissToast);
+
+    // Build justification metrics snapshot
+    const buildJustification = useCallback(() => {
+        const vlsfo = lsegQuantMetrics['VLSFO380'] || lsegQuantMetrics['LCOc1'] || lsegQuantMetrics['BZ=F'];
+        const bdi = lsegQuantMetrics['BADI'] || lsegQuantMetrics['^BDIY'];
+        const riskAlertCount = Object.values(lsegQuantMetrics).filter(m => m.riskAlert).length;
+        const highRiskVesselCount = dynamicFleetData.filter(
+            v => v.derivedRiskLevel === 'CRITICAL' || v.derivedRiskLevel === 'WARNING'
+        ).length;
+
+        return {
+            scenarioName,
+            vlsfoZScore: vlsfo?.zScore,
+            bdiZScore: bdi?.zScore,
+            volatility30d: vlsfo?.volatility30d,
+            riskAlertCount,
+            highRiskVesselCount,
+        };
+    }, [lsegQuantMetrics, dynamicFleetData, scenarioName]);
 
     const handleExecute = useCallback(async (
         id: string,
@@ -100,26 +134,27 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
     ) => {
         setExecutingId(id);
 
-        const decision: StrategicDecision = {
-            id: `sd-${Date.now()}-${id}`,
-            type,
-            title,
-            detail,
-            departmentMessage,
+        // Build audit action log
+        const actionLog: StrategicActionLog = {
+            id: `sal-${Date.now()}-${id}`,
+            actionType: type,
+            description: title,
+            status: 'PENDING',
+            approvedBy: 'CSO (Chief Strategy Officer)',
+            timestamp: new Date().toISOString(),
+            justificationMetrics: buildJustification(),
             targetDepartment,
-            approver: 'CSO (Chief Strategy Officer)',
-            status: 'EXECUTED',
-            lsegEvidence: { ...lsegQuantMetrics },
-            executedAt: new Date().toISOString(),
-            scenarioName,
+            departmentMessage,
         };
 
-        await saveStrategicDecision(decision);
+        // Dispatch to actionStore → fires Firestore audit + toast
+        dispatchActions([actionLog]);
+        await executeAction(actionLog.id);
 
         setExecutedIds(prev => new Set(prev).add(id));
         setExecutingId(null);
         setExpandedId(id);
-    }, [lsegQuantMetrics, scenarioName]);
+    }, [buildJustification, dispatchActions, executeAction]);
 
     const priorityColors: Record<string, { badge: string; text: string }> = {
         IMMEDIATE: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', text: 'text-rose-300' },
@@ -128,7 +163,31 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
     };
 
     return (
-        <div className="mt-10 pt-8 border-t-2 border-dashed border-violet-500/30">
+        <div className="mt-10 pt-8 border-t-2 border-dashed border-violet-500/30 relative">
+            {/* ════════════ LIVE TICKER — Recent Executed Directives  ════════════ */}
+            {executedActions.length > 0 && (
+                <div className="mb-6 bg-slate-950/80 border border-amber-500/20 rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/5 border-b border-amber-500/10">
+                        <AlertTriangle size={10} className="text-amber-400 shrink-0" />
+                        <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider">경영진 긴급 지시 발령</span>
+                    </div>
+                    <div className="overflow-hidden relative h-7 flex items-center">
+                        <div className="ticker-scroll flex items-center gap-8 px-3 whitespace-nowrap">
+                            {executedActions.slice(0, 5).map((a) => (
+                                <span key={a.id} className="text-[10px] text-slate-300 font-mono flex items-center gap-1.5 shrink-0">
+                                    <span className="text-amber-400">🚨</span>
+                                    <span className="text-emerald-400 font-bold">[{a.targetDepartment}]</span>
+                                    <span>{a.description}</span>
+                                    <span className="text-slate-500">
+                                        ({new Date(a.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })})
+                                    </span>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Section Header */}
             <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500/20 to-amber-500/20 border border-rose-500/30 flex items-center justify-center">
@@ -139,9 +198,14 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
                         C-Level Action Wizard
                     </h3>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">
-                        AI 도출 전략 → 임원 승인 → 원클릭 지시 하달
+                        AI 도출 전략 → 임원 승인 → 원클릭 지시 하달 → Firestore 감사 로그
                     </p>
                 </div>
+                {pendingActions.length > 0 && (
+                    <span className="ml-auto text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                        {pendingActions.length} PENDING
+                    </span>
+                )}
             </div>
 
             {/* Hedging Strategies Section */}
@@ -179,6 +243,7 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
                                             <button
                                                 onClick={() => handleExecute(itemId, 'HEDGING', h.strategy, `${h.instrument} / ${h.ratio}`, msg.message, msg.department)}
                                                 disabled={isExecuted || isExecuting}
+                                                title="승인 및 실행"
                                                 className={cn(
                                                     'shrink-0 flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg transition-all',
                                                     isExecuted
@@ -257,6 +322,7 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
                                             <button
                                                 onClick={() => handleExecute(itemId, 'OPERATIONAL', d.directive, d.impact, msg.message, msg.department)}
                                                 disabled={isExecuted || isExecuting}
+                                                title="승인 및 지시 하달"
                                                 className={cn(
                                                     'shrink-0 flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold rounded-lg transition-all',
                                                     isExecuted
@@ -302,12 +368,55 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
                         <span className="text-emerald-300 font-bold">
                             {executedIds.size}건 실행 완료
                         </span>
-                        <span className="text-slate-500">· Firestore strategic_decisions 컬렉션에 저장됨</span>
+                        <span className="text-slate-500">· Firestore strategic_action_logs 감사 로그 저장됨</span>
                         <Clock size={10} className="text-slate-500 ml-auto" />
                         <span className="text-slate-500 font-mono">{new Date().toLocaleTimeString('ko-KR')}</span>
                     </div>
                 </div>
             )}
+
+            {/* ════════════ TOAST NOTIFICATIONS — Fixed bottom ════════════ */}
+            {toasts.length > 0 && (
+                <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 max-w-md">
+                    {toasts.map((toast) => (
+                        <div
+                            key={toast.id}
+                            className="bg-slate-900/95 border border-emerald-500/30 rounded-xl p-4 shadow-2xl shadow-emerald-900/20 backdrop-blur-lg animate-slide-up flex items-start gap-3"
+                        >
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                                <Check size={16} className="text-emerald-400" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[11px] text-emerald-300 font-semibold leading-relaxed">{toast.message}</p>
+                                <p className="text-[9px] text-slate-500 mt-1 font-mono">
+                                    {new Date(toast.timestamp).toLocaleTimeString('ko-KR')} · Firestore 감사 로그 저장 완료
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => dismissToast(toast.id)}
+                                className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors"
+                                title="닫기"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Ticker scrolling CSS */}
+            <style>{`
+                @keyframes ticker-scroll {
+                    0% { transform: translateX(0); }
+                    100% { transform: translateX(-50%); }
+                }
+                .ticker-scroll {
+                    animation: ticker-scroll 20s linear infinite;
+                }
+                .ticker-scroll:hover {
+                    animation-play-state: paused;
+                }
+            `}</style>
         </div>
     );
 }

@@ -41,7 +41,7 @@ import {
     type DocumentData
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Scenario, SimulationParams, AppSettings, StrategicDecision } from '../types';
+import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog } from '../types';
 
 // ============================================================
 // DEBOUNCE UTILITY — Prevent rapid Firestore writes
@@ -365,4 +365,31 @@ export async function loadStrategicDecisions(): Promise<StrategicDecision[]> {
         const raw = localStorage.getItem('sidecar_strategic_decisions');
         return raw ? JSON.parse(raw) : [];
     } catch { return []; }
+}
+
+// ============================================================
+// STRATEGIC ACTION LOG — Audit trail: app/strategic_action_logs/{id}
+// Module 5: Permanent audit record with justification metrics.
+// No debounce — executive actions require instant persistence.
+// ============================================================
+
+export async function logStrategicDecision(actionLog: StrategicActionLog): Promise<void> {
+    // Instant localStorage cache for offline resilience
+    try {
+        const existing = JSON.parse(localStorage.getItem('sidecar_action_logs') || '[]') as StrategicActionLog[];
+        const updated = [actionLog, ...existing.filter(a => a.id !== actionLog.id)].slice(0, 100);
+        localStorage.setItem('sidecar_action_logs', JSON.stringify(updated));
+    } catch { /* ignore */ }
+
+    // Direct Firestore write — no debounce for audit trail
+    try {
+        await setDoc(doc(db, 'app', 'strategic_action_logs', actionLog.id), {
+            ...actionLog,
+            serverTimestamp: serverTimestamp(),
+        });
+        console.info(`[Firestore] ✅ Audit log saved: ${actionLog.id} (${actionLog.actionType})`);
+    } catch (err) {
+        console.warn('[Firestore] logStrategicDecision failed (app continues):', err);
+        // App does NOT crash — UI state already updated via actionStore
+    }
 }

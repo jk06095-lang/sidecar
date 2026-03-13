@@ -376,3 +376,34 @@ export interface StrategicDecision {
   executedAt: string;
   scenarioName: string;
 }
+
+// ============================================================
+// STRATEGIC ACTION LOG — Audit Trail for C-Level decisions (Module 5)
+// ============================================================
+
+export interface StrategicActionLog {
+  id: string;
+  /** HEDGING = derivative position, OPERATIONAL = fleet/routing action */
+  actionType: 'HEDGING' | 'OPERATIONAL';
+  /** Human-readable description of the action */
+  description: string;
+  /** Current workflow state */
+  status: 'PENDING' | 'EXECUTED';
+  /** C-Level officer who approved the action */
+  approvedBy: string;
+  /** ISO timestamp of approval/execution */
+  timestamp: string;
+  /** Quant metrics snapshot at the moment of approval — audit evidence */
+  justificationMetrics: {
+    scenarioName: string;
+    vlsfoZScore?: number;
+    bdiZScore?: number;
+    volatility30d?: number;
+    riskAlertCount: number;
+    highRiskVesselCount: number;
+  };
+  /** Department that received the directive */
+  targetDepartment: string;
+  /** Auto-generated message sent to department */
+  departmentMessage: string;
+}

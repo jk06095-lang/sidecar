@@ -1,5 +1,78 @@
-import { GoogleGenAI } from '@google/genai';
 import type { SimulationParams, FleetVessel, Scenario, OntologyObject, OntologyLink, QuantMetrics, AIPExecutiveBriefing, AIStrategicProposal } from '../types';
+
+// ============================================================
+// BFF HELPERS — All Gemini calls go through /api/gemini
+// API key is injected server-side, never exposed to browser
+// ============================================================
+
+export async function bffGenerate(
+    prompt: string,
+    model = 'gemini-2.5-flash',
+    temperature?: number,
+    tools?: Record<string, unknown>[],
+): Promise<string> {
+    const res = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate', model, temperature, prompt, tools }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(`[Gemini BFF] ${res.status}: ${err.detail || err.error || 'Unknown error'}`);
+    }
+    const data = await res.json();
+    // Extract text from Google REST API response
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function* bffStream(prompt: string, model = 'gemini-2.5-flash', temperature?: number): AsyncGenerator<string> {
+    const res = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'stream', model, temperature, prompt }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(`[Gemini BFF] ${res.status}: ${err.detail || err.error || 'Unknown error'}`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('[Gemini BFF] No response body');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            // Parse SSE events
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonStr = line.slice(6).trim();
+                    if (jsonStr === '[DONE]') return;
+                    try {
+                        const parsed = JSON.parse(jsonStr);
+                        const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (text) yield text;
+                    } catch { /* skip malformed SSE data */ }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+function cleanMarkdownFences(text: string): string {
+    let cleaned = text.trim();
+    if (cleaned.startsWith('```markdown')) cleaned = cleaned.slice('```markdown'.length);
+    else if (cleaned.startsWith('```marp')) cleaned = cleaned.slice('```marp'.length);
+    else if (cleaned.startsWith('```json')) cleaned = cleaned.slice('```json'.length);
+    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+    return cleaned.trim();
+}
 
 export const LOADING_MESSAGES = [
     '보안 해양 온톨로지에 연결 중...',
@@ -63,11 +136,8 @@ export function generateBriefingContext(
 }
 
 export async function fetchGeminiBriefing(
-    apiKey: string,
     contextJSON: string
 ): Promise<string> {
-    const ai = new GoogleGenAI({ apiKey });
-
     const systemPrompt = `당신은 글로벌 해운사의 최고경영진(C-Level)을 위한 전문 해양 리스크 분석 AI입니다.
 제공된 JSON 컨텍스트 데이터를 분석하여 Marp 마크다운 형식의 긴급 경영환경 브리핑 프레젠테이션을 생성하세요.
 
@@ -92,34 +162,9 @@ export async function fetchGeminiBriefing(
 
 이 데이터를 분석해주세요:`;
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-3.1-pro',
-        contents: [
-            {
-                role: 'user',
-                parts: [{ text: `${systemPrompt}\n\n${contextJSON}` }],
-            },
-        ],
-    });
-
-    const text = response.text;
-    if (!text) {
-        throw new Error('Gemini API returned empty response');
-    }
-
-    // Clean up: remove markdown code fences if Gemini wraps the output
-    let cleaned = text.trim();
-    if (cleaned.startsWith('```markdown')) {
-        cleaned = cleaned.slice('```markdown'.length);
-    } else if (cleaned.startsWith('```marp')) {
-        cleaned = cleaned.slice('```marp'.length);
-    } else if (cleaned.startsWith('```')) {
-        cleaned = cleaned.slice(3);
-    }
-    if (cleaned.endsWith('```')) {
-        cleaned = cleaned.slice(0, -3);
-    }
-    return cleaned.trim();
+    const text = await bffGenerate(`${systemPrompt}\n\n${contextJSON}`, 'gemini-2.5-pro');
+    if (!text) throw new Error('Gemini API returned empty response');
+    return cleanMarkdownFences(text);
 }
 
 // ============================================================
@@ -211,10 +256,8 @@ export function generateAIPReportContext(
 // ============================================================
 
 export async function* streamAIPReport(
-    apiKey: string,
     contextJSON: string
 ): AsyncGenerator<string> {
-    const ai = new GoogleGenAI({ apiKey });
 
     const systemPrompt = `너는 데이터 기반 리스크 퀀트 전략가다. 첨부된 온톨로지 수치 데이터와 파급 효과를 근거로 정밀한 의사결정 보고서를 작성하라.
 이 보고서는 해운 업계 최고경영진에게 직접 공유되므로, 전문적이고 체계적인 포맷으로 작성해야 한다.
@@ -261,21 +304,8 @@ export async function* streamAIPReport(
 
 분석할 데이터:`;
 
-    const response = await ai.models.generateContentStream({
-        model: 'gemini-2.5-flash',
-        contents: [
-            {
-                role: 'user',
-                parts: [{ text: `${systemPrompt}\n\n${contextJSON}` }],
-            },
-        ],
-    });
-
-    for await (const chunk of response) {
-        const text = chunk.text;
-        if (text) {
-            yield text;
-        }
+    for await (const chunk of bffStream(`${systemPrompt}\n\n${contextJSON}`, 'gemini-2.5-flash')) {
+        yield chunk;
     }
 }
 
@@ -284,10 +314,8 @@ export async function* streamAIPReport(
 // ============================================================
 
 export async function* streamMarpBriefing(
-    apiKey: string,
     contextJSON: string
 ): AsyncGenerator<string> {
-    const ai = new GoogleGenAI({ apiKey });
 
     const systemPrompt = `당신은 글로벌 해운사의 최고경영진(C-Level)을 위한 전문 해양 리스크 분석 AI입니다.
 제공된 JSON 컨텍스트 데이터를 분석하여 Marp 마크다운 형식의 긴급 경영환경 브리핑 프레젠테이션을 생성하세요.
@@ -318,23 +346,8 @@ export async function* streamMarpBriefing(
 
 이 데이터를 분석해주세요:`;
 
-    const response = await ai.models.generateContentStream({
-        model: 'gemini-2.5-flash',
-        contents: [
-            {
-                role: 'user',
-                parts: [{ text: `${systemPrompt}\n\n${contextJSON}` }],
-            },
-        ],
-    });
-
-    let accumulated = '';
-    for await (const chunk of response) {
-        const text = chunk.text;
-        if (text) {
-            accumulated += text;
-            yield text;
-        }
+    for await (const chunk of bffStream(`${systemPrompt}\n\n${contextJSON}`, 'gemini-2.5-flash')) {
+        yield chunk;
     }
 
     // No post-processing needed for streaming — caller handles cleanup
@@ -354,12 +367,9 @@ export interface SignalEvaluation {
 }
 
 export async function evaluateNewsSignals(
-    apiKey: string,
     articles: { id: string; title: string; description: string; source: string }[],
 ): Promise<SignalEvaluation[]> {
-    if (!apiKey || articles.length === 0) return [];
-
-    const ai = new GoogleGenAI({ apiKey });
+    if (articles.length === 0) return [];
 
     const articlesJSON = articles.map((a, i) => ({
         index: i,
@@ -382,15 +392,7 @@ export async function evaluateNewsSignals(
 ${JSON.stringify(articlesJSON, null, 2)}`;
 
     try {
-        // ============================================================
-        // FinOps MODEL ROUTING: Real-time news scoring uses the CHEAPEST
-        // model (gemini-2.5-flash). Pro models are reserved ONLY for
-        // on-demand deep-dive briefings (BriefingModal / AIP Reports).
-        // ============================================================
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
+        const text = await bffGenerate(prompt, 'gemini-2.5-flash');
 
         // Track API call for FinOps telemetry
         try {
@@ -398,13 +400,8 @@ ${JSON.stringify(articlesJSON, null, 2)}`;
             incrementApiCallCount();
         } catch { /* newsService may not be loaded yet */ }
 
-        const text = response.text || '';
         // Extract JSON from response (handle markdown code fences)
-        let jsonStr = text.trim();
-        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
-        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
-        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
-        jsonStr = jsonStr.trim();
+        const jsonStr = cleanMarkdownFences(text);
 
         const parsed = JSON.parse(jsonStr);
         if (!Array.isArray(parsed)) return [];
@@ -435,21 +432,13 @@ export interface FlashTriageResult {
 }
 
 export async function triageWithFlash(
-    apiKey: string,
     articles: { title: string; description: string; source: string; publishedAt: string }[],
 ): Promise<FlashTriageResult> {
-    const ai = new GoogleGenAI({ apiKey });
-
     const articleBlock = articles.map((a, i) =>
         `[${i + 1}] ${a.source} | ${a.publishedAt}\n제목: ${a.title}\n내용: ${a.description}`
     ).join('\n\n');
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [{
-            role: 'user',
-            parts: [{
-                text: `너는 1차 정보 분석관이다. 이 30분간 누적된 갈등 데이터를 3문장으로 요약하고, 이것이 전사 공급망 및 온톨로지 시나리오를 전면 수정해야 할 '핵심 사태(Critical Escalation)'인지 True/False로 판단하라.
+    const prompt = `너는 1차 정보 분석관이다. 이 30분간 누적된 갈등 데이터를 3문장으로 요약하고, 이것이 전사 공급망 및 온톨로지 시나리오를 전면 수정해야 할 '핵심 사태(Critical Escalation)'인지 True/False로 판단하라.
 
 판단 기준:
 - 물리적 충돌(미사일, 공격, 나포)이 실제 발생했거나 임박한 경우 → Critical
@@ -461,16 +450,10 @@ export async function triageWithFlash(
 ${articleBlock}
 
 JSON 응답만 반환하라:
-{ "summary": "3문장 요약...", "isCritical": true/false }` }],
-        }],
-    });
+{ "summary": "3문장 요약...", "isCritical": true/false }`;
 
-    const text = response.text || '';
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
-    else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
-    if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
-    jsonStr = jsonStr.trim();
+    const text = await bffGenerate(prompt, 'gemini-2.5-flash');
+    const jsonStr = cleanMarkdownFences(text);
 
     try {
         const parsed = JSON.parse(jsonStr);
@@ -505,12 +488,9 @@ export interface ProEscalationResult {
 }
 
 export async function escalateWithPro(
-    apiKey: string,
     flashSummary: string,
     ontologyState: { objects: OntologyObject[]; links: OntologyLink[] },
 ): Promise<ProEscalationResult> {
-    const ai = new GoogleGenAI({ apiKey });
-
     // Compact ontology JSON — only relevant fields
     const compactObjects = ontologyState.objects.map(o => ({
         id: o.id,
@@ -519,12 +499,7 @@ export async function escalateWithPro(
         properties: o.properties,
     }));
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: [{
-            role: 'user',
-            parts: [{
-                text: `너는 최고 작전 통제관이다. 1차 분석관이 요약한 '핵심 사태'를 바탕으로 다음을 수행하라:
+    const prompt = `너는 최고 작전 통제관이다. 1차 분석관이 요약한 '핵심 사태'를 바탕으로 다음을 수행하라:
 
 ## 1차 요약 (Flash 분석관 보고):
 ${flashSummary}
@@ -548,16 +523,10 @@ JSON 응답만 반환:
   ],
   "riskLevel": "Critical",
   "impactSummary": "1줄 요약..."
-}` }],
-        }],
-    });
+}`;
 
-    const text = response.text || '';
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
-    else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
-    if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
-    jsonStr = jsonStr.trim();
+    const text = await bffGenerate(prompt, 'gemini-2.5-pro');
+    const jsonStr = cleanMarkdownFences(text);
 
     try {
         const parsed = JSON.parse(jsonStr);
@@ -595,7 +564,6 @@ export const EXECUTIVE_BRIEFING_LOADING_MESSAGES = [
 ];
 
 export async function generateAIPExecutiveBriefing(
-    apiKey: string,
     ontologyState: {
         objects: OntologyObject[];
         links: OntologyLink[];
@@ -604,7 +572,6 @@ export async function generateAIPExecutiveBriefing(
     scenarioParams: SimulationParams,
     fleetData?: FleetVessel[],
 ): Promise<AIPExecutiveBriefing> {
-    const ai = new GoogleGenAI({ apiKey });
 
     // Build compact context for the AI
     const highRiskObjects = ontologyState.objects.filter(
@@ -734,28 +701,12 @@ export async function generateAIPExecutiveBriefing(
 분석할 데이터:`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro',
-            config: {
-                temperature: 0.2,
-            },
-            contents: [
-                {
-                    role: 'user',
-                    parts: [{ text: `${systemPrompt}\n\n${JSON.stringify(context, null, 2)}` }],
-                },
-            ],
-        });
-
-        const text = response.text || '';
+        const text = await bffGenerate(`${systemPrompt}\n\n${JSON.stringify(context, null, 2)}`, 'gemini-2.5-pro', 0.2);
 
         // Robust JSON extraction — handle code fences, BOM, stray whitespace
         let jsonStr = text.trim();
-        // Strip markdown code fences (```json ... ``` or ``` ... ```)
         jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        // Remove BOM if present
         jsonStr = jsonStr.replace(/^\uFEFF/, '');
-        // Find first '{' and last '}' to extract JSON object
         const firstBrace = jsonStr.indexOf('{');
         const lastBrace = jsonStr.lastIndexOf('}');
         if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -836,7 +787,6 @@ export const STRATEGY_GEN_LOADING_MESSAGES = [
 ];
 
 export async function generateContextualStrategies(
-    apiKey: string,
     ontologyState: {
         objects: OntologyObject[];
         links: OntologyLink[];
@@ -849,7 +799,6 @@ export async function generateContextualStrategies(
     },
     fleetData?: FleetVessel[],
 ): Promise<AIStrategicProposal[]> {
-    const ai = new GoogleGenAI({ apiKey });
 
     // Build compact high-risk objects
     const highRiskObjects = ontologyState.objects
@@ -947,16 +896,7 @@ export async function generateContextualStrategies(
 분석할 데이터:`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro',
-            config: { temperature: 0.2 },
-            contents: [{
-                role: 'user',
-                parts: [{ text: `${systemPrompt}\n\n${JSON.stringify(context, null, 2)}` }],
-            }],
-        });
-
-        const text = response.text || '';
+        const text = await bffGenerate(`${systemPrompt}\n\n${JSON.stringify(context, null, 2)}`, 'gemini-2.5-pro', 0.2);
         let jsonStr = text.trim();
         jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
         jsonStr = jsonStr.replace(/^\uFEFF/, '');

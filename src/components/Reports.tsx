@@ -11,7 +11,6 @@ import {
     LOADING_MESSAGES,
     AIP_LOADING_MESSAGES,
 } from '../services/geminiService';
-import type { AppSettings } from '../types';
 
 interface ReportInfo {
     id: string;
@@ -41,14 +40,6 @@ export default function Reports() {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [generationType, setGenerationType] = useState<'marp' | 'aip' | null>(null);
     const abortRef = useRef(false);
-
-    // API key from settings
-    const apiKey = (() => {
-        try {
-            const settings: AppSettings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
-            return settings.apiKey || '';
-        } catch { return ''; }
-    })();
 
     // Ontology store
     const scenarios = useOntologyStore(s => s.scenarios);
@@ -117,7 +108,7 @@ export default function Reports() {
     // MARP BRIEFING GENERATION (migrated from App.tsx)
     // ============================================================
     const handleGenerateMarpBriefing = useCallback(async () => {
-        if (!apiKey || isGenerating) return;
+        if (isGenerating) return;
 
         setIsGenerating(true);
         setGenerationType('marp');
@@ -150,7 +141,7 @@ export default function Reports() {
             const enhancedContextJSON = JSON.stringify(parsedContext, null, 2);
 
             let accumulated = '';
-            for await (const chunk of streamMarpBriefing(apiKey, enhancedContextJSON)) {
+            for await (const chunk of streamMarpBriefing(enhancedContextJSON)) {
                 if (abortRef.current) break;
                 accumulated += chunk;
                 setStreamingText(accumulated);
@@ -185,13 +176,13 @@ export default function Reports() {
             setIsStreaming(false);
             setLoadingMessage('');
         }
-    }, [apiKey, isGenerating, activeScenario, simulationParams, dynamicFleetData, objects, links]);
+    }, [isGenerating, activeScenario, simulationParams, dynamicFleetData, objects, links]);
 
     // ============================================================
     // AIP REPORT GENERATION (NEW)
     // ============================================================
     const handleGenerateAIPReport = useCallback(async () => {
-        if (!apiKey || isGenerating) return;
+        if (isGenerating) return;
 
         setIsGenerating(true);
         setGenerationType('aip');
@@ -217,7 +208,7 @@ export default function Reports() {
             );
 
             let accumulated = '';
-            for await (const chunk of streamAIPReport(apiKey, contextJSON)) {
+            for await (const chunk of streamAIPReport(contextJSON)) {
                 if (abortRef.current) break;
                 accumulated += chunk;
                 setStreamingText(accumulated);
@@ -243,7 +234,7 @@ export default function Reports() {
             setIsStreaming(false);
             setLoadingMessage('');
         }
-    }, [apiKey, isGenerating, activeScenario, simulationParams, dynamicFleetData, objects, links]);
+    }, [isGenerating, activeScenario, simulationParams, dynamicFleetData, objects, links]);
 
     const criticalCount = dynamicFleetData.filter(v => v.riskLevel === 'Critical').length;
     const highCount = dynamicFleetData.filter(v => v.riskLevel === 'High').length;
@@ -289,14 +280,12 @@ export default function Reports() {
                 {/* Generate Buttons */}
                 <button
                     onClick={handleGenerateMarpBriefing}
-                    disabled={isGenerating || !apiKey}
+                    disabled={isGenerating}
                     className={cn(
                         'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap',
                         isGenerating && generationType === 'marp'
                             ? 'bg-cyan-900/30 border border-cyan-700/30 text-cyan-400 cursor-wait'
-                            : apiKey
-                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600'
-                                : 'bg-slate-800/50 text-slate-600 border border-slate-700/50 cursor-not-allowed'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600'
                     )}
                 >
                     {isGenerating && generationType === 'marp' ? (
@@ -308,14 +297,12 @@ export default function Reports() {
 
                 <button
                     onClick={handleGenerateAIPReport}
-                    disabled={isGenerating || !apiKey}
+                    disabled={isGenerating}
                     className={cn(
                         'flex items-center gap-2 px-5 py-2.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap',
                         isGenerating && generationType === 'aip'
                             ? 'bg-emerald-900/30 border border-emerald-700/30 text-emerald-400 cursor-wait'
-                            : apiKey
-                                ? 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-lg shadow-emerald-900/30'
-                                : 'bg-slate-800/50 text-slate-600 border border-slate-700/50 cursor-not-allowed'
+                            : 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-lg shadow-emerald-900/30'
                     )}
                 >
                     {isGenerating && generationType === 'aip' ? (
@@ -325,12 +312,6 @@ export default function Reports() {
                     )}
                 </button>
 
-                {!apiKey && (
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-400/80">
-                        <AlertTriangle size={12} />
-                        API 키 필요
-                    </div>
-                )}
             </div>
 
             {/* Loading Progress Bar */}

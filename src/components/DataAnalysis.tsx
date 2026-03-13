@@ -142,18 +142,6 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
         setTerminalLog([]);
 
         try {
-            // Read API key
-            let apiKey = '';
-            try {
-                const s = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
-                apiKey = s.apiKey || '';
-            } catch { /* ignore */ }
-
-            if (!apiKey) {
-                appendLog('❌ ERROR: API Key가 설정되지 않았습니다. 설정 > API 연동에서 키를 입력하세요.');
-                setForceSyncing(false);
-                return;
-            }
 
             // Step 1: Force Crawl
             appendLog('[1/3] 수동 크롤링 개시: 1티어 매체 인텔리전스 DB 수집 중...');
@@ -171,7 +159,6 @@ export default function DataAnalysis({ simulationParams, dynamicChartData, dynam
             ).join('\n');
 
             const proResult = await escalateWithPro(
-                apiKey,
                 `[MANUAL OVERRIDE — Force Intelligence Sync]\n최신 수집 기사 ${passed.length}건:\n${articleSummary}`,
                 { objects, links: ontologyLinks },
             );

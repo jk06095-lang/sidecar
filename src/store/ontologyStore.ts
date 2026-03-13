@@ -1080,17 +1080,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const state = get();
             if (state.isExecutiveBriefingLoading) return;
 
-            let apiKey = '';
-            try {
-                const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
-                apiKey = settings.apiKey || '';
-            } catch { /* ignore */ }
-
-            if (!apiKey) {
-                console.warn('[OntologyStore] Executive briefing requires API key');
-                return;
-            }
-
             set({
                 isExecutiveBriefingLoading: true,
                 showExecutiveBriefingModal: true,
@@ -1100,7 +1089,6 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             try {
                 const { generateAIPExecutiveBriefing } = await import('../services/geminiService');
                 const briefing = await generateAIPExecutiveBriefing(
-                    apiKey,
                     {
                         objects: state.objects,
                         links: state.links,

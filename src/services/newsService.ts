@@ -690,24 +690,12 @@ export async function bootstrapHistoricalData(): Promise<IntelArticle[]> {
         return cached;
     }
 
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-        console.warn('[NewsService] No API key for backfill');
-        return [];
-    }
-
     const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-11'
 
     try {
-        const { GoogleGenAI } = await import('@google/genai');
-        const ai = new GoogleGenAI({ apiKey });
+        const { bffGenerate } = await import('./geminiService');
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{
-                role: 'user',
-                parts: [{
-                    text: `You are a maritime intelligence analyst. Search for REAL news events from 2026-03-01 to ${today} related to:
+        const prompt = `You are a maritime intelligence analyst. Search for REAL news events from 2026-03-01 to ${today} related to:
 - Strait of Hormuz tensions, Middle East geopolitical risks
 - Oil price movements (Brent crude)  
 - Maritime security incidents (UKMTO warnings, piracy, drone attacks on vessels)
@@ -734,14 +722,9 @@ Find 10-15 REAL events that actually happened. For each event, return:
 ORDER events chronologically (oldest first). Include events from different dates to show a timeline.
 If you cannot find events from 2026, use the most recent real maritime security events you can find.
 
-Return ONLY a JSON array. No other text.` }],
-            }],
-            config: {
-                tools: [{ googleSearch: {} }],
-            },
-        });
+Return ONLY a JSON array. No other text.`;
 
-        const text = response.text || '';
+        const text = await bffGenerate(prompt, 'gemini-2.5-flash', undefined, [{ googleSearch: {} }]);
         let jsonStr = text.trim();
         if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
         else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
@@ -801,28 +784,11 @@ let lastOfficialFetchTime = 0;
 const OFFICIAL_FETCH_INTERVAL_MS = 5 * 60 * 1000; // 5 min between official fetches
 const officialArticleCache: IntelArticle[] = [];
 
-async function getGeminiApiKey(): Promise<string> {
+export async function fetchKPICirculars(): Promise<IntelArticle[]> {
     try {
-        const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
-        if (settings.apiKey) return settings.apiKey;
-    } catch { /* ignore */ }
-    // Fallback to env variable
-    return (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-}
+        const { bffGenerate } = await import('./geminiService');
 
-export async function fetchKPICirculars(apiKey: string): Promise<IntelArticle[]> {
-    if (!apiKey) return [];
-
-    try {
-        const { GoogleGenAI } = await import('@google/genai');
-        const ai = new GoogleGenAI({ apiKey });
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{
-                role: 'user',
-                parts: [{
-                    text: `한국 P&I 클럽(Korea P&I Club, kpiclub.or.kr)의 최근 공식 회람(Circular)을 검색해서 찾아줘.
+        const prompt = `한국 P&I 클럽(Korea P&I Club, kpiclub.or.kr)의 최근 공식 회람(Circular)을 검색해서 찾아줘.
 최근 6개월 이내에 발행된 해상보험 관련 회람을 최대 5건 찾아서 아래 JSON 형식으로 반환해.
 
 검색 키워드: "한국선주상호보험" OR "kpiclub" 회람 circular war risk premium 보험
@@ -837,14 +803,9 @@ export async function fetchKPICirculars(apiKey: string): Promise<IntelArticle[]>
   { "targetNodeId": "insurance-war-risk", "targetNodeTitle": "War Risk Premium", "propertyKey": "rateTo", "newValue": 수치, "displayLabel": "표시 텍스트", "sourceRef": "문서 번호" }
 
 반드시 JSON 배열만 반환. 다른 텍스트 없이.
-만약 결과를 찾을 수 없다면 빈 배열 []을 반환.` }],
-            }],
-            config: {
-                tools: [{ googleSearch: {} }],
-            },
-        });
+만약 결과를 찾을 수 없다면 빈 배열 []을 반환.`;
 
-        const text = response.text || '';
+        const text = await bffGenerate(prompt, 'gemini-2.5-flash', undefined, [{ googleSearch: {} }]);
         let jsonStr = text.trim();
         if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
         else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
@@ -881,19 +842,11 @@ export async function fetchKPICirculars(apiKey: string): Promise<IntelArticle[]>
     }
 }
 
-export async function fetchSecurityAlerts(apiKey: string): Promise<IntelArticle[]> {
-    if (!apiKey) return [];
-
+export async function fetchSecurityAlerts(): Promise<IntelArticle[]> {
     try {
-        const { GoogleGenAI } = await import('@google/genai');
-        const ai = new GoogleGenAI({ apiKey });
+        const { bffGenerate } = await import('./geminiService');
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{
-                role: 'user',
-                parts: [{
-                    text: `Search for the latest UKMTO (United Kingdom Maritime Trade Operations) maritime security alerts, warnings, and advisories.
+        const prompt = `Search for the latest UKMTO (United Kingdom Maritime Trade Operations) maritime security alerts, warnings, and advisories.
 Also search for IMB (International Maritime Bureau), MSCHOA, and NATO Shipping Centre alerts.
 
 Find up to 5 recent maritime security incidents or warnings from the last 3 months. Return as JSON array:
@@ -908,14 +861,9 @@ Find up to 5 recent maritime security incidents or warnings from the last 3 mont
   { "targetNodeId": "macro-hormuz-tension", "targetNodeTitle": "Hormuz Tension", "propertyKey": "riskScore", "newValue": number, "displayLabel": "description", "sourceRef": "ref number" }
 
 Return ONLY a JSON array. No other text.
-If no results found, return empty array [].` }],
-            }],
-            config: {
-                tools: [{ googleSearch: {} }],
-            },
-        });
+If no results found, return empty array [].`;
 
-        const text = response.text || '';
+        const text = await bffGenerate(prompt, 'gemini-2.5-flash', undefined, [{ googleSearch: {} }]);
         let jsonStr = text.trim();
         if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
         else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
@@ -962,13 +910,10 @@ export async function fetchOfficialSources(): Promise<IntelArticle[]> {
         return [...officialArticleCache];
     }
 
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) return [...officialArticleCache];
-
     try {
         const [kpiArticles, securityArticles] = await Promise.allSettled([
-            fetchKPICirculars(apiKey),
-            fetchSecurityAlerts(apiKey),
+            fetchKPICirculars(),
+            fetchSecurityAlerts(),
         ]);
 
         const results: IntelArticle[] = [];

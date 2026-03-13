@@ -9,7 +9,6 @@ interface ImportMetaEnv {
     readonly VITE_FIREBASE_APP_ID: string;
     readonly VITE_FIREBASE_MEASUREMENT_ID: string;
     readonly VITE_USE_FIREBASE_EMULATORS?: string;
-    readonly VITE_GEMINI_API_KEY?: string;
 
     readonly VITE_ENABLE_GEMINI_SIM?: string;
 }

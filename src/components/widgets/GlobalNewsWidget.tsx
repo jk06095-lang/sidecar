@@ -61,14 +61,12 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     const ontologyLinks = useOntologyStore(s => s.links);
 
     const handleBatchEvaluation = useCallback(async (batch: IntelArticle[]) => {
-        const settings = getSettings();
-        if (!settings.apiKey || batch.length === 0) return;
+        if (batch.length === 0) return;
 
         try {
             // ── GATE 1: Flash Triage ──
             console.log(`[Gate1] 🔍 Flash triage: ${batch.length} articles`);
             const triageResult = await triageWithFlash(
-                settings.apiKey,
                 batch.map(a => ({
                     title: a.title,
                     description: a.description,
@@ -103,7 +101,6 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 console.log('[Gate2] 🚨 CRITICAL → Escalating to Pro for ontology update');
 
                 const proResult = await escalateWithPro(
-                    settings.apiKey,
                     triageResult.summary,
                     { objects: ontologyObjects, links: ontologyLinks },
                 );

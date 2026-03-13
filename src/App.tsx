@@ -117,7 +117,7 @@ export default function App() {
   // App Settings (Theme, Language, API Key)
   const [settings, setSettings] = useState<AppSettings>(() => {
     const defaults: AppSettings = {
-      apiKey: import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('gemini_api_key') || '',
+      apiKey: '',
       theme: 'dark',
       language: 'ko',
       osintSources: [],

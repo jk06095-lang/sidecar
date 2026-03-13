@@ -547,7 +547,7 @@ export interface StrategicActionLog {
   id: string;
   actionType: 'HEDGING' | 'OPERATIONAL';
   description: string;
-  status: 'PENDING' | 'EXECUTED';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'EXECUTED';
   approvedBy: string;
   timestamp: string;
   justificationMetrics: {
@@ -560,4 +560,32 @@ export interface StrategicActionLog {
   };
   targetDepartment: string;
   departmentMessage: string;
+  /** AI confidence score (0-1) */
+  confidence?: number;
+  /** Estimated financial impact in USD */
+  estimatedImpactUsd?: number;
+  /** Approval progress 0-100 (used for UI animation) */
+  approvalProgress?: number;
+  /** Who rejected, if rejected */
+  rejectedBy?: string;
+  /** When actually executed */
+  executedAt?: string;
 }
+
+/** AI-generated strategic proposal with confidence + financial impact */
+export interface AIStrategicProposal {
+  id: string;
+  actionType: 'HEDGING' | 'OPERATIONAL';
+  title: string;
+  description: string;
+  rationale: string;
+  confidence: number;           // 0-1
+  estimatedImpactUsd: number;   // positive = savings, negative = cost
+  targetDepartment: string;
+  departmentMessage: string;
+  priority: 'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM';
+  vesselTargets?: string[];     // vessel names involved
+  instrument?: string;          // for hedging: specific derivative
+  ratio?: string;               // for hedging: hedge ratio
+}
+

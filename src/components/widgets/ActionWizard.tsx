@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { X, Zap, AlertTriangle, ArrowRight, Check, TrendingUp, TrendingDown, Shield } from 'lucide-react';
+import { X, Zap, AlertTriangle, ArrowRight, Check, TrendingUp, TrendingDown, Shield, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
+import { useActionStore } from '../../store/actionStore';
 import type { OntologyObject, OntologyActionType } from '../../types';
 
 // ============================================================
@@ -551,6 +552,213 @@ export default function ActionWizard({ object, actionDef, onClose }: ActionWizar
                     <Zap size={14} />
                     Action 실행 (Store Write-back)
                 </button>
+            </div>
+        </div>
+    );
+}
+
+
+// ============================================================
+// APPROVAL WIZARD — 3-Step Modal for Strategic Action Approval
+// Phase 4: Review → Authorize → Execute
+// ============================================================
+
+interface ApprovalWizardProps {
+    action: import('../../types').StrategicActionLog;
+    onClose: () => void;
+}
+
+export function ApprovalWizard({ action, onClose }: ApprovalWizardProps) {
+    const [step, setStep] = useState(0); // 0=Review, 1=Authorize, 2=Execute
+    const [approverName, setApproverName] = useState('CSO (Chief Strategy Officer)');
+    const [justification, setJustification] = useState('');
+    const [isExecuting, setIsExecuting] = useState(false);
+    const [executionComplete, setExecutionComplete] = useState(false);
+
+    const { submitForApproval, approveAndExecute } = useActionStore();
+
+    const steps = [
+        { label: '검토', labelEn: 'Review', icon: <AlertTriangle size={14} /> },
+        { label: '결재', labelEn: 'Authorize', icon: <Shield size={14} /> },
+        { label: '실행', labelEn: 'Execute', icon: <Zap size={14} /> },
+    ];
+
+    const handleAuthorize = () => {
+        // Move to PENDING_APPROVAL in store
+        if (action.status === 'DRAFT') {
+            submitForApproval(action.id);
+        }
+        setStep(2);
+    };
+
+    const handleExecute = async () => {
+        setIsExecuting(true);
+        await approveAndExecute(action.id, approverName, justification);
+        setIsExecuting(false);
+        setExecutionComplete(true);
+        setTimeout(onClose, 2000);
+    };
+
+    const confLevel = (action.confidence ?? 0) >= 0.8 ? 'HIGH' : (action.confidence ?? 0) >= 0.5 ? 'MEDIUM' : 'LOW';
+    const confColor = confLevel === 'HIGH' ? 'emerald' : confLevel === 'MEDIUM' ? 'amber' : 'rose';
+
+    return (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+            <div className="w-[480px] bg-slate-900 border border-slate-700/60 rounded-2xl shadow-2xl animate-scale-up" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-center gap-3 p-5 pb-4 border-b border-slate-700/40">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-rose-500/20 border border-amber-500/30 flex items-center justify-center">
+                        <Shield size={20} className="text-amber-400" />
+                    </div>
+                    <div className="flex-1">
+                        <h3 className="text-sm font-bold text-slate-200">전략 결재 워크플로우</h3>
+                        <p className="text-[10px] text-slate-500">Strategic Action Approval Pipeline</p>
+                    </div>
+                    <button onClick={onClose} className="text-slate-500 hover:text-slate-300" title="닫기"><X size={16} /></button>
+                </div>
+
+                {/* Step Indicator */}
+                <div className="flex items-center justify-center gap-4 py-4 px-6">
+                    {steps.map((s, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                            {i > 0 && <div className={cn('w-10 h-px', i <= step ? 'bg-emerald-500' : 'bg-slate-700')} />}
+                            <div className={cn(
+                                'w-8 h-8 rounded-full flex items-center justify-center border transition-all',
+                                i < step ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                    : i === step ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse'
+                                        : 'bg-slate-800 text-slate-600 border-slate-700'
+                            )}>
+                                {i < step ? <Check size={14} /> : s.icon}
+                            </div>
+                            <div className="text-center">
+                                <div className={cn('text-[10px] font-bold', i <= step ? 'text-slate-200' : 'text-slate-600')}>{s.label}</div>
+                                <div className="text-[8px] text-slate-600">{s.labelEn}</div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Step Content */}
+                <div className="px-6 pb-6">
+                    {/* STEP 0: Review */}
+                    {step === 0 && (
+                        <div className="space-y-4 animate-fade-in">
+                            <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/30 space-y-3">
+                                <div className="flex items-center gap-2">
+                                    <span className={cn('text-[9px] font-black uppercase px-2 py-0.5 rounded-full border',
+                                        action.actionType === 'HEDGING' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'bg-violet-500/15 text-violet-300 border-violet-500/40'
+                                    )}>{action.actionType === 'HEDGING' ? '헤지 전략' : '운영 지시'}</span>
+                                    <span className={cn(`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border bg-${confColor}-500/15 text-${confColor}-300 border-${confColor}-500/40`)}>
+                                        AI {confLevel} {Math.round((action.confidence ?? 0) * 100)}%
+                                    </span>
+                                </div>
+                                <p className="text-sm font-semibold text-slate-200">{action.description}</p>
+                                <p className="text-[10px] text-slate-400">{action.departmentMessage.split('\n').slice(0, 3).join('\n')}</p>
+                            </div>
+                            <div className="flex gap-3">
+                                <div className="flex-1 p-3 bg-slate-800/30 rounded-lg border border-slate-700/20">
+                                    <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-1">대상 부서</div>
+                                    <div className="text-[11px] text-slate-300 font-semibold">{action.targetDepartment}</div>
+                                </div>
+                                <div className="flex-1 p-3 bg-slate-800/30 rounded-lg border border-slate-700/20">
+                                    <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-1">예상 재무 영향</div>
+                                    <div className={cn('text-[11px] font-mono font-bold', (action.estimatedImpactUsd ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                                        {(action.estimatedImpactUsd ?? 0) >= 0 ? '+' : ''}{((action.estimatedImpactUsd ?? 0) / 1000).toFixed(1)}k USD
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setStep(1)}
+                                className="w-full py-3 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:from-amber-500 hover:to-orange-500 transition-all flex items-center justify-center gap-2 shadow-lg"
+                            >
+                                <ArrowRight size={14} /> 결재 단계로 진행
+                            </button>
+                        </div>
+                    )}
+
+                    {/* STEP 1: Authorize */}
+                    {step === 1 && (
+                        <div className="space-y-4 animate-fade-in">
+                            <div className="space-y-2">
+                                <label className="block text-[9px] text-slate-500 uppercase tracking-widest">결재자 (APPROVER)</label>
+                                <input
+                                    type="text"
+                                    value={approverName}
+                                    onChange={e => setApproverName(e.target.value)}
+                                    className="w-full bg-slate-800/80 border border-slate-700/60 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-600"
+                                    placeholder="결재자 이름 또는 직함"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="block text-[9px] text-slate-500 uppercase tracking-widest">결재 사유 (선택)</label>
+                                <textarea
+                                    value={justification}
+                                    onChange={e => setJustification(e.target.value)}
+                                    rows={3}
+                                    className="w-full bg-slate-800/80 border border-slate-700/60 rounded-lg px-4 py-3 text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-600 resize-none"
+                                    placeholder="결재 승인 사유를 입력하세요..."
+                                />
+                            </div>
+                            {/* Digital Signature Mock */}
+                            <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                                    <Check size={20} className="text-emerald-400" />
+                                </div>
+                                <div>
+                                    <div className="text-[10px] font-bold text-emerald-300">전자 결재 서명</div>
+                                    <div className="text-[9px] text-slate-500">
+                                        {approverName} · {new Date().toISOString().slice(0, 19)}
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleAuthorize}
+                                className="w-full py-3 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-cyan-600 text-white hover:from-emerald-500 hover:to-cyan-500 transition-all flex items-center justify-center gap-2 shadow-lg"
+                            >
+                                <Shield size={14} /> 결재 승인 및 실행 진행
+                            </button>
+                        </div>
+                    )}
+
+                    {/* STEP 2: Execute */}
+                    {step === 2 && (
+                        <div className="space-y-4 animate-fade-in">
+                            {!executionComplete ? (
+                                <>
+                                    <div className="text-center py-6">
+                                        {isExecuting ? (
+                                            <Loader2 size={48} className="text-amber-400 animate-spin mx-auto mb-3" />
+                                        ) : (
+                                            <Zap size={48} className="text-amber-400 mx-auto mb-3" />
+                                        )}
+                                        <p className="text-sm font-bold text-slate-200">
+                                            {isExecuting ? '전략 실행 중...' : '실행 준비 완료'}
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-1">
+                                            {isExecuting ? 'Firestore 감사 로그 기록 중' : '아래 버튼을 클릭하여 전략을 실행하세요'}
+                                        </p>
+                                    </div>
+                                    {!isExecuting && (
+                                        <button
+                                            onClick={handleExecute}
+                                            className="w-full py-3 rounded-xl text-xs font-bold bg-gradient-to-r from-rose-600 to-amber-600 text-white hover:from-rose-500 hover:to-amber-500 transition-all flex items-center justify-center gap-2 shadow-lg animate-pulse"
+                                        >
+                                            <Zap size={14} /> 최종 실행 (EXECUTE)
+                                        </button>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mx-auto mb-4 animate-bounce">
+                                        <Check size={32} className="text-emerald-400" />
+                                    </div>
+                                    <p className="text-lg font-bold text-emerald-300">실행 완료</p>
+                                    <p className="text-[10px] text-slate-500 mt-1">전략이 성공적으로 실행되었습니다. Firestore 감사 로그에 기록됨.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

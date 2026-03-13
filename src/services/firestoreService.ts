@@ -393,3 +393,25 @@ export async function logStrategicDecision(actionLog: StrategicActionLog): Promi
         // App does NOT crash — UI state already updated via actionStore
     }
 }
+
+// ============================================================
+// APPROVAL EVENT LOG — Audit trail for state transitions
+// Phase 4: DRAFT → PENDING_APPROVAL → EXECUTED transitions
+// ============================================================
+
+export async function logApprovalEvent(
+    actionId: string,
+    event: { from: string; to: string; timestamp: string; approvedBy?: string; reason?: string },
+): Promise<void> {
+    const eventId = `${actionId}_${Date.now()}`;
+    try {
+        await setDoc(doc(db, 'app', 'approval_events', eventId), {
+            actionId,
+            ...event,
+            serverTimestamp: serverTimestamp(),
+        });
+        console.info(`[Firestore] Approval event logged: ${actionId} ${event.from}→${event.to}`);
+    } catch (err) {
+        console.warn('[Firestore] logApprovalEvent failed (non-critical):', err);
+    }
+}

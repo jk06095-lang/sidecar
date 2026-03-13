@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import type { SimulationParams, FleetVessel, Scenario, OntologyObject, OntologyLink, QuantMetrics, AIPExecutiveBriefing } from '../types';
+import type { SimulationParams, FleetVessel, Scenario, OntologyObject, OntologyLink, QuantMetrics, AIPExecutiveBriefing, AIStrategicProposal } from '../types';
 
 export const LOADING_MESSAGES = [
     '보안 해양 온톨로지에 연결 중...',
@@ -816,5 +816,178 @@ export async function generateAIPExecutiveBriefing(
     } catch (err) {
         console.error('[GeminiService] Executive briefing generation failed:', err);
         throw new Error(`Executive briefing 생성 실패: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+}
+
+
+// ============================================================
+// MODULE 4: CONTEXT-AWARE STRATEGIC PROPOSALS
+// Generates AI strategic proposals with per-action confidence
+// and estimated financial impact. Injects P&L loss data.
+// ============================================================
+
+export const STRATEGY_GEN_LOADING_MESSAGES = [
+    '온톨로지 리스크 노드 스캔 중...',
+    '시나리오 P&L 손실 데이터 주입 중...',
+    '선대별 최적 전략 도출 중...',
+    'AI 신뢰도(Confidence) 산출 중...',
+    '재무 임팩트 시뮬레이션 중...',
+    '전략 제안서 JSON 생성 중...',
+];
+
+export async function generateContextualStrategies(
+    apiKey: string,
+    ontologyState: {
+        objects: OntologyObject[];
+        links: OntologyLink[];
+        quantMetrics: Record<string, QuantMetrics>;
+    },
+    scenarioParams: SimulationParams,
+    pnlResult: {
+        fleet: { netPnLDelta: number; avgTceDelta: number; totalOpexDelta: number; totalDelayDaysDelta: number };
+        vessels: Array<{ vesselName: string; tce: number; opex: number; delayDays: number; voyagePnL: number }>;
+    },
+    fleetData?: FleetVessel[],
+): Promise<AIStrategicProposal[]> {
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Build compact high-risk objects
+    const highRiskObjects = ontologyState.objects
+        .filter(o => (o.properties.riskScore as number) >= 40 && o.metadata.status === 'active')
+        .slice(0, 20)
+        .map(o => ({
+            id: o.id, type: o.type, title: o.title,
+            riskScore: o.properties.riskScore,
+            keyProps: Object.fromEntries(
+                Object.entries(o.properties).filter(([k]) => k !== 'riskScore').slice(0, 4)
+            ),
+        }));
+
+    // Build quant risk alerts
+    const riskAlerts = Object.entries(ontologyState.quantMetrics)
+        .filter(([, m]) => m.riskAlert)
+        .map(([ric, m]) => ({ ric, zScore: m.zScore, volatility: m.volatility30d, momentum: m.momentum }));
+
+    // P&L loss context — the key differentiator from generic briefing
+    const pnlContext = {
+        fleetLevelImpact: {
+            netPnLDelta: pnlResult.fleet.netPnLDelta,
+            avgTceDelta: pnlResult.fleet.avgTceDelta,
+            totalOpexDelta: pnlResult.fleet.totalOpexDelta,
+            totalDelayDaysDelta: pnlResult.fleet.totalDelayDaysDelta,
+        },
+        perVesselPnL: pnlResult.vessels.slice(0, 15).map(v => ({
+            vesselName: v.vesselName,
+            tce: v.tce,
+            opex: v.opex,
+            delayDays: v.delayDays,
+            voyagePnL: v.voyagePnL,
+        })),
+    };
+
+    // High-risk fleet data
+    const highRiskFleet = (fleetData || [])
+        .filter(v => v.derivedRiskLevel === 'CRITICAL' || v.derivedRiskLevel === 'WARNING')
+        .slice(0, 10)
+        .map(v => ({
+            vessel: v.vessel_name,
+            location: v.location,
+            derivedRiskLevel: v.derivedRiskLevel,
+            riskFactors: v.riskFactors || [],
+            route: `${v.voyage_info.departure_port} → ${v.voyage_info.destination_port}`,
+        }));
+
+    const context = {
+        analysisType: 'CONTEXTUAL_STRATEGIC_PROPOSALS',
+        timestamp: new Date().toISOString(),
+        scenarioParameters: scenarioParams,
+        pnlLossData: pnlContext,
+        highRiskOntologyNodes: highRiskObjects,
+        quantRiskAlerts: riskAlerts,
+        highRiskFleet,
+    };
+
+    const systemPrompt = `너는 글로벌 해운사의 CRO(최고위험관리자)이자 퀀트 전략가다.
+
+제공된 데이터를 분석하여 **구체적인 전략 제안**을 도출하라.
+
+## 핵심 차별점:
+이전 브리핑과 달리, 이번에는 **시나리오 P&L 시뮬레이션 결과**(pnlLossData)가 포함되어 있다.
+각 선박의 TCE, OPEX, 지연일수, 항해 P&L 데이터를 참조하여:
+- 손실이 가장 큰 선박에 대해 구체적 운영 지시를 도출
+- "해당 선박 희망봉 우회 및 2노트 감속 지시" 같은 구체적 액션을 제안
+- 각 전략에 대해 **AI 신뢰도(confidence, 0~1)**와 **예상 재무 임팩트(USD)**를 산출
+
+## 응답 규칙:
+1. 반드시 순수 JSON 배열로만 응답 (마크다운 코드블럭 사용 금지)
+2. 최소 4개, 최대 8개의 전략 제안
+3. 각 제안에 confidence와 estimatedImpactUsd를 정밀 산출
+4. vesselTargets에 관련 선박명을 반드시 포함
+5. 한국어로 작성
+
+## JSON 스키마 (배열):
+[
+  {
+    "id": "strat-1",
+    "actionType": "HEDGING" 또는 "OPERATIONAL",
+    "title": "전략 제목",
+    "description": "상세 설명",
+    "rationale": "P&L 데이터 기반 근거 (구체적 수치 포함)",
+    "confidence": 0.0~1.0,
+    "estimatedImpactUsd": 양수=절감/수익, 음수=비용,
+    "targetDepartment": "담당 부서",
+    "departmentMessage": "부서 전달 메시지 (3~5줄)",
+    "priority": "IMMEDIATE|SHORT_TERM|MEDIUM_TERM",
+    "vesselTargets": ["선박명1", "선박명2"],
+    "instrument": "파생상품명 (헤지 전략의 경우)",
+    "ratio": "헤지 비율 (헤지 전략의 경우)"
+  }
+]
+
+분석할 데이터:`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            config: { temperature: 0.2 },
+            contents: [{
+                role: 'user',
+                parts: [{ text: `${systemPrompt}\n\n${JSON.stringify(context, null, 2)}` }],
+            }],
+        });
+
+        const text = response.text || '';
+        let jsonStr = text.trim();
+        jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        jsonStr = jsonStr.replace(/^\uFEFF/, '');
+
+        // Find array boundaries
+        const firstBracket = jsonStr.indexOf('[');
+        const lastBracket = jsonStr.lastIndexOf(']');
+        if (firstBracket !== -1 && lastBracket > firstBracket) {
+            jsonStr = jsonStr.slice(firstBracket, lastBracket + 1);
+        }
+
+        const parsed = JSON.parse(jsonStr);
+        if (!Array.isArray(parsed)) throw new Error('Expected JSON array');
+
+        return parsed.map((p: any, i: number) => ({
+            id: p.id || `strat-${Date.now()}-${i}`,
+            actionType: p.actionType === 'HEDGING' ? 'HEDGING' : 'OPERATIONAL',
+            title: String(p.title || ''),
+            description: String(p.description || ''),
+            rationale: String(p.rationale || ''),
+            confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0.5)),
+            estimatedImpactUsd: Number(p.estimatedImpactUsd) || 0,
+            targetDepartment: String(p.targetDepartment || '운항팀'),
+            departmentMessage: String(p.departmentMessage || ''),
+            priority: (['IMMEDIATE', 'SHORT_TERM', 'MEDIUM_TERM'].includes(p.priority) ? p.priority : 'SHORT_TERM') as AIStrategicProposal['priority'],
+            vesselTargets: Array.isArray(p.vesselTargets) ? p.vesselTargets.map(String) : [],
+            instrument: p.instrument ? String(p.instrument) : undefined,
+            ratio: p.ratio ? String(p.ratio) : undefined,
+        }));
+    } catch (err) {
+        console.error('[GeminiService] Contextual strategies generation failed:', err);
+        throw new Error(`전략 제안 생성 실패: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
 }

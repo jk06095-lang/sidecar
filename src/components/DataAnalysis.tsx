@@ -2,13 +2,15 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
     TrendingUp, Plus, X, BarChart3, LineChart, Hash, Table2, Filter as FilterIcon,
     Calculator, Save, Trash2, ChevronDown, Sparkles, ArrowRight, GripVertical, Eye,
-    GitBranch, TrendingDown, AlertTriangle, Zap, CandlestickChart, ShieldAlert, Terminal, Loader2
+    GitBranch, TrendingDown, AlertTriangle, Zap, CandlestickChart, ShieldAlert, Terminal, Loader2,
+    Ship, DollarSign, Clock, ArrowUpRight, ArrowDownRight, Activity,
 } from 'lucide-react';
 import { cn, computeObjectDeltas, computeBranchMetrics } from '../lib/utils';
 import type { SimulationParams, ChartDataPoint, FleetVessel } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
 import { fetchAndProcess } from '../services/newsService';
 import { escalateWithPro } from '../services/geminiService';
+import { runScenarioPnL, type ScenarioPnLResult } from '../lib/quantEngine';
 import TradingViewWidget from './widgets/TradingViewWidget';
 
 // ============================================================
@@ -767,6 +769,18 @@ function BranchComparisonDashboard({ baseObjects, branch }: BranchComparisonProp
     const baseMetrics = useMemo(() => computeBranchMetrics(baseObjects), [baseObjects]);
     const branchMetrics = useMemo(() => computeBranchMetrics(branch.branchObjects), [branch.branchObjects]);
 
+    // P&L comparison using quant engine
+    const dynamicFleetData = useOntologyStore(s => s.dynamicFleetData);
+    const pnlComparison = useMemo(() => {
+        try {
+            const basePnl = runScenarioPnL(branch.baseParams, branch.baseParams, dynamicFleetData);
+            const branchPnl = runScenarioPnL(branch.baseParams, branch.branchParams, dynamicFleetData);
+            return { basePnl, branchPnl };
+        } catch {
+            return null;
+        }
+    }, [branch.baseParams, branch.branchParams, dynamicFleetData]);
+
     const TYPE_COLORS: Record<string, string> = {
         Vessel: '#06b6d4', Port: '#f59e0b', Commodity: '#a855f7', MacroEvent: '#ef4444',
         Insurance: '#3b82f6', Market: '#64748b', RiskFactor: '#ec4899', Currency: '#10b981',
@@ -882,6 +896,134 @@ function BranchComparisonDashboard({ baseObjects, branch }: BranchComparisonProp
                     );
                 })}
             </div>
+
+            {/* ═════ P&L WATERFALL — Maritime Quant Engine ═════ */}
+            {pnlComparison && (
+                <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5">
+                    <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+                        <DollarSign size={14} className="text-emerald-400" />
+                        Maritime P&L Impact — Quant Engine
+                    </h3>
+
+                    {/* P&L KPI Row */}
+                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
+                        {[
+                            {
+                                label: 'TCE 변동',
+                                icon: <TrendingUp size={13} />,
+                                base: pnlComparison.basePnl.vessels[0]?.tce || 0,
+                                branch: pnlComparison.branchPnl.vessels[0]?.tce || 0,
+                                unit: '$/day',
+                            },
+                            {
+                                label: 'OPEX 변동',
+                                icon: <DollarSign size={13} />,
+                                base: pnlComparison.basePnl.vessels[0]?.opex || 0,
+                                branch: pnlComparison.branchPnl.vessels[0]?.opex || 0,
+                                unit: '$/day',
+                                invert: true,
+                            },
+                            {
+                                label: '지연일수',
+                                icon: <Clock size={13} />,
+                                base: pnlComparison.basePnl.vessels[0]?.delayDays || 0,
+                                branch: pnlComparison.branchPnl.vessels[0]?.delayDays || 0,
+                                unit: 'days',
+                                invert: true,
+                            },
+                            {
+                                label: 'Net P&L',
+                                icon: <Activity size={13} />,
+                                base: pnlComparison.basePnl.vessels[0]?.voyagePnL || 0,
+                                branch: pnlComparison.branchPnl.vessels[0]?.voyagePnL || 0,
+                                unit: '$',
+                                highlight: true,
+                            },
+                        ].map((kpi, idx) => {
+                            const delta = kpi.branch - kpi.base;
+                            const isGood = kpi.invert ? delta <= 0 : delta >= 0;
+                            return (
+                                <div key={idx} className={cn(
+                                    "rounded-xl border px-4 py-3",
+                                    kpi.highlight
+                                        ? (isGood ? 'bg-emerald-950/30 border-emerald-700/40' : 'bg-rose-950/30 border-rose-700/40')
+                                        : 'bg-slate-800/30 border-slate-700/30'
+                                )}>
+                                    <div className="flex items-center gap-1.5 mb-1.5">
+                                        <span className="text-slate-500">{kpi.icon}</span>
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{kpi.label}</span>
+                                    </div>
+                                    <div className="flex items-end justify-between">
+                                        <div>
+                                            <div className="text-[9px] text-slate-500 mb-0.5">Base</div>
+                                            <div className="text-lg font-black text-cyan-400 font-mono">
+                                                {Math.abs(kpi.base) >= 1000 ? `${(kpi.base / 1000).toFixed(1)}k` : kpi.base.toLocaleString()}
+                                            </div>
+                                        </div>
+                                        <div className="text-center px-1">
+                                            <ArrowRight size={12} className="text-slate-600 mx-auto" />
+                                            <div className={cn("text-[10px] font-bold mt-0.5", isGood ? 'text-emerald-400' : 'text-rose-400')}>
+                                                {delta > 0 ? '+' : ''}{Math.abs(delta) >= 1000 ? `${(delta / 1000).toFixed(1)}k` : delta.toLocaleString()}
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-[9px] text-slate-500 mb-0.5">Branch</div>
+                                            <div className="text-lg font-black text-purple-400 font-mono">
+                                                {Math.abs(kpi.branch) >= 1000 ? `${(kpi.branch / 1000).toFixed(1)}k` : kpi.branch.toLocaleString()}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-[8px] text-slate-600 text-right mt-1">{kpi.unit}</div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Per-vessel P&L delta bars (waterfall-style) */}
+                    {pnlComparison.branchPnl.vessels.length > 0 && (
+                        <div className="space-y-2">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-2 flex items-center gap-1.5">
+                                <Ship size={11} className="text-cyan-400" /> 선박별 Voyage P&L Delta
+                            </div>
+                            {pnlComparison.branchPnl.vessels.map((v, i) => {
+                                const baseV = pnlComparison.basePnl.vessels[i];
+                                if (!baseV) return null;
+                                const delta = v.voyagePnL - baseV.voyagePnL;
+                                const maxAbs = Math.max(
+                                    ...pnlComparison.branchPnl.vessels.map((vv, j) => Math.abs(vv.voyagePnL - (pnlComparison.basePnl.vessels[j]?.voyagePnL || 0))),
+                                    1
+                                );
+                                const pct = (Math.abs(delta) / maxAbs) * 100;
+                                const isPositive = delta >= 0;
+                                return (
+                                    <div key={i} className="flex items-center gap-3">
+                                        <span className="text-[10px] text-slate-300 font-medium w-28 truncate">{v.vesselName}</span>
+                                        <div className="flex-1 h-5 bg-slate-800 rounded-full overflow-hidden relative">
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <div className="w-px h-full bg-slate-600" />
+                                            </div>
+                                            <div
+                                                className={cn("h-full rounded-full transition-all duration-500",
+                                                    isPositive ? 'bg-emerald-500/60 ml-[50%]' : 'bg-rose-500/60'
+                                                )}
+                                                style={{
+                                                    width: `${pct / 2}%`,
+                                                    ...(isPositive ? {} : { marginLeft: `${50 - pct / 2}%` })
+                                                }}
+                                            />
+                                        </div>
+                                        <span className={cn("text-[10px] font-mono font-bold w-20 text-right",
+                                            isPositive ? 'text-emerald-400' : 'text-rose-400'
+                                        )}>
+                                            {delta > 0 ? '+' : ''}{Math.abs(delta) >= 1000 ? `$${(delta / 1000).toFixed(1)}k` : `$${delta.toLocaleString()}`}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Risk by Type Bar Chart */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">

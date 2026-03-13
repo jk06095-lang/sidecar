@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Activity, Save, Sparkles, Fuel, AlertTriangle,
     Shield, TrendingUp, Box, Database, Network, Copy, Trash2, Edit2, Check, X,
     Flame, CloudLightning, Wifi, Globe2, Package, Zap, GitBranch, Play,
-    Plus, Search, ChevronRight, ChevronDown, Minus, RotateCcw, Loader2
+    Plus, Search, ChevronRight, ChevronDown, Minus, RotateCcw, Loader2,
+    DollarSign, Ship, Clock, BarChart3, ArrowUpRight, ArrowDownRight,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Scenario, SimulationParams, AppSettings } from '../types';
 import LogicMapCanvas from './widgets/LogicMapCanvas';
 import BriefingModal from './BriefingModal';
 import { useOntologyStore } from '../store/ontologyStore';
+import { runScenarioPnL, type ScenarioPnLResult } from '../lib/quantEngine';
 import {
     SCENARIO_VARIABLE_CATALOG,
     CATEGORY_META,
@@ -49,6 +51,7 @@ export default function ScenarioBuilder({
     const [branchName, setBranchName] = useState('');
     const [catalogSearch, setCatalogSearch] = useState('');
     const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+    const [showPnLDetails, setShowPnLDetails] = useState(false);
 
     // Track which variables are in the active scenario's deck
     const [activeVariableIds, setActiveVariableIds] = useState<string[]>(() => {
@@ -59,6 +62,7 @@ export default function ScenarioBuilder({
     const createScenarioBranch = useOntologyStore((s) => s.createScenarioBranch);
     const clearScenarioBranch = useOntologyStore((s) => s.clearScenarioBranch);
     const scenarioBranch = useOntologyStore((s) => s.scenarioBranch);
+    const dynamicFleetData = useOntologyStore((s) => s.dynamicFleetData);
 
     // Module 3: Executive Briefing state from Zustand
     const requestExecutiveBriefing = useOntologyStore((s) => s.requestExecutiveBriefing);
@@ -71,13 +75,37 @@ export default function ScenarioBuilder({
 
     const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
+    // ── Build baseline params from defaults ──
+    const baselineParams = useMemo<SimulationParams>(() => {
+        const base = { ...simulationParams };
+        DEFAULT_VARIABLE_IDS.forEach(id => {
+            const v = VARIABLE_MAP.get(id);
+            if (v) base[id] = v.defaultValue;
+        });
+        return base;
+    }, []);
+
+    // ── Quant P&L result (debounced) ──
+    const [pnlResult, setPnlResult] = useState<ScenarioPnLResult | null>(null);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            try {
+                const result = runScenarioPnL(baselineParams, simulationParams, dynamicFleetData);
+                setPnlResult(result);
+            } catch (err) {
+                console.warn('[QuantEngine] P&L computation error:', err);
+            }
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [simulationParams, dynamicFleetData, baselineParams]);
+
     // Sync activeVariableIds when scenario changes
     useEffect(() => {
         const sc = scenarios.find(s => s.id === activeScenarioId);
         if (sc?.selectedVariableIds) {
             setActiveVariableIds(sc.selectedVariableIds);
         } else {
-            // For existing scenarios without selectedVariableIds, infer from params
             const ids = Object.keys(simulationParams).filter(k => simulationParams[k] !== undefined && VARIABLE_MAP.has(k));
             setActiveVariableIds(ids.length > 0 ? ids : [...DEFAULT_VARIABLE_IDS]);
         }
@@ -91,7 +119,6 @@ export default function ScenarioBuilder({
         if (activeVariableIds.includes(varId)) return;
         const newIds = [...activeVariableIds, varId];
         setActiveVariableIds(newIds);
-        // Set default value if not already in params
         const varMeta = VARIABLE_MAP.get(varId);
         if (varMeta && simulationParams[varId] === undefined) {
             onParamsChange({ ...simulationParams, [varId]: varMeta.defaultValue });
@@ -343,7 +370,7 @@ export default function ScenarioBuilder({
                     </div>
                 </div>
 
-                {/* Variable Deck + Logic Map */}
+                {/* Variable Deck + Quant Results + Logic Map */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
                     {/* Variable Deck Header */}
                     <div className="flex items-center justify-between mb-4">
@@ -355,7 +382,7 @@ export default function ScenarioBuilder({
                     </div>
 
                     {/* Variable Cards Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                         {activeVariables.map(v => {
                             const value = simulationParams[v.id] ?? v.defaultValue;
                             const catMeta = CATEGORY_META[v.category];
@@ -371,7 +398,6 @@ export default function ScenarioBuilder({
                                         catMeta.bgColor, catMeta.borderColor
                                     )}
                                 >
-                                    {/* Card Header */}
                                     <div className="flex items-start justify-between mb-2">
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
@@ -389,7 +415,6 @@ export default function ScenarioBuilder({
                                         </button>
                                     </div>
 
-                                    {/* Value Display */}
                                     <div className="flex items-baseline gap-1 mb-2">
                                         <span className={cn(
                                             "text-xl font-black font-mono leading-none",
@@ -400,7 +425,6 @@ export default function ScenarioBuilder({
                                         <span className="text-[9px] text-slate-500">{v.unit}</span>
                                     </div>
 
-                                    {/* Slider */}
                                     <input
                                         type="range"
                                         min={v.min} max={v.max} step={v.step}
@@ -414,14 +438,13 @@ export default function ScenarioBuilder({
                                         )}
                                     />
                                     <div className="flex justify-between text-[8px] text-slate-600 mt-0.5">
-                                        <span>{v.min}{v.unit === '%' || v.unit === '/100' ? '' : ''}</span>
+                                        <span>{v.min}</span>
                                         <span>{v.max}</span>
                                     </div>
                                 </div>
                             );
                         })}
 
-                        {/* Add variable prompt */}
                         {activeVariables.length === 0 && (
                             <div className="col-span-full flex items-center justify-center py-12 border-2 border-dashed border-slate-700/50 rounded-2xl">
                                 <div className="text-center">
@@ -433,14 +456,124 @@ export default function ScenarioBuilder({
                         )}
                     </div>
 
+                    {/* ═════════ QUANT P&L RESULTS PANEL ═════════ */}
+                    {pnlResult && (
+                        <div className="mb-8 bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden">
+                            {/* Fleet Summary */}
+                            <div className="px-5 py-4 border-b border-slate-800/50">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                        <BarChart3 size={14} className="text-emerald-400" />
+                                        Fleet P&L Impact
+                                    </h3>
+                                    <button
+                                        onClick={() => setShowPnLDetails(!showPnLDetails)}
+                                        className="text-[10px] text-slate-400 hover:text-cyan-400 transition-colors flex items-center gap-1"
+                                    >
+                                        <Ship size={11} />
+                                        {showPnLDetails ? '요약 보기' : `선박별 상세 (${pnlResult.vessels.length}척)`}
+                                        <ChevronDown size={10} className={cn("transition-transform", showPnLDetails && "rotate-180")} />
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                                    <PnLCard
+                                        icon={<TrendingUp size={14} />}
+                                        label="TCE 변동"
+                                        value={pnlResult.fleet.avgTceDelta}
+                                        unit="$/day"
+                                        format="delta"
+                                    />
+                                    <PnLCard
+                                        icon={<DollarSign size={14} />}
+                                        label="OPEX 변동"
+                                        value={pnlResult.fleet.totalOpexDelta}
+                                        unit="$"
+                                        format="delta"
+                                        invertColor
+                                    />
+                                    <PnLCard
+                                        icon={<Clock size={14} />}
+                                        label="지연일수 변동"
+                                        value={pnlResult.fleet.totalDelayDaysDelta}
+                                        unit="days"
+                                        format="delta"
+                                        invertColor
+                                    />
+                                    <PnLCard
+                                        icon={<Activity size={14} />}
+                                        label="Net P&L"
+                                        value={pnlResult.fleet.netPnLDelta}
+                                        unit="$"
+                                        format="delta"
+                                        highlight
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Per-Vessel Breakdown (expandable) */}
+                            {showPnLDetails && (
+                                <div className="px-5 py-3">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-[10px]">
+                                            <thead>
+                                                <tr className="text-slate-500 border-b border-slate-800/50">
+                                                    <th className="text-left py-2 pr-4 font-bold uppercase tracking-widest">선박</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">TCE</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">ΔTCE</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">OPEX</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">ΔOPEX</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">Delay</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">Bunker</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">AWRP</th>
+                                                    <th className="text-right py-2 px-3 font-bold uppercase tracking-widest">Carbon</th>
+                                                    <th className="text-right py-2 pl-3 font-bold uppercase tracking-widest">Voyage P&L</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {pnlResult.vessels.map((v, i) => (
+                                                    <tr key={i} className="border-b border-slate-800/20 hover:bg-slate-800/20 transition-colors">
+                                                        <td className="py-2 pr-4">
+                                                            <div className="flex items-center gap-1.5">
+                                                                <Ship size={11} className="text-cyan-400" />
+                                                                <span className="text-slate-300 font-medium">{v.vesselName}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="text-right py-2 px-3 text-slate-300 font-mono">${v.tce.toLocaleString()}</td>
+                                                        <td className="text-right py-2 px-3 font-mono font-bold">
+                                                            <DeltaValue value={v.tceDelta} unit="" />
+                                                        </td>
+                                                        <td className="text-right py-2 px-3 text-slate-300 font-mono">${v.opex.toLocaleString()}</td>
+                                                        <td className="text-right py-2 px-3 font-mono font-bold">
+                                                            <DeltaValue value={v.opexDelta} unit="" invert />
+                                                        </td>
+                                                        <td className="text-right py-2 px-3 font-mono">
+                                                            <DeltaValue value={v.delayDaysDelta} unit="d" invert />
+                                                        </td>
+                                                        <td className="text-right py-2 px-3 text-slate-400 font-mono">${v.bunkerCostPerDay.toLocaleString()}/d</td>
+                                                        <td className="text-right py-2 px-3 text-slate-400 font-mono">${v.awrpCost.toLocaleString()}</td>
+                                                        <td className="text-right py-2 px-3 text-slate-400 font-mono">${v.carbonCost.toLocaleString()}</td>
+                                                        <td className="text-right py-2 pl-3 font-mono font-bold">
+                                                            <DeltaValue value={v.voyagePnLDelta} unit="" />
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Logic Map */}
                     <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 hover:border-purple-500/30 transition-colors">
                         <div className="mb-2">
                             <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
                                 <Network size={14} className="text-purple-400" />
-                                로직맵 워크플로우
+                                인과관계 로직 트리
                             </h3>
-                            <p className="text-[10px] text-slate-500 mt-0.5">시나리오의 트리거와 전개 과정을 블록으로 설계합니다</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">변수 노드와 선박 노드를 드래그 & 연결하여 인과관계를 구성하세요</p>
                         </div>
                         <LogicMapCanvas activeScenario={activeScenario} />
                     </div>
@@ -458,5 +591,64 @@ export default function ScenarioBuilder({
                 ontologyLinks={ontologyLinks}
             />
         </div>
+    );
+}
+
+// ============================================================
+// Sub-components
+// ============================================================
+
+function PnLCard({ icon, label, value, unit, format, invertColor, highlight }: {
+    icon: React.ReactNode;
+    label: string;
+    value: number;
+    unit: string;
+    format?: 'delta';
+    invertColor?: boolean;
+    highlight?: boolean;
+}) {
+    const isPositive = invertColor ? value <= 0 : value >= 0;
+    const color = format === 'delta'
+        ? (isPositive ? 'text-emerald-400' : 'text-rose-400')
+        : 'text-slate-200';
+
+    const bgClass = highlight
+        ? (isPositive ? 'bg-emerald-950/30 border-emerald-700/40' : 'bg-rose-950/30 border-rose-700/40')
+        : 'bg-slate-800/30 border-slate-700/30';
+
+    const sign = format === 'delta' && value > 0 ? '+' : '';
+
+    return (
+        <div className={cn("rounded-xl border px-4 py-3 transition-all", bgClass)}>
+            <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-slate-500">{icon}</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{label}</span>
+            </div>
+            <div className="flex items-baseline gap-1">
+                <span className={cn("text-xl font-black font-mono leading-none", color)}>
+                    {sign}{Math.abs(value) >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                </span>
+                <span className="text-[9px] text-slate-500">{unit}</span>
+            </div>
+            {format === 'delta' && (
+                <div className="flex items-center gap-0.5 mt-1">
+                    {isPositive
+                        ? <ArrowUpRight size={10} className="text-emerald-400" />
+                        : <ArrowDownRight size={10} className="text-rose-400" />
+                    }
+                    <span className={cn("text-[9px] font-mono", color)}>vs baseline</span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function DeltaValue({ value, unit, invert }: { value: number; unit: string; invert?: boolean }) {
+    const isPositive = invert ? value <= 0 : value >= 0;
+    const sign = value > 0 ? '+' : '';
+    return (
+        <span className={cn("font-mono", isPositive ? 'text-emerald-400' : 'text-rose-400')}>
+            {sign}{value.toLocaleString(undefined, { maximumFractionDigits: 1 })}{unit}
+        </span>
     );
 }

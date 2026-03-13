@@ -177,9 +177,9 @@ export default function BriefingModal({
                             💰 Financial Impact & VaR
                         </h2>
                     </div>
-                    <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-5 mb-5">
+                    <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-5 mb-5" style={{ boxShadow: '0 0 30px rgba(239, 68, 68, 0.08), inset 0 1px 0 rgba(239, 68, 68, 0.1)' }}>
                         <div className="text-[10px] uppercase tracking-wider text-rose-400/70 mb-1">Total Value-at-Risk (95% CI)</div>
-                        <div className="text-2xl font-black text-rose-300 font-mono">{briefing.financialImpactVaR.totalVaR}</div>
+                        <div className="text-3xl font-black text-rose-300 font-mono" style={{ textShadow: '0 0 20px rgba(239, 68, 68, 0.3)' }}>{briefing.financialImpactVaR.totalVaR}</div>
                     </div>
                     {briefing.financialImpactVaR.breakdown.length > 0 && (
                         <div className="overflow-x-auto rounded-xl border border-slate-700/50 mb-5">
@@ -964,6 +964,16 @@ export default function BriefingModal({
                                     <div className="prose prose-invert max-w-none">
                                         {isExecutiveBriefingLoading ? (
                                             <div className="space-y-6">
+                                                {/* Animated loading message */}
+                                                <div className="flex flex-col items-center py-8">
+                                                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500/10 to-rose-500/10 border border-violet-500/20 flex items-center justify-center mb-5 animate-pulse">
+                                                        <span className="text-3xl">🧠</span>
+                                                    </div>
+                                                    <p className="text-sm font-semibold text-violet-300 animate-pulse">
+                                                        AIP 퀀트 엔진이 온톨로지 변수를 연산 중입니다...
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-500 mt-2 font-mono">Gemini Pro · Temperature 0.2 · Strict JSON</p>
+                                                </div>
                                                 <SkeletonLoader variant="kpi" />
                                                 <SkeletonLoader variant="list" lines={5} />
                                                 <SkeletonLoader variant="list" lines={4} />

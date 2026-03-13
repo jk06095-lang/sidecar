@@ -660,29 +660,53 @@ export async function generateAIPExecutiveBriefing(
             totalObjects: ontologyState.objects.length,
             totalLinks: ontologyState.links.length,
         },
+        // Part 3: Derived risk fleet data for quant fusion context
+        highRiskFleet: (fleetData || []).filter(
+            v => v.derivedRiskLevel === 'CRITICAL' || v.derivedRiskLevel === 'WARNING'
+        ).slice(0, 15).map(v => ({
+            vessel: v.vessel_name,
+            type: v.vessel_type,
+            location: v.location,
+            derivedRiskLevel: v.derivedRiskLevel,
+            riskFactors: v.riskFactors || [],
+            fuelROB: v.consumption_and_rob.fo_rob,
+            voyageDays: `${v.voyage_info.sailed_days}/${v.voyage_info.plan_days}`,
+            route: `${v.voyage_info.departure_port} → ${v.voyage_info.destination_port}`,
+        })),
+        fleetRiskDistribution: {
+            totalVessels: (fleetData || []).length,
+            critical: (fleetData || []).filter(v => v.derivedRiskLevel === 'CRITICAL').length,
+            warning: (fleetData || []).filter(v => v.derivedRiskLevel === 'WARNING').length,
+            safe: (fleetData || []).filter(v => v.derivedRiskLevel === 'SAFE' || !v.derivedRiskLevel).length,
+        },
     };
 
-    const systemPrompt = `너는 글로벌 해운사의 수석 퀀트 전략가(Chief Quant Strategist)다.
-제공된 온톨로지 그래프 상태, LSEG 퀀트 메트릭스(SMA, Volatility, Z-Score), 그리고 시나리오 파라미터를 분석하여
-최고경영진(CEO, CFO, COO)에게 즉각적인 조치사항을 보고하라.
+    const systemPrompt = `너는 글로벌 최고 해운사의 수석 퀀트 전략가 겸 리스크 관리 책임자(CRO)다.
+제공된 온톨로지 파생 리스크 데이터, LSEG 퀀트 지표(Z-Score, 변동성, SMA), 선대 파생 리스크(derivedRiskLevel, riskFactors),
+그리고 시나리오 파라미터를 분석하여 임원진에게 즉각적인 조치사항을 보고하라.
+
+## 엄격한 원칙:
+- 감정적 서론 없이 냉철하고 구체적인 수치(달러, 퍼센트)로 답변
+- 제공된 데이터의 실제 수치를 근거로 분석. 임의 수치 사용 절대 금지
+- 모든 텍스트는 한국어, 금융 전문 용어는 영문 병기
+- highRiskFleet에 있는 선박명과 riskFactors를 정확히 참조하여 운영 지시사항을 도출
 
 ## 응답 규칙:
 1. 반드시 순수 JSON으로만 응답하라. 마크다운 코드블럭(\`\`\`)을 절대 사용하지 말라.
-2. 제공된 데이터의 실제 수치를 근거로 분석하라. 임의 수치 사용 금지.
-3. 모든 텍스트는 한국어로 작성하되, 금융 전문 용어는 영문 병기.
-4. 헤지 전략에는 구체적인 파생상품명과 비율을 포함하라.
-5. VaR은 시나리오별 구체적 금액(USD)으로 산출하라.
+2. 헤지 전략에는 구체적인 파생상품명, 비율(%), 예상 방어 금액을 포함
+3. VaR은 시나리오별 구체적 금액(USD)으로 산출. 95% 신뢰구간 명시
+4. operationalDirectives에는 반드시 highRiskFleet의 선박명을 타겟으로 지정
 
 ## JSON 스키마:
 {
   "marketOutlook": {
-    "summary": "퀀트 수치 기반 위기 상황 요약 (3-5문장)",
+    "summary": "퀀트 수치 기반 위기 상황 요약 (3-5문장, 핵심 Z-Score와 트렌드 언급)",
     "keyMetrics": [
       { "label": "지표명", "value": "수치와 단위", "trend": "up|down|stable|critical" }
     ]
   },
   "financialImpactVaR": {
-    "totalVaR": "선대 전체 예상 최대 손실액 (95% 신뢰구간)",
+    "totalVaR": "선대 전체 예상 최대 손실액 (95% 신뢰구간, USD)",
     "breakdown": [
       { "item": "비용 항목", "amount": "금액 (USD)", "probability": "발생 확률" }
     ],
@@ -690,18 +714,18 @@ export async function generateAIPExecutiveBriefing(
   },
   "hedgingStrategies": [
     {
-      "strategy": "Capesize FFA 매도 헤지",
-      "instrument": "Baltic Capesize 5TC FFA Q2 2026",
-      "ratio": "선대 운임 노출의 30%",
-      "rationale": "BDI Z-Score 기반 운임 하락 방어 근거"
+      "strategy": "전략명",
+      "instrument": "구체적 파생상품명 (예: Baltic Capesize 5TC FFA Q2 2026)",
+      "ratio": "선대 노출의 XX%",
+      "rationale": "Z-Score/트렌드 기반 근거"
     }
   ],
   "operationalDirectives": [
     {
       "priority": "IMMEDIATE|SHORT_TERM|MEDIUM_TERM",
-      "directive": "구체적 운영 지시",
+      "directive": "구체적 운영 지시 (선박명 포함)",
       "responsible": "담당 부서/직책",
-      "impact": "기대 효과"
+      "impact": "기대 효과 (금액 또는 리스크 감소 수치)"
     }
   ],
   "generatedAt": "ISO timestamp"
@@ -725,14 +749,26 @@ export async function generateAIPExecutiveBriefing(
 
         const text = response.text || '';
 
-        // Parse JSON — handle potential code fence wrapping
+        // Robust JSON extraction — handle code fences, BOM, stray whitespace
         let jsonStr = text.trim();
-        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
-        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
-        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
-        jsonStr = jsonStr.trim();
+        // Strip markdown code fences (```json ... ``` or ``` ... ```)
+        jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        // Remove BOM if present
+        jsonStr = jsonStr.replace(/^\uFEFF/, '');
+        // Find first '{' and last '}' to extract JSON object
+        const firstBrace = jsonStr.indexOf('{');
+        const lastBrace = jsonStr.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+        }
 
-        const parsed = JSON.parse(jsonStr);
+        let parsed: any;
+        try {
+            parsed = JSON.parse(jsonStr);
+        } catch (parseErr) {
+            console.error('[GeminiService] JSON parse failed. Raw text:', text.slice(0, 500));
+            throw new Error(`AI 응답 JSON 파싱 실패: ${parseErr instanceof Error ? parseErr.message : 'Invalid JSON'}`);
+        }
 
         // Type-safe mapping with defaults
         const briefing: AIPExecutiveBriefing = {

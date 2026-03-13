@@ -41,7 +41,7 @@ import {
     type DocumentData
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog } from '../types';
+import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink } from '../types';
 
 // ============================================================
 // DEBOUNCE UTILITY — Prevent rapid Firestore writes
@@ -413,5 +413,155 @@ export async function logApprovalEvent(
         console.info(`[Firestore] Approval event logged: ${actionId} ${event.from}→${event.to}`);
     } catch (err) {
         console.warn('[Firestore] logApprovalEvent failed (non-critical):', err);
+    }
+}
+
+// ============================================================
+// ONTOLOGY GRAPH — Single-document persistence
+//   app/ontology_objects  — { items: OntologyObject[] }
+//   app/ontology_links    — { items: OntologyLink[] }
+//
+// Single-doc pattern: 2 reads on load, 1 write per mutation.
+// Cost-efficient for graphs < 500 nodes.
+// ============================================================
+
+/**
+ * Load the full ontology graph from Firestore.
+ * Returns null if DB is empty (first-run signal for seeding).
+ */
+export async function loadOntologyGraph(): Promise<{
+    objects: OntologyObject[];
+    links: OntologyLink[];
+} | null> {
+    try {
+        const [objSnap, linkSnap] = await Promise.all([
+            getDoc(doc(db, 'app', 'ontology_objects')),
+            getDoc(doc(db, 'app', 'ontology_links')),
+        ]);
+
+        if (!objSnap.exists()) {
+            console.info('[Firestore] Ontology graph not found — first run detected');
+            return null; // Signal: need seeding
+        }
+
+        const objects = (objSnap.data().items as OntologyObject[]) || [];
+        const links = linkSnap.exists()
+            ? (linkSnap.data().items as OntologyLink[]) || []
+            : [];
+
+        console.info(`[Firestore] Ontology loaded: ${objects.length} objects, ${links.length} links`);
+        return { objects, links };
+    } catch (err) {
+        console.warn('[Firestore] loadOntologyGraph failed:', err);
+
+        // Fallback: try localStorage cache
+        try {
+            const objRaw = localStorage.getItem('sidecar_ontology_objects');
+            const linkRaw = localStorage.getItem('sidecar_ontology_links');
+            if (objRaw) {
+                const objects = JSON.parse(objRaw) as OntologyObject[];
+                const links = linkRaw ? (JSON.parse(linkRaw) as OntologyLink[]) : [];
+                console.info('[Firestore] Using localStorage fallback for ontology');
+                return { objects, links };
+            }
+        } catch { /* ignore */ }
+
+        return null;
+    }
+}
+
+/**
+ * Seed the ontology graph into Firestore (first-run only).
+ * Writes all objects and links as a batch, then caches in localStorage.
+ */
+export async function seedOntologyGraph(
+    objects: OntologyObject[],
+    links: OntologyLink[],
+): Promise<void> {
+    console.info(`[Firestore] Seeding ontology: ${objects.length} objects, ${links.length} links`);
+    try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'app', 'ontology_objects'), {
+            items: objects,
+            updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'app', 'ontology_links'), {
+            items: links,
+            updatedAt: serverTimestamp(),
+        });
+        await batch.commit();
+
+        // Cache in localStorage
+        localStorage.setItem('sidecar_ontology_objects', JSON.stringify(objects));
+        localStorage.setItem('sidecar_ontology_links', JSON.stringify(links));
+        console.info('[Firestore] Ontology seed completed successfully');
+    } catch (err) {
+        console.error('[Firestore] seedOntologyGraph failed:', err);
+        throw err; // Propagate — caller should handle
+    }
+}
+
+/**
+ * Persist the full objects array to Firestore.
+ * Used after add/remove/update operations.
+ */
+export function persistOntologyObjects(objects: OntologyObject[]): void {
+    // Instant localStorage cache
+    localStorage.setItem('sidecar_ontology_objects', JSON.stringify(objects));
+
+    debouncedWrite('ontology_objects', async () => {
+        await setDoc(doc(db, 'app', 'ontology_objects'), {
+            items: objects,
+            updatedAt: serverTimestamp(),
+        });
+    }, 800);
+}
+
+/**
+ * Persist the full links array to Firestore.
+ * Used after add/remove link operations.
+ */
+export function persistOntologyLinks(links: OntologyLink[]): void {
+    // Instant localStorage cache
+    localStorage.setItem('sidecar_ontology_links', JSON.stringify(links));
+
+    debouncedWrite('ontology_links', async () => {
+        await setDoc(doc(db, 'app', 'ontology_links'), {
+            items: links,
+            updatedAt: serverTimestamp(),
+        });
+    }, 800);
+}
+
+/**
+ * Immediately persist objects (no debounce).
+ * Used for critical operations like add/remove where data loss is unacceptable.
+ */
+export async function persistOntologyObjectsImmediate(objects: OntologyObject[]): Promise<void> {
+    localStorage.setItem('sidecar_ontology_objects', JSON.stringify(objects));
+    try {
+        await setDoc(doc(db, 'app', 'ontology_objects'), {
+            items: objects,
+            updatedAt: serverTimestamp(),
+        });
+    } catch (err) {
+        console.error('[Firestore] persistOntologyObjectsImmediate failed:', err);
+        throw err;
+    }
+}
+
+/**
+ * Immediately persist links (no debounce).
+ */
+export async function persistOntologyLinksImmediate(links: OntologyLink[]): Promise<void> {
+    localStorage.setItem('sidecar_ontology_links', JSON.stringify(links));
+    try {
+        await setDoc(doc(db, 'app', 'ontology_links'), {
+            items: links,
+            updatedAt: serverTimestamp(),
+        });
+    } catch (err) {
+        console.error('[Firestore] persistOntologyLinksImmediate failed:', err);
+        throw err;
     }
 }

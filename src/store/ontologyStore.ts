@@ -18,16 +18,20 @@ import type {
     VulnerabilityDataPoint,
 } from '../types';
 import { computeScenarioBranch } from '../lib/utils';
-import {
-    BASE_SCENARIOS,
-    ONTOLOGY_OBJECTS,
-    ONTOLOGY_LINKS,
-} from '../data/mockData';
+import { BASE_SCENARIOS } from '../data/mockData';
 import {
     fullSync,
     applyMarketUpdatesToParams,
 } from '../services/maritimeIntegrationService';
 import type { MarketQuote } from '../services/maritimeIntegrationService';
+import {
+    loadOntologyGraph,
+    seedOntologyGraph,
+    persistOntologyObjects,
+    persistOntologyLinks,
+    persistOntologyObjectsImmediate,
+    persistOntologyLinksImmediate,
+} from '../services/firestoreService';
 
 // ============================================================
 // INTERNAL: VULNERABILITY BASE DATA (for chart calculation)
@@ -593,10 +597,11 @@ function selectHighRiskVesselsFromState(
 // ============================================================
 
 interface OntologyState {
-    // ---- Graph Data (Single Source of Truth) ----
+    // ---- Graph Data (Hydrated from Firestore SSOT) ----
     objects: OntologyObject[];
     links: OntologyLink[];
     actionLog: OntologyAction[];
+    isHydrated: boolean;
 
     // ---- BEVI (Business Environment Volatility Index) ----
     bevi: BEVIState;
@@ -631,12 +636,13 @@ interface OntologyState {
     // ---- Ripple Effect ----
     highlightedNodeIds: string[];
 
-    // ---- Graph Actions ----
-    addObject: (obj: OntologyObject) => void;
-    removeObject: (id: string) => void;
+    // ---- Graph Actions (DB-first write-back) ----
+    hydrateFromDB: () => Promise<void>;
+    addObject: (obj: OntologyObject) => Promise<void>;
+    removeObject: (id: string) => Promise<void>;
     updateObjectProperty: (id: string, key: string, value: string | number | boolean) => void;
-    addLink: (link: OntologyLink) => void;
-    removeLink: (id: string) => void;
+    addLink: (link: OntologyLink) => Promise<void>;
+    removeLink: (id: string) => Promise<void>;
     executeAction: (action: OntologyAction) => void;
 
     // ---- BEVI Actions ----
@@ -694,19 +700,17 @@ interface OntologyState {
 const initialParams = BASE_SCENARIOS[0].params;
 
 export const useOntologyStore = create<OntologyState>((set, get) => {
-    const initialMergedFleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
-    const initialBEVI = deriveNewBEVI(INITIAL_BEVI, ONTOLOGY_OBJECTS, []);
-
     return {
-        // ---- Graph Data ----
-        objects: [...ONTOLOGY_OBJECTS],
-        links: [...ONTOLOGY_LINKS],
+        // ---- Graph Data (empty until hydrated from Firestore) ----
+        objects: [],
+        links: [],
         actionLog: [],
+        isHydrated: false,
         scenarioBranch: null,
         highlightedNodeIds: [],
 
         // ---- BEVI ----
-        bevi: initialBEVI,
+        bevi: INITIAL_BEVI,
         intelArticles: [],
 
         // ---- Application State ----
@@ -714,7 +718,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         activeScenarioId: 'realtime',
         simulationParams: { ...initialParams },
         dynamicChartData: calculateDynamicChartData(initialParams),
-        dynamicFleetData: calculateDynamicFleetData(initialParams, initialMergedFleet),
+        dynamicFleetData: [],
 
         getHighRiskVessels: () => {
             const state = get();
@@ -736,18 +740,81 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         isExecutiveBriefingLoading: false,
         showExecutiveBriefingModal: false,
 
-        // ---- Graph Actions (with BEVI recalc) ----
-        addObject: (obj) => {
-            set((state) => ({ objects: [...state.objects, obj] }));
-            get().markBEVIDirty();
+        // ============================================================
+        // HYDRATION — Load graph from Firestore, seed if empty
+        // ============================================================
+        hydrateFromDB: async () => {
+            try {
+                let graph = await loadOntologyGraph();
+
+                if (!graph) {
+                    // First run: seed from mockData
+                    const { ONTOLOGY_OBJECTS, ONTOLOGY_LINKS } = await import('../data/mockData');
+                    await seedOntologyGraph(ONTOLOGY_OBJECTS, ONTOLOGY_LINKS);
+                    graph = { objects: [...ONTOLOGY_OBJECTS], links: [...ONTOLOGY_LINKS] };
+                    console.info('[OntologyStore] 🌱 DB seeded from mockData');
+                }
+
+                const fleet = mapOntologyToFleetVessels(graph.objects);
+                const bevi = deriveNewBEVI(INITIAL_BEVI, graph.objects, []);
+
+                set({
+                    objects: graph.objects,
+                    links: graph.links,
+                    isHydrated: true,
+                    bevi,
+                    dynamicFleetData: calculateDynamicFleetData(initialParams, fleet),
+                });
+
+                console.info(`[OntologyStore] ✅ Hydrated: ${graph.objects.length} objects, ${graph.links.length} links`);
+            } catch (err) {
+                console.error('[OntologyStore] Hydration failed:', err);
+                // Emergency fallback: load mockData directly so app is usable
+                const { ONTOLOGY_OBJECTS, ONTOLOGY_LINKS } = await import('../data/mockData');
+                const fleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
+                set({
+                    objects: [...ONTOLOGY_OBJECTS],
+                    links: [...ONTOLOGY_LINKS],
+                    isHydrated: true,
+                    dynamicFleetData: calculateDynamicFleetData(initialParams, fleet),
+                });
+            }
         },
 
-        removeObject: (id) => {
-            set((state) => ({
-                objects: state.objects.filter((o) => o.id !== id),
-                links: state.links.filter((l) => l.sourceId !== id && l.targetId !== id),
-            }));
+        // ============================================================
+        // GRAPH ACTIONS — DB-first write-back with rollback
+        // ============================================================
+        addObject: async (obj) => {
+            const prev = get().objects;
+            const newObjects = [...prev, obj];
+            // Optimistic UI update
+            set({ objects: newObjects });
             get().markBEVIDirty();
+            try {
+                await persistOntologyObjectsImmediate(newObjects);
+            } catch (err) {
+                console.error('[OntologyStore] addObject rollback:', err);
+                set({ objects: prev }); // Rollback
+            }
+        },
+
+        removeObject: async (id) => {
+            const prevObjects = get().objects;
+            const prevLinks = get().links;
+            const newObjects = prevObjects.filter((o) => o.id !== id);
+            const newLinks = prevLinks.filter((l) => l.sourceId !== id && l.targetId !== id);
+            // Optimistic UI update
+            set({ objects: newObjects, links: newLinks });
+            get().markBEVIDirty();
+            try {
+                await Promise.all([
+                    persistOntologyObjectsImmediate(newObjects),
+                    persistOntologyLinksImmediate(newLinks),
+                ]);
+            } catch (err) {
+                console.error('[OntologyStore] removeObject rollback:', err);
+                set({ objects: prevObjects, links: prevLinks }); // Rollback
+            }
         },
 
         updateObjectProperty: (id, key, value) => {
@@ -761,13 +828,33 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             if (key === 'riskScore' || key === 'impactValue' || key === 'congestionPct') {
                 get().markBEVIDirty();
             }
+            // Debounced write-back (fires frequently from sliders/quant engine)
+            persistOntologyObjects(get().objects);
         },
 
-        addLink: (link) =>
-            set((state) => ({ links: [...state.links, link] })),
+        addLink: async (link) => {
+            const prev = get().links;
+            const newLinks = [...prev, link];
+            set({ links: newLinks });
+            try {
+                await persistOntologyLinksImmediate(newLinks);
+            } catch (err) {
+                console.error('[OntologyStore] addLink rollback:', err);
+                set({ links: prev });
+            }
+        },
 
-        removeLink: (id) =>
-            set((state) => ({ links: state.links.filter((l) => l.id !== id) })),
+        removeLink: async (id) => {
+            const prev = get().links;
+            const newLinks = prev.filter((l) => l.id !== id);
+            set({ links: newLinks });
+            try {
+                await persistOntologyLinksImmediate(newLinks);
+            } catch (err) {
+                console.error('[OntologyStore] removeLink rollback:', err);
+                set({ links: prev });
+            }
+        },
 
         executeAction: (action) => {
             set((state) => {
@@ -809,6 +896,8 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 return { actionLog: newLog, objects: newObjects };
             });
             get().markBEVIDirty();
+            // Debounced write-back for executeAction (action objects change frequently)
+            persistOntologyObjects(get().objects);
         },
 
         // ---- BEVI Actions ----
@@ -1011,7 +1100,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         // ---- Scenario Branching ----
         createScenarioBranch: (name, branchParams) => {
             const state = get();
-            const baseObjects = ONTOLOGY_OBJECTS.map(o => ({
+            const baseObjects = state.objects.map(o => ({
                 ...o,
                 properties: { ...o.properties },
                 metadata: { ...o.metadata },

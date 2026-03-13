@@ -140,11 +140,15 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
 
   // ============================================================
-  // EFFECT: Firebase migration + Firestore settings hydration
-  // Runs once on first mount. Migrates localStorage → Firestore.
+  // EFFECT: Firebase migration + DB-first ontology hydration + settings
+  // Runs once on first mount.
   // ============================================================
   useEffect(() => {
     migrateLocalStorageToFirestore();
+
+    // Hydrate ontology graph from Firestore (seeds from mockData if DB empty)
+    useOntologyStore.getState().hydrateFromDB();
+
     firestoreLoadSettings().then(remote => {
       if (remote) setSettings(prev => ({ ...prev, ...remote }));
     });

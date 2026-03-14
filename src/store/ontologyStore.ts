@@ -26,7 +26,7 @@ import {
 import type { MarketQuote } from '../services/maritimeIntegrationService';
 import {
     loadOntologyGraph,
-    subscribeOntologyGraph,
+    seedOntologyGraph,
     persistOntologyObjects,
     persistOntologyLinks,
     persistOntologyObjectsImmediate,
@@ -741,61 +741,44 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         showExecutiveBriefingModal: false,
 
         // ============================================================
-        // HYDRATION — Load graph from Firestore (no mock data seeding)
-        // If Firestore is empty, start with an empty graph.
+        // HYDRATION — Load graph from Firestore, seed if empty
         // ============================================================
         hydrateFromDB: async () => {
             try {
-                const graph = await loadOntologyGraph();
+                let graph = await loadOntologyGraph();
 
-                const objects = graph?.objects ?? [];
-                const links = graph?.links ?? [];
+                if (!graph) {
+                    // First run: seed from mockData
+                    const { ONTOLOGY_OBJECTS, ONTOLOGY_LINKS } = await import('../data/mockData');
+                    await seedOntologyGraph(ONTOLOGY_OBJECTS, ONTOLOGY_LINKS);
+                    graph = { objects: [...ONTOLOGY_OBJECTS], links: [...ONTOLOGY_LINKS] };
+                    console.info('[OntologyStore] 🌱 DB seeded from mockData');
+                }
 
-                const fleet = mapOntologyToFleetVessels(objects);
-                const bevi = deriveNewBEVI(INITIAL_BEVI, objects, []);
+                const fleet = mapOntologyToFleetVessels(graph.objects);
+                const bevi = deriveNewBEVI(INITIAL_BEVI, graph.objects, []);
 
                 set({
-                    objects,
-                    links,
+                    objects: graph.objects,
+                    links: graph.links,
                     isHydrated: true,
                     bevi,
                     dynamicFleetData: calculateDynamicFleetData(initialParams, fleet),
                 });
 
-                if (objects.length === 0) {
-                    console.info('[OntologyStore] ✅ Hydrated with empty graph (no Firestore data found)');
-                } else {
-                    console.info(`[OntologyStore] ✅ Hydrated: ${objects.length} objects, ${links.length} links`);
-                }
+                console.info(`[OntologyStore] ✅ Hydrated: ${graph.objects.length} objects, ${graph.links.length} links`);
             } catch (err) {
                 console.error('[OntologyStore] Hydration failed:', err);
-                // Start with empty graph — no mock data fallback
+                // Emergency fallback: load mockData directly so app is usable
+                const { ONTOLOGY_OBJECTS, ONTOLOGY_LINKS } = await import('../data/mockData');
+                const fleet = mapOntologyToFleetVessels(ONTOLOGY_OBJECTS);
                 set({
-                    objects: [],
-                    links: [],
+                    objects: [...ONTOLOGY_OBJECTS],
+                    links: [...ONTOLOGY_LINKS],
                     isHydrated: true,
-                    dynamicFleetData: calculateDynamicFleetData(initialParams, []),
+                    dynamicFleetData: calculateDynamicFleetData(initialParams, fleet),
                 });
             }
-
-            // Start real-time listener after hydration
-            const unsub = subscribeOntologyGraph(({ objects, links }) => {
-                const state = get();
-                // Only update if data actually changed (avoid infinite loops from our own writes)
-                if (objects.length !== state.objects.length || links.length !== state.links.length) {
-                    const fleet = mapOntologyToFleetVessels(objects);
-                    const bevi = deriveNewBEVI(INITIAL_BEVI, objects, []);
-                    set({
-                        objects,
-                        links,
-                        bevi,
-                        dynamicFleetData: calculateDynamicFleetData(state.simulationParams, fleet),
-                    });
-                    console.info(`[OntologyStore] 🔄 Live sync: ${objects.length} objects, ${links.length} links`);
-                }
-            });
-            // Store unsubscribe for cleanup (accessible via getState)
-            (window as any).__ontologyUnsub = unsub;
         },
 
         // ============================================================

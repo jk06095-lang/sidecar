@@ -37,7 +37,6 @@
 import {
     doc, getDoc, setDoc, deleteDoc,
     collection, getDocs, writeBatch,
-    onSnapshot,
     serverTimestamp, Timestamp,
     type DocumentData
 } from 'firebase/firestore';
@@ -565,77 +564,4 @@ export async function persistOntologyLinksImmediate(links: OntologyLink[]): Prom
         console.error('[Firestore] persistOntologyLinksImmediate failed:', err);
         throw err;
     }
-}
-
-// ============================================================
-// REAL-TIME LISTENERS — onSnapshot for live Firestore sync
-// Returns unsubscribe functions for cleanup.
-// ============================================================
-
-/**
- * Subscribe to ontology graph changes in real-time.
- * Fires callback whenever ontology_objects or ontology_links change.
- */
-export function subscribeOntologyGraph(
-    onUpdate: (data: { objects: OntologyObject[]; links: OntologyLink[] }) => void,
-): () => void {
-    let latestObjects: OntologyObject[] = [];
-    let latestLinks: OntologyLink[] = [];
-    let initialized = false;
-
-    const unsubObjects = onSnapshot(
-        doc(db, 'app', 'ontology_objects'),
-        (snap) => {
-            if (snap.exists()) {
-                latestObjects = (snap.data().items as OntologyObject[]) || [];
-            } else {
-                latestObjects = [];
-            }
-            if (initialized) {
-                onUpdate({ objects: latestObjects, links: latestLinks });
-            }
-        },
-        (err) => console.warn('[Firestore] onSnapshot ontology_objects error:', err),
-    );
-
-    const unsubLinks = onSnapshot(
-        doc(db, 'app', 'ontology_links'),
-        (snap) => {
-            if (snap.exists()) {
-                latestLinks = (snap.data().items as OntologyLink[]) || [];
-            } else {
-                latestLinks = [];
-            }
-            if (initialized) {
-                onUpdate({ objects: latestObjects, links: latestLinks });
-            }
-        },
-        (err) => console.warn('[Firestore] onSnapshot ontology_links error:', err),
-    );
-
-    // Mark initialized after first snapshot pair fires
-    // (onSnapshot fires immediately with cached data)
-    setTimeout(() => { initialized = true; }, 500);
-
-    return () => {
-        unsubObjects();
-        unsubLinks();
-    };
-}
-
-/**
- * Subscribe to app settings changes in real-time.
- */
-export function subscribeSettings(
-    onUpdate: (settings: AppSettings) => void,
-): () => void {
-    return onSnapshot(
-        doc(db, 'app', 'settings'),
-        (snap) => {
-            if (snap.exists()) {
-                onUpdate(snap.data() as AppSettings);
-            }
-        },
-        (err) => console.warn('[Firestore] onSnapshot settings error:', err),
-    );
 }

@@ -65,12 +65,41 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
     const objects = useOntologyStore(s => s.objects);
     const fetchAndBindMarketData = useOntologyStore(s => s.fetchAndBindMarketData);
 
-    // ---- LSEG Data Fetch on Mount + Polling ----
+    // ---- AIS Position Tracking ----
+    const [aisPositions, setAisPositions] = useState<import('../services/aisService').AISPosition[]>([]);
+    const [isAisRefreshing, setIsAisRefreshing] = useState(false);
+
+    const refreshAISPositions = useCallback(async () => {
+        setIsAisRefreshing(true);
+        try {
+            const mmsiList = dynamicFleetData
+                .map(v => v.mmsi ? Number(v.mmsi) : 0)
+                .filter(m => m > 0);
+            if (mmsiList.length === 0) {
+                setIsAisRefreshing(false);
+                return;
+            }
+            const vesselNames: Record<number, string> = {};
+            dynamicFleetData.forEach(v => {
+                if (v.mmsi) vesselNames[Number(v.mmsi)] = v.vessel_name;
+            });
+            const { fetchAndPersistAISPositions } = await import('../services/aisService');
+            const positions = await fetchAndPersistAISPositions(mmsiList, vesselNames);
+            if (positions.length > 0) setAisPositions(positions);
+        } catch (err) {
+            console.warn('[DashboardGrid] AIS refresh failed:', err);
+        } finally {
+            setIsAisRefreshing(false);
+        }
+    }, [dynamicFleetData]);
+
+    // ---- Auto-fetch AIS on mount + LSEG Data Fetch + Polling ----
     useEffect(() => {
         fetchAndBindMarketData();
+        refreshAISPositions();
         const interval = setInterval(() => fetchAndBindMarketData(), LSEG_POLL_INTERVAL_MS);
         return () => clearInterval(interval);
-    }, [fetchAndBindMarketData]);
+    }, [fetchAndBindMarketData, refreshAISPositions]);
 
     // ---- Filtered & sorted object list ----
     const filteredObjects = useMemo(() => {
@@ -246,7 +275,10 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
                     <div className="flex-1 relative min-h-0">
                         <FleetMapWidget
                             vessels={dynamicFleetData}
+                            aisPositions={aisPositions}
                             onSelectVessel={handleMapVesselClick}
+                            onRefresh={refreshAISPositions}
+                            isRefreshing={isAisRefreshing}
                         />
                     </div>
                 </div>

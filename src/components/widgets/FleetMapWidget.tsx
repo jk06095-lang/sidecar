@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2, AlertTriangle } from 'lucide-react';
+import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import type { FleetVessel } from '../../types';
 import type { AISPosition } from '../../services/aisService';
 
@@ -107,9 +107,11 @@ interface FleetMapWidgetProps {
     vessels: FleetVessel[];
     aisPositions?: AISPosition[];
     onSelectVessel?: (vessel: FleetVessel) => void;
+    onRefresh?: () => void;
+    isRefreshing?: boolean;
 }
 
-export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVessel }: FleetMapWidgetProps) {
+export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVessel, onRefresh, isRefreshing }: FleetMapWidgetProps) {
     const mapRef = useRef<HTMLDivElement>(null);
     const leafletMap = useRef<L.Map | null>(null);
     const markersRef = useRef<L.Marker[]>([]);
@@ -173,13 +175,15 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
 
         vessels.forEach((vessel) => {
             // Prefer AIS live position if available (match by MMSI from vessel properties)
-            const vesselMMSI = vessel.voyage_info?.departure_port ? undefined : undefined; // MMSI from ontology
-            const mmsiStr = String((vessel as any).mmsi || '');
-            const aisMatch = aisPositions.find(p => String(p.mmsi) === mmsiStr);
+            const mmsiStr = String(vessel.mmsi || (vessel as any).mmsi || '');
+            const aisMatch = mmsiStr ? aisPositions.find(p => String(p.mmsi) === mmsiStr) : null;
             const isLiveAIS = !!aisMatch;
+            // Priority: AIS live > vessel.lat/lng from ontology > location string resolver
             const coords: [number, number] = aisMatch
                 ? [aisMatch.lat, aisMatch.lng]
-                : resolveCoords(vessel.location);
+                : (vessel.lat && vessel.lng && (vessel.lat !== 0 || vessel.lng !== 0))
+                    ? [vessel.lat, vessel.lng]
+                    : resolveCoords(vessel.location);
             const baseColor = RISK_COLORS[vessel.riskLevel] || '#3b82f6';
 
             // Determine visual config from derived risk
@@ -309,13 +313,26 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                         </div>
                     )}
                 </div>
-                <button
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="pointer-events-auto p-1.5 rounded bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 hover:text-white transition-colors"
-                    title={isExpanded ? '축소' : '확대'}
-                >
-                    {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
+                <div className="flex items-center gap-1 pointer-events-auto">
+                    {onRefresh && (
+                        <button
+                            onClick={onRefresh}
+                            disabled={isRefreshing}
+                            className="p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 hover:text-cyan-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+                            title="선박 위치 최신화"
+                        >
+                            {isRefreshing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                            <span className="text-[9px] font-bold">위치 최신화</span>
+                        </button>
+                    )}
+                    <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="p-1.5 rounded bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 hover:text-white transition-colors"
+                        title={isExpanded ? '축소' : '확대'}
+                    >
+                        {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    </button>
+                </div>
             </div>
 
             {/* Map */}

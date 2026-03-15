@@ -419,6 +419,50 @@ export async function logApprovalEvent(
 }
 
 // ============================================================
+// ACTION CENTER STATE — Single-document persistence
+//   app/action_state — { draftActions, pendingApproval, executedActions }
+//   No debounce — user expects instant persistence.
+// ============================================================
+
+export async function loadActionState(): Promise<{
+    draftActions: StrategicActionLog[];
+    pendingApproval: StrategicActionLog[];
+    executedActions: StrategicActionLog[];
+} | null> {
+    try {
+        const snap = await getDoc(doc(db, 'app', 'action_state'));
+        if (snap.exists()) {
+            const data = snap.data();
+            return {
+                draftActions: (data.draftActions as StrategicActionLog[]) || [],
+                pendingApproval: (data.pendingApproval as StrategicActionLog[]) || [],
+                executedActions: (data.executedActions as StrategicActionLog[]) || [],
+            };
+        }
+    } catch (err) {
+        console.warn('[Firestore] loadActionState failed:', err);
+    }
+    return null;
+}
+
+export async function saveActionState(
+    draftActions: StrategicActionLog[],
+    pendingApproval: StrategicActionLog[],
+    executedActions: StrategicActionLog[],
+): Promise<void> {
+    try {
+        await setDoc(doc(db, 'app', 'action_state'), {
+            draftActions,
+            pendingApproval,
+            executedActions: executedActions.slice(0, 200), // Cap at 200 for document size
+            updatedAt: serverTimestamp(),
+        });
+    } catch (err) {
+        console.warn('[Firestore] saveActionState failed:', err);
+    }
+}
+
+// ============================================================
 // ONTOLOGY GRAPH — Single-document persistence
 //   app/ontology_objects  — { items: OntologyObject[] }
 //   app/ontology_links    — { items: OntologyLink[] }

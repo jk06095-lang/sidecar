@@ -10,6 +10,7 @@ import TopTabBar, { type Notification } from './components/TopTabBar';
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
 const News = lazy(() => import('./components/News'));
 import { useOntologyStore } from './store/ontologyStore';
+import { useActionStore } from './store/actionStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
 import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/maritimeIntegrationService';
 import {
@@ -149,6 +150,9 @@ export default function App() {
 
     // Hydrate ontology graph from Firestore (seeds from mockData if DB empty)
     useOntologyStore.getState().hydrateFromDB();
+
+    // Hydrate action center state from Firestore
+    useActionStore.getState().hydrateFromDB();
 
     firestoreLoadSettings().then(remote => {
       if (remote) setSettings(prev => ({ ...prev, ...remote }));

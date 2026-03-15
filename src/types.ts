@@ -380,6 +380,9 @@ export interface FleetVessel {
   riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
   derivedRiskLevel?: 'SAFE' | 'WARNING' | 'CRITICAL';
   riskFactors?: string[];
+  lat?: number;
+  lng?: number;
+  mmsi?: string;
   voyage_info: VoyageInfo;
   speed_and_weather_metrics: SpeedMetrics;
   consumption_and_rob: ConsumptionROB;

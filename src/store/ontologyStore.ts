@@ -347,6 +347,9 @@ function mapOntologyToFleetVessels(objects: OntologyObject[]): FleetVessel[] {
                 vessel_type: String(p.vesselType || '-'),
                 location: String(p.location || '-'),
                 riskLevel,
+                lat: Number(p.lat || 0),
+                lng: Number(p.lng || 0),
+                mmsi: String(p.mmsi || ''),
                 voyage_info: {
                     departure_port: String(p.departurePort || '-'),
                     destination_port: String(p.destinationPort || '-'),
@@ -756,7 +759,7 @@ function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
     _writeInProgress++;
     return fn().finally(() => {
         // Delay unlock so onSnapshot callback from our own write is ignored
-        setTimeout(() => { _writeInProgress = Math.max(0, _writeInProgress - 1); }, 2000);
+        setTimeout(() => { _writeInProgress = Math.max(0, _writeInProgress - 1); }, 500);
     });
 }
 
@@ -852,17 +855,13 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                         const currentObjects = get().objects;
                         const currentLinks = get().links;
 
-                        // Robust change detection: check length + last ID + content hash
+                        // Robust change detection: compare length + JSON-length hash
                         const objectsChanged =
                             snapshot.objects.length !== currentObjects.length ||
-                            (snapshot.objects.length > 0 && currentObjects.length > 0 &&
-                                (snapshot.objects[snapshot.objects.length - 1]?.id !== currentObjects[currentObjects.length - 1]?.id ||
-                                 snapshot.objects[0]?.id !== currentObjects[0]?.id));
+                            JSON.stringify(snapshot.objects).length !== JSON.stringify(currentObjects).length;
                         const linksChanged =
                             snapshot.links.length !== currentLinks.length ||
-                            (snapshot.links.length > 0 && currentLinks.length > 0 &&
-                                (snapshot.links[snapshot.links.length - 1]?.id !== currentLinks[currentLinks.length - 1]?.id ||
-                                 snapshot.links[0]?.id !== currentLinks[0]?.id));
+                            JSON.stringify(snapshot.links).length !== JSON.stringify(currentLinks).length;
 
                         if (objectsChanged || linksChanged) {
                             const fleet = mapOntologyToFleetVessels(snapshot.objects);

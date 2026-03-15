@@ -72,6 +72,12 @@ interface ActionStoreState {
 
     /** Internal: Firestore state transition audit */
     _logTransition: (actionId: string, from: string, to: string) => Promise<void>;
+
+    /** Internal: Persist all state to Firestore */
+    _persistState: () => void;
+
+    /** Hydrate from Firestore on app startup */
+    hydrateFromDB: () => Promise<void>;
 }
 
 // ============================================================
@@ -84,6 +90,24 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
     executedActions: [],
     toasts: [],
     lastVoyageInstructionDocId: null,
+
+    // ─── Hydrate from Firestore ───
+    hydrateFromDB: async () => {
+        try {
+            const { loadActionState } = await import('../services/firestoreService');
+            const state = await loadActionState();
+            if (state) {
+                set({
+                    draftActions: state.draftActions,
+                    pendingApproval: state.pendingApproval,
+                    executedActions: state.executedActions,
+                });
+                console.info(`[ActionStore] ✅ Hydrated: ${state.draftActions.length} drafts, ${state.pendingApproval.length} pending, ${state.executedActions.length} executed`);
+            }
+        } catch (err) {
+            console.warn('[ActionStore] hydrateFromDB failed:', err);
+        }
+    },
 
     // ─── Import AI Proposals → DRAFT ───
     importProposals: (proposals, scenarioName) => {
@@ -115,6 +139,8 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
             const deduped = newActions.filter(a => !existingIds.has(a.id));
             return { draftActions: [...state.draftActions, ...deduped] };
         });
+
+        get()._persistState();
     },
 
     // ─── Legacy dispatch (backwards compat) ───
@@ -130,6 +156,8 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
                 .map(a => ({ ...a, status: 'DRAFT' as const }));
             return { draftActions: [...state.draftActions, ...newActions] };
         });
+
+        get()._persistState();
     },
 
     // ─── DRAFT → PENDING_APPROVAL ───
@@ -153,6 +181,7 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
 
         // Firestore audit trail
         get()._logTransition(id, 'DRAFT', 'PENDING_APPROVAL');
+        get()._persistState();
     },
 
     // ─── PENDING_APPROVAL → EXECUTED (with animated progress) ───
@@ -202,6 +231,8 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
         };
         set(s => ({ toasts: [...s.toasts, toast] }));
         setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== toast.id) })), 6000);
+
+        get()._persistState();
 
         // ── Auto-generate Voyage Instruction document ──
         try {
@@ -265,6 +296,7 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
         setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== toast.id) })), 5000);
 
         get()._logTransition(id, 'PENDING_APPROVAL', 'DRAFT');
+        get()._persistState();
     },
 
     // ─── Legacy: one-step execute (backwards compat) ───
@@ -304,6 +336,8 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
         };
         set(s => ({ toasts: [...s.toasts, toast] }));
         setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== toast.id) })), 6000);
+
+        get()._persistState();
     },
 
     // ─── Progress animation helper ───
@@ -340,5 +374,13 @@ export const useActionStore = create<ActionStoreState>((set, get) => ({
         } catch {
             // Silently fail — not critical
         }
+    },
+
+    // ─── Internal: Persist full state to Firestore ───
+    _persistState: () => {
+        const { draftActions, pendingApproval, executedActions } = get();
+        import('../services/firestoreService').then(({ saveActionState }) => {
+            saveActionState(draftActions, pendingApproval, executedActions);
+        }).catch(() => { /* non-critical */ });
     },
 }));

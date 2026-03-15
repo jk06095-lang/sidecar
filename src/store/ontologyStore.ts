@@ -750,6 +750,16 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Write-lock to prevent onSnapshot from overwriting during local writes
+let _writeInProgress = 0;
+function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    _writeInProgress++;
+    return fn().finally(() => {
+        // Delay unlock so onSnapshot callback from our own write is ignored
+        setTimeout(() => { _writeInProgress = Math.max(0, _writeInProgress - 1); }, 2000);
+    });
+}
+
 export const useOntologyStore = create<OntologyState>((set, get) => {
     return {
         // ---- Graph Data (empty until hydrated from Firestore) ----
@@ -832,19 +842,27 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
 
                 _unsubscribeGraph = subscribeOntologyGraph(
                     (snapshot) => {
+                        // Skip if we are currently writing locally
+                        if (_writeInProgress > 0) {
+                            console.info('[OntologyStore] onSnapshot ignored (local write in progress)');
+                            return;
+                        }
+
                         // Only apply if data actually changed (avoid loops from own writes)
                         const currentObjects = get().objects;
                         const currentLinks = get().links;
 
-                        // Simple length + first-id check to detect remote changes
+                        // Robust change detection: check length + last ID + content hash
                         const objectsChanged =
                             snapshot.objects.length !== currentObjects.length ||
                             (snapshot.objects.length > 0 && currentObjects.length > 0 &&
-                                snapshot.objects[0]?.id !== currentObjects[0]?.id);
+                                (snapshot.objects[snapshot.objects.length - 1]?.id !== currentObjects[currentObjects.length - 1]?.id ||
+                                 snapshot.objects[0]?.id !== currentObjects[0]?.id));
                         const linksChanged =
                             snapshot.links.length !== currentLinks.length ||
                             (snapshot.links.length > 0 && currentLinks.length > 0 &&
-                                snapshot.links[0]?.id !== currentLinks[0]?.id);
+                                (snapshot.links[snapshot.links.length - 1]?.id !== currentLinks[currentLinks.length - 1]?.id ||
+                                 snapshot.links[0]?.id !== currentLinks[0]?.id));
 
                         if (objectsChanged || linksChanged) {
                             const fleet = mapOntologyToFleetVessels(snapshot.objects);
@@ -931,24 +949,28 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const prev = get().links;
             const newLinks = [...prev, link];
             set({ links: newLinks });
-            try {
-                await persistOntologyLinksImmediate(newLinks);
-            } catch (err) {
-                console.error('[OntologyStore] addLink rollback:', err);
-                set({ links: prev });
-            }
+            await withWriteLock(async () => {
+                try {
+                    await persistOntologyLinksImmediate(newLinks);
+                } catch (err) {
+                    console.error('[OntologyStore] addLink rollback:', err);
+                    set({ links: prev });
+                }
+            });
         },
 
         removeLink: async (id) => {
             const prev = get().links;
             const newLinks = prev.filter((l) => l.id !== id);
             set({ links: newLinks });
-            try {
-                await persistOntologyLinksImmediate(newLinks);
-            } catch (err) {
-                console.error('[OntologyStore] removeLink rollback:', err);
-                set({ links: prev });
-            }
+            await withWriteLock(async () => {
+                try {
+                    await persistOntologyLinksImmediate(newLinks);
+                } catch (err) {
+                    console.error('[OntologyStore] removeLink rollback:', err);
+                    set({ links: prev });
+                }
+            });
         },
 
         updateLink: async (id, patch) => {
@@ -957,12 +979,14 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 l.id === id ? { ...l, ...patch } : l,
             );
             set({ links: newLinks });
-            try {
-                await persistOntologyLinksImmediate(newLinks);
-            } catch (err) {
-                console.error('[OntologyStore] updateLink rollback:', err);
-                set({ links: prev });
-            }
+            await withWriteLock(async () => {
+                try {
+                    await persistOntologyLinksImmediate(newLinks);
+                } catch (err) {
+                    console.error('[OntologyStore] updateLink rollback:', err);
+                    set({ links: prev });
+                }
+            });
         },
 
         generateLinks: async () => {
@@ -1013,13 +1037,15 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             // Batch add all links in a single store update + single Firestore write
             const allLinks = [...existingLinks, ...drafts];
             set({ links: allLinks });
-            try {
-                await persistOntologyLinksImmediate(allLinks);
-                console.info(`[OntologyStore] generateLinks: Added ${drafts.length} draft links, total ${allLinks.length}`);
-            } catch (err) {
-                console.error('[OntologyStore] generateLinks persist error:', err);
-                set({ links: existingLinks }); // rollback
-            }
+            await withWriteLock(async () => {
+                try {
+                    await persistOntologyLinksImmediate(allLinks);
+                    console.info(`[OntologyStore] generateLinks: Added ${drafts.length} draft links, total ${allLinks.length}`);
+                } catch (err) {
+                    console.error('[OntologyStore] generateLinks persist error:', err);
+                    set({ links: existingLinks }); // rollback
+                }
+            });
 
             return drafts.length;
         },
@@ -1142,13 +1168,15 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             set({ objects: finalObjects, links: finalLinks });
             get().markBEVIDirty();
 
-            try {
-                await persistOntologyObjectsImmediate(finalObjects);
-                await persistOntologyLinksImmediate(finalLinks);
-                console.info(`[OntologyStore] 🧠 Ingested: ${newObjects.length} objects, ${newLinks.length} links, ${extracted.updatedObjects.length} updates`);
-            } catch (err) {
-                console.error('[OntologyStore] ingestExtractedOntology persist failed:', err);
-            }
+            await withWriteLock(async () => {
+                try {
+                    await persistOntologyObjectsImmediate(finalObjects);
+                    await persistOntologyLinksImmediate(finalLinks);
+                    console.info(`[OntologyStore] 🧠 Ingested: ${newObjects.length} objects, ${newLinks.length} links, ${extracted.updatedObjects.length} updates`);
+                } catch (err) {
+                    console.error('[OntologyStore] ingestExtractedOntology persist failed:', err);
+                }
+            });
         },
 
         // ---- AIS Position Setter ----

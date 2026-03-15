@@ -216,7 +216,8 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         }
     }, [onStatsUpdate, addIntelArticles]);
 
-    // Load cached official articles from Firebase (cache-first, no API call)
+    // Load cached official articles from Firebase (cache-first)
+    // If cache is empty → auto-fetch from API to populate it
     const loadOfficialCache = useCallback(async () => {
         if (officialInitialized.current) return;
         officialInitialized.current = true;
@@ -227,10 +228,25 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             const cached = await loadIntelArticles('official', scrappedUrls);
             if (cached.length > 0) {
                 setOfficialArticles(cached);
+                setOfficialLoading(false);
                 console.info(`[GlobalNewsWidget] ✅ Loaded ${cached.length} cached official articles from Firebase`);
+                return; // Cache hit → done, no API call needed
             }
         } catch (err) {
             console.warn('[GlobalNewsWidget] Official cache load error:', err);
+        }
+
+        // Cache empty → fetch from API to populate Firebase for next time
+        console.info('[GlobalNewsWidget] 📡 Cache empty → fetching official sources from API...');
+        try {
+            const results = await fetchOfficialSources();
+            if (results.length > 0) {
+                setOfficialArticles(results);
+                persistIntelArticles('official', results);
+                console.info(`[GlobalNewsWidget] ✅ Fetched & cached ${results.length} official articles`);
+            }
+        } catch (err) {
+            console.warn('[GlobalNewsWidget] Official API fetch error:', err);
         } finally {
             setOfficialLoading(false);
         }

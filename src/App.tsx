@@ -29,6 +29,9 @@ export default function App() {
   // Open tabs management (browser-like)
   const [openTabs, setOpenTabs] = useState<string[]>(['workspace']);
 
+  // Keep-alive: track which tabs have been visited (lazy-mount once, never unmount)
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set(['workspace']));
+
   // Notification system
   const [notifications, setNotifications] = useState<Notification[]>([
     {
@@ -73,6 +76,12 @@ export default function App() {
   const handleSetActiveTab = useCallback((tab: string) => {
     setActiveTab(tab);
     setOpenTabs(prev => prev.includes(tab) ? prev : [...prev, tab]);
+    setVisitedTabs(prev => {
+      if (prev.has(tab)) return prev;
+      const next = new Set(prev);
+      next.add(tab);
+      return next;
+    });
   }, []);
 
   const handleTabClose = useCallback((tab: string) => {
@@ -322,9 +331,11 @@ export default function App() {
           onNotificationRead={handleNotificationRead}
           onClearNotifications={handleClearNotifications}
         />
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 overflow-hidden relative">
+          {/* Keep-alive tab rendering: mount once on first visit, hide with CSS instead of unmounting */}
+
           {/* ════════ PILLAR 1: WORKSPACE ════════ */}
-          {activeTab === 'workspace' && (
+          <div className="absolute inset-0" style={{ display: activeTab === 'workspace' ? 'block' : 'none' }}>
             <Home
               scenarios={scenarios}
               activeScenario={activeScenario}
@@ -337,47 +348,57 @@ export default function App() {
               onSaveScenario={handleSaveScenario}
               onNavigateTab={handleSetActiveTab}
             />
-          )}
+          </div>
 
           {/* ════════ PILLAR 2: ONTOLOGY ════════ */}
-          {activeTab === 'ontology' && <Ontology />}
+          {visitedTabs.has('ontology') && (
+            <div className="absolute inset-0" style={{ display: activeTab === 'ontology' ? 'flex' : 'none' }}>
+              <Ontology />
+            </div>
+          )}
 
           {/* ════════ PILLAR 3: INTELLIGENCE ════════ */}
-          {activeTab === 'news' && (
-            <Suspense fallback={
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
-              </div>
-            }>
-              <News />
-            </Suspense>
+          {visitedTabs.has('news') && (
+            <div className="absolute inset-0" style={{ display: activeTab === 'news' ? 'block' : 'none' }}>
+              <Suspense fallback={
+                <div className="flex items-center justify-center h-full">
+                  <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
+                </div>
+              }>
+                <News />
+              </Suspense>
+            </div>
           )}
 
           {/* ════════ PILLAR 4: AIP SCENARIO ════════ */}
-          {(activeTab === 'scenario' || activeTab === 'scenario-builder') && (
-            <ScenarioBuilder
-              scenarios={scenarios}
-              activeScenarioId={activeScenarioId}
-              simulationParams={simulationParams}
-              onScenarioChange={handleScenarioChange}
-              onParamsChange={handleParamsChange}
-              onSaveScenario={handleSaveScenario}
-              onUpdateScenario={handleUpdateScenario}
-              onCopyScenario={handleCopyScenario}
-              onDeleteScenario={handleDeleteScenario}
-              settings={settings}
-            />
+          {(visitedTabs.has('scenario') || visitedTabs.has('scenario-builder')) && (
+            <div className="absolute inset-0" style={{ display: (activeTab === 'scenario' || activeTab === 'scenario-builder') ? 'block' : 'none' }}>
+              <ScenarioBuilder
+                scenarios={scenarios}
+                activeScenarioId={activeScenarioId}
+                simulationParams={simulationParams}
+                onScenarioChange={handleScenarioChange}
+                onParamsChange={handleParamsChange}
+                onSaveScenario={handleSaveScenario}
+                onUpdateScenario={handleUpdateScenario}
+                onCopyScenario={handleCopyScenario}
+                onDeleteScenario={handleDeleteScenario}
+                settings={settings}
+              />
+            </div>
           )}
 
           {/* ════════ PILLAR 5: ACTION CENTER ════════ */}
-          {activeTab === 'action-center' && (
-            <Suspense fallback={
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
-              </div>
-            }>
-              <ActionCenter />
-            </Suspense>
+          {visitedTabs.has('action-center') && (
+            <div className="absolute inset-0" style={{ display: activeTab === 'action-center' ? 'block' : 'none' }}>
+              <Suspense fallback={
+                <div className="flex items-center justify-center h-full">
+                  <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
+                </div>
+              }>
+                <ActionCenter />
+              </Suspense>
+            </div>
           )}
         </main>
       </div>

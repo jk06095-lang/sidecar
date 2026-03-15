@@ -108,6 +108,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
             // ── GATE 2: Pro Escalation (only if critical) ──
             if (triageResult.isCritical) {
+                // Trigger scenario update on critical/high-risk feed detection
+                console.info('[Gate1] 🚨 Critical feed detected → triggering scenario update');
+                window.dispatchEvent(new CustomEvent('scenario_update_trigger'));
+
                 console.log('[Gate2] 🚨 CRITICAL → Escalating to Pro for ontology update');
 
                 const proResult = await escalateWithPro(
@@ -420,6 +424,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
         // Notify parent about the scrap
         onScrap?.(article);
+
+        // Trigger scenario update on user scrap action
+        console.info('[Scrap] 📌 User scraped article → triggering scenario update');
+        window.dispatchEvent(new CustomEvent('scenario_update_trigger'));
 
         const btn = e.currentTarget;
         btn.classList.add('text-amber-400', 'scale-125');

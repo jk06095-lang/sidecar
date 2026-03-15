@@ -87,6 +87,10 @@ export default function News() {
             };
             const updated = [newScrap, ...prev];
             localStorage.setItem('sidecar_scraps', JSON.stringify(updated));
+
+            // Trigger scenario update on user scrap action
+            window.dispatchEvent(new CustomEvent('scenario_update_trigger'));
+
             return updated;
         });
     }, []);

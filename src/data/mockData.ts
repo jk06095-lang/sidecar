@@ -7,7 +7,7 @@ export const BASE_SCENARIOS: Scenario[] = [
     {
         id: 'realtime',
         name: '🔴 현재 상황 (Real-time Live)',
-        description: '실시간 외부 데이터 기반 자동 갱신 모드. 유가, 환율, 뉴스 감성 분석 등이 30초 주기로 업데이트됩니다.',
+        description: '실시간 외부 데이터 기반 이벤트 갱신 모드. 인텔리전스 피드에서 뉴스 스크랩 또는 긴급 피드 감지 시 자동으로 업데이트됩니다.',
         isRealtime: true,
         params: {
             vlsfoPrice: 620,

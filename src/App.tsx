@@ -179,7 +179,8 @@ export default function App() {
   }, [storeRecalculate]);
 
   // ============================================================
-  // REALTIME AUTO-FETCH: 30-second interval when realtime scenario is active
+  // REALTIME EVENT-DRIVEN FETCH: triggered by Intelligence feed events
+  // (user scrap, urgent/critical feed detection) — no polling
   // Uses Yahoo Finance (via marketDataService) + free exchange rate API
   // ============================================================
   useEffect(() => {
@@ -232,6 +233,7 @@ export default function App() {
 
         storeSetSimulationParams(newParams);
         storeUpdateRealtimeParams(newParams);
+        console.info('[Realtime] ✅ Scenario variables updated via event trigger');
       } catch (err) {
         console.warn('Realtime fetch failed, using local simulation:', err);
         const prev = useOntologyStore.getState().simulationParams;
@@ -243,9 +245,16 @@ export default function App() {
       }
     };
 
-    fetchRealtimeData(); // initial fetch
-    const interval = setInterval(fetchRealtimeData, 600_000); // 10-minute batch cycle
-    return () => clearInterval(interval);
+    fetchRealtimeData(); // initial fetch on mount only
+
+    // Event-driven: listen for trigger events from Intelligence feed
+    // Fired when user scraps news or when urgent/critical feed is detected
+    const handleTrigger = () => {
+      console.info('[Realtime] 📡 scenario_update_trigger received — refreshing scenario variables');
+      fetchRealtimeData();
+    };
+    window.addEventListener('scenario_update_trigger', handleTrigger);
+    return () => window.removeEventListener('scenario_update_trigger', handleTrigger);
   }, [activeScenarioId, storeSetSimulationParams, storeUpdateRealtimeParams]);
 
   // Persist settings to both localStorage (instant) and Firestore (debounced)

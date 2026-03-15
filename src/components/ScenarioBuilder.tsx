@@ -9,7 +9,7 @@ import {
 import { cn } from '../lib/utils';
 import type { Scenario, SimulationParams, AppSettings } from '../types';
 import LogicMapCanvas from './widgets/LogicMapCanvas';
-import BriefingModal from './BriefingModal';
+import BriefingPanel from './BriefingPanel';
 import { useOntologyStore } from '../store/ontologyStore';
 import { runScenarioPnL, type ScenarioPnLResult } from '../lib/quantEngine';
 import {
@@ -52,6 +52,7 @@ export default function ScenarioBuilder({
     const [catalogSearch, setCatalogSearch] = useState('');
     const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
     const [showPnLDetails, setShowPnLDetails] = useState(false);
+    const [showBriefingPanel, setShowBriefingPanel] = useState(false);
 
     // Track which variables are in the active scenario's deck
     const [activeVariableIds, setActiveVariableIds] = useState<string[]>(() => {
@@ -335,13 +336,14 @@ export default function ScenarioBuilder({
                         </div>
                         <div className="flex items-center gap-2">
                             <button
-                                onClick={requestExecutiveBriefing}
-                                disabled={isExecutiveBriefingLoading}
+                                onClick={() => setShowBriefingPanel(!showBriefingPanel)}
                                 className={cn(
                                     'flex items-center gap-2 px-4 py-2 text-[11px] font-bold rounded-lg transition-all whitespace-nowrap',
-                                    isExecutiveBriefingLoading
-                                        ? 'bg-violet-900/30 border border-violet-700/30 text-violet-400 cursor-wait'
-                                        : 'bg-gradient-to-r from-violet-600 to-rose-600 hover:from-violet-500 hover:to-rose-500 text-white shadow-lg shadow-violet-900/20'
+                                    showBriefingPanel
+                                        ? 'bg-violet-500/15 border border-violet-500/30 text-violet-300'
+                                        : isExecutiveBriefingLoading
+                                            ? 'bg-violet-900/30 border border-violet-700/30 text-violet-400 cursor-wait'
+                                            : 'bg-gradient-to-r from-violet-600 to-rose-600 hover:from-violet-500 hover:to-rose-500 text-white shadow-lg shadow-violet-900/20'
                                 )}
                             >
                                 {isExecutiveBriefingLoading ? (
@@ -580,16 +582,15 @@ export default function ScenarioBuilder({
                 </div>
             </div>
 
-            {/* Module 3: Executive Briefing Modal */}
-            <BriefingModal
-                isOpen={showExecutiveBriefingModal}
-                onClose={clearExecutiveBriefing}
-                marpContent=""
-                executiveBriefing={executiveBriefing}
-                isExecutiveBriefingLoading={isExecutiveBriefingLoading}
-                ontologyObjects={ontologyObjects}
-                ontologyLinks={ontologyLinks}
-            />
+            {/* Module 3: Executive Briefing Panel */}
+            {showBriefingPanel && (
+                <div className="absolute inset-0 z-50 bg-slate-950">
+                    <BriefingPanel
+                        onClose={() => setShowBriefingPanel(false)}
+                        scenarioName={activeScenario?.name || '현재 시나리오'}
+                    />
+                </div>
+            )}
         </div>
     );
 }

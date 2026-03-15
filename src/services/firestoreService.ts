@@ -207,50 +207,7 @@ export function saveLogicMap(scenarioId: string, nodes: any[], edges: any[]): vo
 
 // ============================================================
 // BRIEFINGS — Sub-collection: app/briefings/{id}
-// Cost: N reads to list, 1 write per save
-// ============================================================
-
-export interface BriefingDoc {
-    id: string;
-    name: string;
-    content: string;
-    createdAt: string;
-}
-
-export async function loadBriefings(): Promise<BriefingDoc[]> {
-    try {
-        const snap = await getDocs(collection(db, 'app', 'briefings'));
-        if (!snap.empty) {
-            return snap.docs.map(d => ({ id: d.id, ...d.data() } as BriefingDoc));
-        }
-    } catch (err) {
-        console.warn('[Firestore] loadBriefings failed:', err);
-    }
-    // Fallback
-    try {
-        const raw = localStorage.getItem('sidecar_briefings');
-        return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-}
-
-export function saveBriefing(briefing: BriefingDoc): void {
-    debouncedWrite(`briefing_${briefing.id}`, async () => {
-        await setDoc(doc(db, 'app', 'briefings', briefing.id), {
-            name: briefing.name,
-            content: briefing.content,
-            createdAt: briefing.createdAt,
-            updatedAt: serverTimestamp(),
-        });
-    }, 500);
-}
-
-export async function deleteBriefing(id: string): Promise<void> {
-    try {
-        await deleteDoc(doc(db, 'app', 'briefings', id));
-    } catch (err) {
-        console.warn(`[Firestore] deleteBriefing(${id}) failed:`, err);
-    }
-}
+// (Briefing persistence moved to BRIEFINGS section below reports)
 
 // ============================================================
 // ORPHAN CLEANUP — Call when a scenario is deleted
@@ -304,16 +261,18 @@ export async function migrateLocalStorageToFirestore(): Promise<void> {
             }
         }
 
-        // Migrate briefings
+        // Migrate briefings (legacy format → new format)
         const briefingsRaw = localStorage.getItem('sidecar_briefings');
         if (briefingsRaw) {
-            const briefings: BriefingDoc[] = JSON.parse(briefingsRaw);
+            const briefings = JSON.parse(briefingsRaw) as { id: string; name?: string; content?: string; createdAt?: string }[];
             const batch = writeBatch(db);
             for (const b of briefings) {
-                batch.set(doc(db, 'app', 'briefings', b.id), {
-                    name: b.name,
-                    content: b.content,
-                    createdAt: b.createdAt,
+                batch.set(doc(db, 'briefings', b.id), {
+                    id: b.id,
+                    title: b.name || 'Legacy Briefing',
+                    scenarioName: '',
+                    date: b.createdAt || new Date().toISOString(),
+                    briefingData: { legacyContent: b.content || '' },
                     updatedAt: serverTimestamp(),
                 });
             }
@@ -514,6 +473,60 @@ export async function deleteReport(reportId: string): Promise<void> {
         await deleteDoc(doc(db, 'reports', reportId));
     } catch (err) {
         console.warn('[Firestore] deleteReport failed:', err);
+    }
+}
+
+// ============================================================
+// BRIEFINGS — AIP Executive Briefing persistence
+//   briefings/{id} — { id, title, scenarioName, date, briefingData, updatedAt }
+// ============================================================
+
+export interface BriefingDoc {
+    id: string;
+    title: string;
+    scenarioName: string;
+    date: string;
+    briefingData: Record<string, unknown>; // AIPExecutiveBriefing serialized
+}
+
+export async function saveBriefing(briefing: BriefingDoc): Promise<void> {
+    try {
+        await setDoc(doc(db, 'briefings', briefing.id), {
+            ...briefing,
+            updatedAt: serverTimestamp(),
+        });
+    } catch (err) {
+        console.warn('[Firestore] saveBriefing failed:', err);
+    }
+}
+
+export async function loadBriefings(): Promise<BriefingDoc[]> {
+    try {
+        const snap = await getDocs(collection(db, 'briefings'));
+        const items: BriefingDoc[] = [];
+        snap.forEach(d => {
+            const data = d.data();
+            items.push({
+                id: d.id,
+                title: data.title || '',
+                scenarioName: data.scenarioName || '',
+                date: data.date || '',
+                briefingData: data.briefingData || {},
+            });
+        });
+        items.sort((a, b) => b.id.localeCompare(a.id));
+        return items;
+    } catch (err) {
+        console.warn('[Firestore] loadBriefings failed:', err);
+        return [];
+    }
+}
+
+export async function deleteBriefing(briefingId: string): Promise<void> {
+    try {
+        await deleteDoc(doc(db, 'briefings', briefingId));
+    } catch (err) {
+        console.warn('[Firestore] deleteBriefing failed:', err);
     }
 }
 

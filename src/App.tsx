@@ -5,6 +5,7 @@ import SettingsModal from './components/SettingsModal';
 import Ontology from './components/Ontology';
 import ScenarioBuilder from './components/ScenarioBuilder';
 import TopTabBar, { type Notification } from './components/TopTabBar';
+import ToastContainer from './components/ToastContainer';
 
 // Lazy-load Action Center and News (heavy composite components)
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
@@ -410,6 +411,9 @@ export default function App() {
         settings={settings}
         onSettingsChange={setSettings}
       />
+
+      {/* Toast Notifications */}
+      <ToastContainer />
     </div>
   );
 }

@@ -257,8 +257,23 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
         })();
 
+        // Visibility-based pause: stop polling when tab is hidden, resume on visible
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                // Pause polling
+                if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
+            } else {
+                // Resume: fetch now and restart timer
+                fetchAndMerge();
+                nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
+                pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
         return () => {
             if (pollTimer.current) clearInterval(pollTimer.current);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [fetchAndMerge]);
 

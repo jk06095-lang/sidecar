@@ -6,8 +6,9 @@ import Ontology from './components/Ontology';
 import ScenarioBuilder from './components/ScenarioBuilder';
 import TopTabBar, { type Notification } from './components/TopTabBar';
 
-// Lazy-load Action Center (heavy composite component)
+// Lazy-load Action Center and News (heavy composite components)
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
+const News = lazy(() => import('./components/News'));
 import { useOntologyStore } from './store/ontologyStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
 import { fetchAllMarketData, mapQuotesToScenarioParams } from './services/maritimeIntegrationService';
@@ -337,7 +338,18 @@ export default function App() {
           {/* ════════ PILLAR 2: ONTOLOGY ════════ */}
           {activeTab === 'ontology' && <Ontology />}
 
-          {/* ════════ PILLAR 3: AIP SCENARIO ════════ */}
+          {/* ════════ PILLAR 3: INTELLIGENCE ════════ */}
+          {activeTab === 'news' && (
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-full">
+                <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
+              </div>
+            }>
+              <News />
+            </Suspense>
+          )}
+
+          {/* ════════ PILLAR 4: AIP SCENARIO ════════ */}
           {(activeTab === 'scenario' || activeTab === 'scenario-builder') && (
             <ScenarioBuilder
               scenarios={scenarios}
@@ -353,7 +365,7 @@ export default function App() {
             />
           )}
 
-          {/* ════════ PILLAR 4: ACTION CENTER ════════ */}
+          {/* ════════ PILLAR 5: ACTION CENTER ════════ */}
           {activeTab === 'action-center' && (
             <Suspense fallback={
               <div className="flex items-center justify-center h-full">

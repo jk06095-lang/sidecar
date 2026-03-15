@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Settings, Anchor,
-  Activity, Menu, Database, Gavel,
+  Activity, Menu, Database, Gavel, Newspaper,
   Star, Edit2, Check, X, Trash2, LogOut,
   ChevronRight, ChevronDown as ChevronDownIcon, FolderOpen, Folder, Copy,
   FileCheck, Clock,
@@ -39,13 +39,14 @@ function loadFavoritesLocal(): FavoriteEntry[] {
 }
 
 // ============================================================
-// 4-PILLAR NAVIGATION
+// 5-PILLAR NAVIGATION
 // ============================================================
 const NAV_PILLARS = [
   { id: 'workspace', label: 'Fleet Control', labelKo: '① Fleet 관제', icon: LayoutDashboard },
   { id: 'ontology', label: 'Ontology Data', labelKo: '② Ontology 데이터', icon: Database },
-  { id: 'scenario', label: 'Quant Simulation', labelKo: '③ 퀀트 시뮬레이션', icon: Activity },
-  { id: 'action-center', label: 'Action & Report', labelKo: '④ Action 결재', icon: Gavel },
+  { id: 'news', label: 'Intelligence', labelKo: '③ 인텔리전스', icon: Newspaper },
+  { id: 'scenario', label: 'Quant Simulation', labelKo: '④ 퀀트 시뮬레이션', icon: Activity },
+  { id: 'action-center', label: 'Action & Report', labelKo: '⑤ Action 결재', icon: Gavel },
 ] as const;
 
 export default function Sidebar({

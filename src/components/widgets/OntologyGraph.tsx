@@ -234,7 +234,17 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     }, [storeLinks, graphNodes]);
 
     // Sync refs
-    useEffect(() => { nodesRef.current = graphNodes; }, [graphNodes]);
+    useEffect(() => { 
+        nodesRef.current = graphNodes; 
+        // Important: Visibility of links in physics is calculated synchronously here
+        const currentNodes = nodesRef.current;
+        const currentLinks = linksRef.current.map(link => {
+             const src = currentNodes.find((n) => n.id === link.source);
+             const tgt = currentNodes.find((n) => n.id === link.target);
+             return { ...link, visible: !!(src?.visible && tgt?.visible) };
+        });
+        linksRef.current = currentLinks;
+    }, [graphNodes]);
     useEffect(() => { linksRef.current = graphLinks; }, [graphLinks]);
 
     // ============================================================
@@ -357,8 +367,10 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
         const updateSize = () => {
             const rect = canvas.parentElement?.getBoundingClientRect();
             if (rect) {
-                canvas.width = rect.width;
-                canvas.height = rect.height;
+                if (canvas.width !== rect.width || canvas.height !== rect.height) {
+                    canvas.width = rect.width;
+                    canvas.height = rect.height;
+                }
             }
         };
         updateSize();
@@ -776,7 +788,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
             cancelAnimationFrame(animFrameRef.current);
             window.removeEventListener('resize', updateSize);
         };
-    }, [graphNodes, graphLinks, selectedObjectId, hoveredNode, hoveredLink]);
+    }, []); // Removed specific state dependencies to prevent Canvas reset on every click
 
     // ============================================================
     // MOUSE HANDLERS

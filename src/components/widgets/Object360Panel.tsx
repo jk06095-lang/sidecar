@@ -98,7 +98,7 @@ function Object360PanelInner({ obj, objectId, objects, links, onClose, onNavigat
     }).filter((c) => c.object);
 
     return (
-        <div className="w-[400px] shrink-0 bg-slate-900/95 backdrop-blur-xl border-l border-slate-700/50 flex flex-col overflow-hidden animate-slide-left shadow-2xl">
+        <div className="h-full w-[400px] shrink-0 bg-slate-900/95 backdrop-blur-xl border-l border-slate-700/50 flex flex-col overflow-hidden animate-slide-left shadow-2xl">
             {/* Header */}
             <div className="p-4 border-b border-slate-700/50 bg-slate-800/30">
                 <div className="flex items-center justify-between mb-3">

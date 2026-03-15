@@ -295,8 +295,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 }
             }
 
-            // Step 2: First live fetch (runs silently in background if cache exists)
-            await fetchAndMerge();
+            // Step 2: Skip initial API fetch if cache loaded articles. Otherwise, fetch immediately.
+            if (!hasCachedData) {
+                await fetchAndMerge();
+            }
 
             // Step 3: Start 10-minute polling
             nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
@@ -425,6 +427,19 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     {activeTab === 'osint' ? 'OSINT Intelligence Feed' : '공식 지침 & 안보 경보'}
                 </h4>
                 <span className="ml-auto flex items-center gap-1.5">
+                    <button
+                        onClick={() => {
+                            if (activeTab === 'osint') fetchAndMerge();
+                            else { officialInitialized.current = false; fetchOfficial(); }
+                            // Reset countdown
+                            nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
+                        }}
+                        disabled={isLoading}
+                        className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors flex items-center gap-1 disabled:opacity-50"
+                        title="최신화"
+                    >
+                        🔄 최신화
+                    </button>
                     <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-900/30 text-emerald-400 font-mono border border-emerald-700/30">
                         {visibleArticles.filter(a => a.evaluated).length}/{visibleArticles.length} evaluated
                     </span>

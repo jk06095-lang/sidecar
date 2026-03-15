@@ -105,7 +105,15 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     const [linkCreationMode, setLinkCreationMode] = useState(false);
     const [linkDragSource, setLinkDragSource] = useState<GraphNode | null>(null);
     const linkDragCursorRef = useRef<{ x: number; y: number } | null>(null);
+    const linkDragSourceRef = useRef<GraphNode | null>(null);
     const [showRelationPicker, setShowRelationPicker] = useState<{ sourceId: string; targetId: string; screenX: number; screenY: number } | null>(null);
+
+    // Keep ref in sync with state for canvas tick closure
+    useEffect(() => { linkDragSourceRef.current = linkDragSource; }, [linkDragSource]);
+
+    // Selected link ref for canvas tick
+    const selectedLinkIdRef = useRef<string | null>(null);
+    useEffect(() => { selectedLinkIdRef.current = selectedLinkId ?? null; }, [selectedLinkId]);
 
     // Store actions
     const addLink = useOntologyStore((s) => s.addLink);
@@ -140,10 +148,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     }, []);
 
     // ============================================================
-    // BUILD GRAPH FROM STORE
+    // BUILD GRAPH NODES FROM STORE (only re-runs when objects change)
     // ============================================================
     useEffect(() => {
-        // Initialize: show seed nodes (Vessel + MacroEvent + a few key ports)
         const seedTypes: OntologyObjectType[] = ['Vessel', 'RiskEvent'];
         const seedIds = new Set<string>();
 
@@ -160,27 +167,25 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
 
             if (isSeed) seedIds.add(obj.id);
 
-            // Module 2: Check if this node is affected by a QuantMetrics riskAlert
             let isQuantRiskAlert = false;
-            // Check direct RIC match (for Commodity/Market nodes)
             const ric = String(obj.properties.ric || obj.properties.symbol || '');
             if (ric && lsegQuantMetrics[ric]?.riskAlert) {
                 isQuantRiskAlert = true;
             }
-            // Check if this vessel has bunkerCostRisk='High'
             if (obj.type === 'Vessel' && obj.properties.bunkerCostRisk === 'High') {
                 isQuantRiskAlert = true;
             }
 
-            // Arrange seed nodes in a circle, others at random positions
+            // Preserve existing position if node already exists
+            const existing = nodesRef.current.find(n => n.id === obj.id);
             const angle = (i / storeObjects.length) * Math.PI * 2;
             const radius_spread = isSeed ? 180 : 280;
 
             newNodes.push({
                 id: obj.id,
                 label: obj.title,
-                x: cx + Math.cos(angle) * radius_spread + (Math.random() - 0.5) * 40,
-                y: cy + Math.sin(angle) * radius_spread + (Math.random() - 0.5) * 40,
+                x: existing?.x ?? (cx + Math.cos(angle) * radius_spread + (Math.random() - 0.5) * 40),
+                y: existing?.y ?? (cy + Math.sin(angle) * radius_spread + (Math.random() - 0.5) * 40),
                 vx: 0,
                 vy: 0,
                 type: obj.type,
@@ -188,34 +193,41 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                 color: cfg.color,
                 borderColor: getRiskColor(riskScore),
                 riskScore,
-                expanded: isSeed,
-                visible: isSeed,
+                expanded: existing?.expanded ?? isSeed,
+                visible: existing?.visible ?? isSeed,
                 isQuantRiskAlert,
             });
         });
 
+        setGraphNodes(newNodes);
+        nodesRef.current = newNodes;
+        setExpandedIds(prev => prev.size > 0 ? prev : seedIds);
+    }, [storeObjects, lsegQuantMetrics]);
+
+    // ============================================================
+    // BUILD GRAPH LINKS FROM STORE (runs when links or nodes change)
+    // ============================================================
+    useEffect(() => {
+        const currentNodes = nodesRef.current;
         const newLinks: GraphLink[] = storeLinks.map((link) => ({
             id: link.id,
             source: link.sourceId,
             target: link.targetId,
             weight: link.weight,
             relationType: link.relationType,
-            visible: false, // will be computed
+            visible: false,
         }));
 
         // Make links visible if both endpoints are visible
         newLinks.forEach((link) => {
-            const src = newNodes.find((n) => n.id === link.source);
-            const tgt = newNodes.find((n) => n.id === link.target);
+            const src = currentNodes.find((n) => n.id === link.source);
+            const tgt = currentNodes.find((n) => n.id === link.target);
             link.visible = !!(src?.visible && tgt?.visible);
         });
 
-        setGraphNodes(newNodes);
         setGraphLinks(newLinks);
-        nodesRef.current = newNodes;
         linksRef.current = newLinks;
-        setExpandedIds(seedIds);
-    }, [storeObjects, storeLinks, lsegQuantMetrics]);
+    }, [storeLinks, graphNodes]);
 
     // Sync refs
     useEffect(() => { nodesRef.current = graphNodes; }, [graphNodes]);
@@ -702,8 +714,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
             });
 
             // ---- RUBBER-BAND LINE (link creation drag) ----
-            if (linkDragSource && linkDragCursorRef.current) {
-                const src = visibleNodes.find(n => n.id === linkDragSource.id);
+            const dragSrc = linkDragSourceRef.current;
+            if (dragSrc && linkDragCursorRef.current) {
+                const src = visibleNodes.find(n => n.id === dragSrc.id);
                 if (src) {
                     const cursor = linkDragCursorRef.current;
                     ctx.beginPath();
@@ -727,8 +740,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
             }
 
             // ---- HIGHLIGHT SELECTED LINK ----
-            if (selectedLinkId) {
-                const selLink = visibleLinks.find(l => l.id === selectedLinkId);
+            const curSelectedLinkId = selectedLinkIdRef.current;
+            if (curSelectedLinkId) {
+                const selLink = visibleLinks.find(l => l.id === curSelectedLinkId);
                 if (selLink) {
                     const src = visibleNodes.find(n => n.id === selLink.source);
                     const tgt = visibleNodes.find(n => n.id === selLink.target);

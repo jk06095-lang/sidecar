@@ -966,14 +966,11 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         },
 
         generateLinks: async () => {
-            const { objects, links: existingLinks, addLink: storeAddLink } = get();
+            const { objects, links: existingLinks } = get();
             if (objects.length < 2) return 0;
 
-            // Build a simple AI prompt to generate links between objects
-            const objectSummaries = objects.map(o => `${o.id}|${o.type}|${o.title}`).join('\n');
             const existingPairs = new Set(existingLinks.map(l => `${l.sourceId}::${l.targetId}`));
 
-            // Use heuristic link generation (no API key dependency)
             const RELATION_RULES: Array<{ from: string; to: string; rel: import('../types').OntologyLinkRelation; weight: number }> = [
                 { from: 'Vessel', to: 'Port', rel: 'OPERATES_AT', weight: 0.7 },
                 { from: 'Vessel', to: 'Route', rel: 'SAILS', weight: 0.8 },
@@ -1003,7 +1000,7 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                             sourceId: src.id,
                             targetId: tgt.id,
                             relationType: rule.rel,
-                            weight: rule.weight + (Math.random() - 0.5) * 0.2,
+                            weight: Math.max(0.1, Math.min(1, rule.weight + (Math.random() - 0.5) * 0.2)),
                             metadata: { label: `${src.title} → ${tgt.title}`, createdAt: new Date().toISOString() },
                         });
                         existingPairs.add(pairKey);
@@ -1011,9 +1008,17 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 }
             }
 
-            // Batch add
-            for (const draft of drafts) {
-                await storeAddLink(draft);
+            if (drafts.length === 0) return 0;
+
+            // Batch add all links in a single store update + single Firestore write
+            const allLinks = [...existingLinks, ...drafts];
+            set({ links: allLinks });
+            try {
+                await persistOntologyLinksImmediate(allLinks);
+                console.info(`[OntologyStore] generateLinks: Added ${drafts.length} draft links, total ${allLinks.length}`);
+            } catch (err) {
+                console.error('[OntologyStore] generateLinks persist error:', err);
+                set({ links: existingLinks }); // rollback
             }
 
             return drafts.length;

@@ -211,39 +211,29 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     // BUILD GRAPH LINKS FROM STORE (runs when links or nodes change)
     // ============================================================
     useEffect(() => {
-        const currentNodes = nodesRef.current;
+        // Use graphNodes state directly (not nodesRef) for accurate visibility
+        const currentNodes = graphNodes;
 
-        const newLinks: GraphLink[] = storeLinks.map((link) => ({
-            id: link.id,
-            source: link.sourceId,
-            target: link.targetId,
-            weight: link.weight,
-            relationType: link.relationType,
-            visible: false,
-        }));
-
-        // Always recalculate visibility from current node state
-        newLinks.forEach((link) => {
-            const src = currentNodes.find((n) => n.id === link.source);
-            const tgt = currentNodes.find((n) => n.id === link.target);
-            link.visible = !!(src?.visible && tgt?.visible);
+        const newLinks: GraphLink[] = storeLinks.map((link) => {
+            const src = currentNodes.find((n) => n.id === link.sourceId);
+            const tgt = currentNodes.find((n) => n.id === link.targetId);
+            return {
+                id: link.id,
+                source: link.sourceId,
+                target: link.targetId,
+                weight: link.weight,
+                relationType: link.relationType,
+                visible: !!(src?.visible && tgt?.visible),
+            };
         });
 
         setGraphLinks(newLinks);
         linksRef.current = newLinks;
     }, [storeLinks, graphNodes]);
 
-    // Sync refs
-    useEffect(() => { 
-        nodesRef.current = graphNodes; 
-        // Important: Visibility of links in physics is calculated synchronously here
-        const currentNodes = nodesRef.current;
-        const currentLinks = linksRef.current.map(link => {
-             const src = currentNodes.find((n) => n.id === link.source);
-             const tgt = currentNodes.find((n) => n.id === link.target);
-             return { ...link, visible: !!(src?.visible && tgt?.visible) };
-        });
-        linksRef.current = currentLinks;
+    // Sync refs — keep nodesRef in sync with state for canvas tick
+    useEffect(() => {
+        nodesRef.current = graphNodes;
     }, [graphNodes]);
     useEffect(() => { linksRef.current = graphLinks; }, [graphLinks]);
 
@@ -366,14 +356,21 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
 
         const updateSize = () => {
             const rect = canvas.parentElement?.getBoundingClientRect();
-            if (rect) {
-                if (canvas.width !== rect.width || canvas.height !== rect.height) {
-                    canvas.width = rect.width;
-                    canvas.height = rect.height;
+            if (rect && rect.width > 0 && rect.height > 0) {
+                if (canvas.width !== Math.round(rect.width) || canvas.height !== Math.round(rect.height)) {
+                    canvas.width = Math.round(rect.width);
+                    canvas.height = Math.round(rect.height);
                 }
             }
         };
         updateSize();
+
+        // Use ResizeObserver to detect parent size changes (handles portal/fullscreen)
+        let resizeObserver: ResizeObserver | null = null;
+        if (canvas.parentElement) {
+            resizeObserver = new ResizeObserver(() => updateSize());
+            resizeObserver.observe(canvas.parentElement);
+        }
         window.addEventListener('resize', updateSize);
 
         const alpha = 0.04;
@@ -787,8 +784,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
         return () => {
             cancelAnimationFrame(animFrameRef.current);
             window.removeEventListener('resize', updateSize);
+            resizeObserver?.disconnect();
         };
-    }, []); // Removed specific state dependencies to prevent Canvas reset on every click
+    }, [isFullScreen]); // Re-initialize canvas when fullscreen changes
 
     // ============================================================
     // MOUSE HANDLERS
@@ -981,26 +979,32 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     // EXPAND ALL / COLLAPSE ALL
     // ============================================================
     const handleExpandAll = () => {
-        setGraphNodes((prev) => prev.map((n) => ({
+        const updatedNodes = graphNodes.map((n) => ({
             ...n, visible: true, expanded: true,
-        })));
-        setGraphLinks((prev) => prev.map((l) => ({ ...l, visible: true })));
+        }));
+        const updatedLinks = graphLinks.map((l) => ({ ...l, visible: true }));
+        setGraphNodes(updatedNodes);
+        setGraphLinks(updatedLinks);
+        nodesRef.current = updatedNodes;
+        linksRef.current = updatedLinks;
         setExpandedIds(new Set(storeObjects.map((o) => o.id)));
     };
 
     const handleCollapseAll = () => {
         const seedTypes: OntologyObjectType[] = ['Vessel', 'RiskEvent'];
-        setGraphNodes((prev) =>
-            prev.map((n) => ({
-                ...n,
-                visible: seedTypes.includes(n.type),
-                expanded: seedTypes.includes(n.type),
-            })),
-        );
-        setGraphLinks((prev) => {
-            const visible = new Set(nodesRef.current.filter((n) => seedTypes.includes(n.type)).map((n) => n.id));
-            return prev.map((l) => ({ ...l, visible: visible.has(l.source) && visible.has(l.target) }));
-        });
+        const updatedNodes = graphNodes.map((n) => ({
+            ...n,
+            visible: seedTypes.includes(n.type),
+            expanded: seedTypes.includes(n.type),
+        }));
+        const seedNodeIds = new Set(updatedNodes.filter((n) => n.visible).map((n) => n.id));
+        const updatedLinks = graphLinks.map((l) => ({
+            ...l, visible: seedNodeIds.has(l.source) && seedNodeIds.has(l.target),
+        }));
+        setGraphNodes(updatedNodes);
+        setGraphLinks(updatedLinks);
+        nodesRef.current = updatedNodes;
+        linksRef.current = updatedLinks;
         setExpandedIds(new Set(storeObjects.filter((o) => seedTypes.includes(o.type)).map((o) => o.id)));
     };
 
@@ -1075,9 +1079,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                     )}
                 </div>
 
-                <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-slate-500">
-                    <span>Nodes: <span className="text-slate-300">{visibleNodeCount}</span>/{totalNodeCount}</span>
-                    <span>Links: <span className="text-slate-300">{visibleLinkCount}</span></span>
+                <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-slate-500 shrink-0">
+                    <span className="min-w-[90px] text-right">Nodes: <span className="text-slate-300">{visibleNodeCount}</span>/{totalNodeCount}</span>
+                    <span className="min-w-[60px] text-right">Links: <span className="text-slate-300">{visibleLinkCount}</span></span>
                     <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">ONTOLOGY STORE</span>
 
                     {/* Full-screen toggle */}

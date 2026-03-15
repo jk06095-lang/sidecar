@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Search, Ship, Anchor, Navigation, Fuel, Zap, Shield, DollarSign,
-    AlertTriangle, FileText, Map, ChevronRight, TrendingUp,
+    AlertTriangle, FileText, ChevronRight, TrendingUp,
     Filter, X, Loader2, Route as RouteIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -260,18 +260,7 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
                     CENTER PANEL — Map / Graph
                    ════════════════════════════════════════════ */}
                 <div className="flex-1 flex flex-col min-w-0">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800/40 bg-slate-950/30">
-                        <div className="flex items-center gap-1.5 text-[10px] font-medium text-cyan-400">
-                            <Map size={12} />
-                            Fleet Map
-                        </div>
-                        <div className="text-[9px] text-slate-600 font-mono">
-                            {dynamicFleetData.length} vessels
-                        </div>
-                    </div>
-
-                    {/* Content */}
+                    {/* Content — Full height map (header is inside FleetMapWidget overlay) */}
                     <div className="flex-1 relative min-h-0">
                         <FleetMapWidget
                             vessels={dynamicFleetData}

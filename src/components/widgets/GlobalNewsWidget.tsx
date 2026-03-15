@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock } from 'lucide-react';
+import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock, RefreshCw, ShieldAlert, FileWarning } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
 import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, type FinOpsStats } from '../../services/newsService';
@@ -212,35 +212,43 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         }
     }, [onStatsUpdate, addIntelArticles]);
 
-    // Fetch official sources (KP&I + UKMTO)
-    const fetchOfficial = useCallback(async () => {
+    // Load cached official articles from Firebase (cache-first, no API call)
+    const loadOfficialCache = useCallback(async () => {
         if (officialInitialized.current) return;
         officialInitialized.current = true;
         setOfficialLoading(true);
 
         try {
-            // Load cached official articles from Firebase first
             const scrappedUrls = getScrappedUrls();
             const cached = await loadIntelArticles('official', scrappedUrls);
             if (cached.length > 0) {
                 setOfficialArticles(cached);
-                setOfficialLoading(false); // Show cached data immediately
                 console.info(`[GlobalNewsWidget] ✅ Loaded ${cached.length} cached official articles from Firebase`);
             }
+        } catch (err) {
+            console.warn('[GlobalNewsWidget] Official cache load error:', err);
+        } finally {
+            setOfficialLoading(false);
+        }
+    }, []);
 
-            // Fetch fresh data in background (no loading spinner if cache existed)
+    // Refresh official articles from API (user-triggered or auto)
+    const refreshOfficial = useCallback(async () => {
+        setOfficialLoading(true);
+        try {
             const results = await fetchOfficialSources();
             if (results.length > 0) {
                 setOfficialArticles(prev => {
                     const existing = new Set(prev.map(a => a.id));
                     const newItems = results.filter(a => !existing.has(a.id));
+                    if (newItems.length === 0) return prev;
                     const merged = [...newItems, ...prev];
                     persistIntelArticles('official', merged);
                     return merged;
                 });
             }
         } catch (err) {
-            console.warn('[GlobalNewsWidget] Official fetch error:', err);
+            console.warn('[GlobalNewsWidget] Official refresh error:', err);
         } finally {
             setOfficialLoading(false);
         }
@@ -325,12 +333,12 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         };
     }, [fetchAndMerge, addIntelArticles]);
 
-    // Load official sources when tab switches to 'official'
+    // Load official sources from cache when tab switches to 'official'
     useEffect(() => {
         if (activeTab === 'official' && !officialInitialized.current) {
-            fetchOfficial();
+            loadOfficialCache();
         }
-    }, [activeTab, fetchOfficial]);
+    }, [activeTab, loadOfficialCache]);
 
     // ============================================================
     // WRITE-BACK: Apply suggested action to ontology
@@ -429,16 +437,20 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 <span className="ml-auto flex items-center gap-1.5">
                     <button
                         onClick={() => {
-                            if (activeTab === 'osint') fetchAndMerge();
-                            else { officialInitialized.current = false; fetchOfficial(); }
+                            if (activeTab === 'osint') {
+                                fetchAndMerge();
+                            } else {
+                                refreshOfficial();
+                            }
                             // Reset countdown
                             nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
                         }}
                         disabled={isLoading}
-                        className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors flex items-center gap-1 disabled:opacity-50"
+                        className="px-2 py-1 rounded-md text-[10px] bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 disabled:opacity-50 font-bold"
                         title="최신화"
                     >
-                        🔄 최신화
+                        {isLoading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+                        최신화
                     </button>
                     <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-900/30 text-emerald-400 font-mono border border-emerald-700/30">
                         {visibleArticles.filter(a => a.evaluated).length}/{visibleArticles.length} evaluated
@@ -611,7 +623,7 @@ function OSINTCard({ article, onBookmark, onTagClick }: {
 }
 
 // ============================================================
-// OFFICIAL CARD — Circular / Security Alert (Signal Triage UI)
+// OFFICIAL CARD — Premium Glassmorphism Signal Triage Card
 // ============================================================
 function OfficialCard({ article, onApply, onAcknowledge, onBookmark, onTagClick }: {
     article: IntelArticle;
@@ -620,155 +632,186 @@ function OfficialCard({ article, onApply, onAcknowledge, onBookmark, onTagClick 
     onBookmark: (e: React.MouseEvent, article: IntelArticle) => void;
     onTagClick?: (tag: string) => void;
 }) {
-    const isCircular = article.category === 'OFFICIAL_CIRCULAR';
     const isAlert = article.category === 'SECURITY_ALERT';
     const isAcknowledged = article.acknowledged;
+
+    const accentFrom = isAlert ? 'from-rose-500/20' : 'from-amber-500/20';
+    const accentTo = isAlert ? 'to-rose-900/5' : 'to-amber-900/5';
+    const borderAccent = isAlert ? 'border-rose-500/30' : 'border-amber-500/30';
+    const glowColor = isAlert ? 'shadow-rose-900/20' : 'shadow-amber-900/20';
+    const textAccent = isAlert ? 'text-rose-300' : 'text-amber-300';
+    const iconColor = isAlert ? 'text-rose-400' : 'text-amber-400';
 
     return (
         <div
             className={cn(
-                "relative p-4 mx-2 my-2 rounded-lg transition-all animate-slide-down",
-                isAcknowledged && "opacity-50",
-                isAlert
-                    ? "border-l-4 border-l-rose-500 border border-rose-800/40 bg-rose-950/15 animate-official-pulse"
-                    : "border-l-4 border-l-amber-500 border border-amber-800/40 bg-amber-950/10 animate-official-pulse-gold"
+                "relative mx-3 my-2.5 rounded-xl transition-all duration-300 animate-slide-down",
+                "bg-gradient-to-br", accentFrom, accentTo,
+                "border", borderAccent,
+                "shadow-lg", glowColor,
+                "backdrop-blur-sm",
+                "hover:shadow-xl hover:scale-[1.005]",
+                isAcknowledged && "opacity-40 hover:opacity-60"
             )}
         >
+            {/* Top accent bar */}
+            <div className={cn(
+                "h-0.5 rounded-t-xl",
+                isAlert
+                    ? "bg-gradient-to-r from-rose-500 via-rose-400 to-rose-600"
+                    : "bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600"
+            )} />
+
             {/* Acknowledged overlay */}
             {isAcknowledged && (
-                <div className="absolute inset-0 flex items-center justify-center z-10 rounded-lg bg-slate-950/30">
-                    <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-3 py-1.5 rounded-full border border-emerald-600/30 flex items-center gap-1.5">
-                        <CheckCircle2 size={14} /> ACKNOWLEDGED
+                <div className="absolute inset-0 flex items-center justify-center z-10 rounded-xl bg-slate-950/40 backdrop-blur-[2px]">
+                    <span className="text-xs font-bold text-emerald-400 bg-emerald-950/70 px-4 py-2 rounded-full border border-emerald-500/30 flex items-center gap-2 shadow-lg shadow-emerald-900/20">
+                        <CheckCircle2 size={14} /> 확인 완료
                     </span>
                 </div>
             )}
 
-            {/* Ref Number Badge */}
-            <div className="flex items-center gap-2 mb-2">
-                <span className={cn(
-                    "text-[10px] font-mono font-bold px-2 py-0.5 rounded tracking-wider",
-                    isAlert
-                        ? "bg-rose-900/40 text-rose-300 border border-rose-700/50"
-                        : "bg-amber-900/40 text-amber-300 border border-amber-700/50"
-                )}>
-                    {article.refNumber || 'REF-PENDING'}
-                </span>
-                <span className={cn(
-                    "text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded",
-                    isAlert
-                        ? "text-rose-400 bg-rose-900/20"
-                        : "text-amber-400 bg-amber-900/20"
-                )}>
-                    {isAlert ? '🚨 SECURITY ALERT' : '📋 OFFICIAL CIRCULAR'}
-                </span>
-            </div>
+            <div className="p-4">
+                {/* Header row: badge + type + time */}
+                <div className="flex items-center gap-2 mb-3">
+                    {/* Type icon */}
+                    <div className={cn(
+                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
+                        isAlert
+                            ? "bg-rose-500/15 border border-rose-500/30"
+                            : "bg-amber-500/15 border border-amber-500/30"
+                    )}>
+                        {isAlert
+                            ? <ShieldAlert size={14} className="text-rose-400" />
+                            : <FileWarning size={14} className="text-amber-400" />
+                        }
+                    </div>
 
-            {/* Source + Time */}
-            <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-800/70 px-1.5 py-0.5 rounded shrink-0">
-                    {article.sourceBadge} {article.source}
-                </span>
-                <span className={cn(
-                    "text-[9px] px-1.5 py-0.5 rounded-full border font-bold uppercase tracking-wider shrink-0",
-                    RISK_COLORS[article.riskLevel || 'High']
-                )}>
-                    {article.riskLevel || 'HIGH'}
-                </span>
-                <span className="text-[10px] text-slate-600 ml-auto shrink-0 font-mono">
-                    {formatSmartTimestamp(article.publishedAt)}
-                </span>
-            </div>
+                    {/* Ref + category */}
+                    <div className="flex flex-col min-w-0">
+                        <span className={cn("text-[10px] font-mono font-bold tracking-wider", textAccent)}>
+                            {article.refNumber || 'REF-PENDING'}
+                        </span>
+                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+                            {isAlert ? 'SECURITY ALERT' : 'OFFICIAL CIRCULAR'}
+                        </span>
+                    </div>
 
-            {/* Title */}
-            <h4
-                className={cn(
-                    "text-sm font-bold leading-snug mb-2 cursor-pointer hover:underline",
-                    isAlert ? "text-rose-200" : "text-amber-200"
-                )}
-                onClick={() => window.open(article.url, '_blank')}
-            >
-                {article.title}
-            </h4>
+                    {/* Source + risk */}
+                    <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                        <span className={cn(
+                            "text-[9px] px-1.5 py-0.5 rounded-md border font-bold uppercase tracking-wider",
+                            RISK_COLORS[article.riskLevel || 'High']
+                        )}>
+                            {article.riskLevel || 'HIGH'}
+                        </span>
+                        <span className="text-[9px] text-slate-500 font-mono">
+                            {formatSmartTimestamp(article.publishedAt)}
+                        </span>
+                    </div>
+                </div>
 
-            {/* Description */}
-            <p className="text-xs text-slate-400 leading-relaxed mb-3">
-                {article.description}
-            </p>
-
-            {/* AI Insight */}
-            {article.aiInsight && (
-                <div className={cn(
-                    "mb-3 flex items-start gap-1.5 rounded-lg px-3 py-2",
-                    isAlert
-                        ? "bg-rose-950/30 border border-rose-800/30"
-                        : "bg-amber-950/30 border border-amber-800/30"
-                )}>
-                    <Zap size={11} className={cn("mt-0.5 shrink-0", isAlert ? "text-rose-400" : "text-amber-400")} />
-                    <span className={cn("text-[11px] leading-relaxed", isAlert ? "text-rose-300/90" : "text-amber-300/90")}>
-                        {article.aiInsight}
+                {/* Source line */}
+                <div className="flex items-center gap-1.5 mb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-800/50 px-2 py-0.5 rounded-md shrink-0">
+                        {article.sourceBadge} {article.source}
                     </span>
                 </div>
-            )}
 
-            {/* Ontology Tags */}
-            {article.ontologyTags && article.ontologyTags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-3">
-                    {article.ontologyTags.map(tag => (
-                        <button
-                            key={tag}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onTagClick?.(tag);
-                            }}
-                            className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-300 border border-slate-700/50 hover:bg-cyan-500/15 hover:text-cyan-300 hover:border-cyan-500/30 transition-all font-medium"
-                        >
-                            #{tag}
-                        </button>
-                    ))}
-                </div>
-            )}
-
-            {/* Action Buttons */}
-            {!isAcknowledged && (
-                <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/30">
-                    {article.suggestedAction && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onApply(article);
-                            }}
-                            className={cn(
-                                "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold transition-all",
-                                "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500",
-                                "text-white shadow-lg shadow-cyan-900/30 hover:shadow-cyan-800/40",
-                                "border border-cyan-500/30"
-                            )}
-                        >
-                            <Zap size={12} />
-                            ⚡ Apply: {article.suggestedAction.displayLabel}
-                        </button>
+                {/* Title */}
+                <h4
+                    className={cn(
+                        "text-[13px] font-bold leading-snug mb-2 cursor-pointer transition-colors",
+                        isAlert ? "text-rose-100 hover:text-rose-50" : "text-amber-100 hover:text-amber-50"
                     )}
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onAcknowledge(article.id);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-slate-700/40 text-slate-300 hover:bg-slate-600/50 hover:text-slate-100 border border-slate-600/30 transition-all"
-                    >
-                        <CheckCircle2 size={12} />
-                        ✓ Acknowledge
-                    </button>
+                    onClick={() => window.open(article.url, '_blank')}
+                >
+                    {article.title}
+                </h4>
 
-                    {/* Bookmark */}
-                    <button
-                        onClick={(e) => onBookmark(e, article)}
-                        className="p-2 text-slate-500 hover:text-amber-400 hover:bg-slate-800 rounded transition-all"
-                        title="온톨로지(AI 지식베이스)에 추가하기"
-                    >
-                        <Bookmark size={12} />
-                    </button>
-                </div>
-            )}
+                {/* Description */}
+                <p className="text-[11px] text-slate-400 leading-relaxed mb-3 line-clamp-3">
+                    {article.description}
+                </p>
+
+                {/* AI Insight */}
+                {article.aiInsight && (
+                    <div className={cn(
+                        "mb-3 flex items-start gap-2 rounded-lg px-3 py-2.5",
+                        isAlert
+                            ? "bg-rose-950/30 border border-rose-700/20"
+                            : "bg-amber-950/30 border border-amber-700/20"
+                    )}>
+                        <Sparkles size={12} className={cn("mt-0.5 shrink-0", iconColor)} />
+                        <span className={cn("text-[11px] leading-relaxed", isAlert ? "text-rose-200/90" : "text-amber-200/90")}>
+                            {article.aiInsight}
+                        </span>
+                    </div>
+                )}
+
+                {/* Ontology Tags */}
+                {article.ontologyTags && article.ontologyTags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-3">
+                        {article.ontologyTags.map(tag => (
+                            <button
+                                key={tag}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTagClick?.(tag);
+                                }}
+                                className={cn(
+                                    "text-[9px] px-2 py-0.5 rounded-full border transition-all font-medium",
+                                    isAlert
+                                        ? "bg-rose-900/20 text-rose-300/80 border-rose-700/30 hover:bg-rose-500/20 hover:text-rose-200"
+                                        : "bg-amber-900/20 text-amber-300/80 border-amber-700/30 hover:bg-amber-500/20 hover:text-amber-200"
+                                )}
+                            >
+                                #{tag}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {/* Action Buttons */}
+                {!isAcknowledged && (
+                    <div className="flex items-center gap-2 pt-3 border-t border-slate-700/20">
+                        {article.suggestedAction && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onApply(article);
+                                }}
+                                className={cn(
+                                    "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all",
+                                    "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500",
+                                    "text-white shadow-lg shadow-cyan-900/30 hover:shadow-cyan-800/40",
+                                    "border border-cyan-400/20"
+                                )}
+                            >
+                                <Zap size={12} />
+                                Apply: {article.suggestedAction.displayLabel}
+                            </button>
+                        )}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onAcknowledge(article.id);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800/50 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100 border border-slate-600/20 transition-all"
+                        >
+                            <CheckCircle2 size={12} />
+                            확인
+                        </button>
+                        <button
+                            onClick={(e) => onBookmark(e, article)}
+                            className="p-2 text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all border border-transparent hover:border-amber-500/20"
+                            title="온톨로지(AI 지식베이스)에 추가하기"
+                        >
+                            <Bookmark size={12} />
+                        </button>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

@@ -209,23 +209,35 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
 
     // ============================================================
     // BUILD GRAPH LINKS FROM STORE (runs when links or nodes change)
+    // Preserves previous visibility to prevent flicker on re-render.
     // ============================================================
     useEffect(() => {
         const currentNodes = nodesRef.current;
-        const newLinks: GraphLink[] = storeLinks.map((link) => ({
-            id: link.id,
-            source: link.sourceId,
-            target: link.targetId,
-            weight: link.weight,
-            relationType: link.relationType,
-            visible: false,
-        }));
+        const prevLinkMap = new Map(linksRef.current.map(l => [l.id, l]));
 
-        // Make links visible if both endpoints are visible
+        const newLinks: GraphLink[] = storeLinks.map((link) => {
+            const prev = prevLinkMap.get(link.id);
+            // Preserve previous visibility for existing links to avoid flicker
+            const defaultVisible = prev?.visible ?? false;
+            return {
+                id: link.id,
+                source: link.sourceId,
+                target: link.targetId,
+                weight: link.weight,
+                relationType: link.relationType,
+                visible: defaultVisible,
+            };
+        });
+
+        // Recalculate visibility based on node visibility
         newLinks.forEach((link) => {
             const src = currentNodes.find((n) => n.id === link.source);
             const tgt = currentNodes.find((n) => n.id === link.target);
-            link.visible = !!(src?.visible && tgt?.visible);
+            const shouldBeVisible = !!(src?.visible && tgt?.visible);
+            // Only update if both endpoints exist; otherwise keep previous state
+            if (src && tgt) {
+                link.visible = shouldBeVisible;
+            }
         });
 
         setGraphLinks(newLinks);
@@ -1006,14 +1018,14 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                 <div className="flex items-center gap-2">
                     <button
                         onClick={handleExpandAll}
-                        className="p-1.5 rounded-md transition-colors flex items-center text-xs gap-1 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10"
+                        className="p-1.5 rounded-md transition-all flex items-center text-xs gap-1 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer active:scale-95"
                         title="모든 노드 확장"
                     >
                         <Maximize2 size={14} /> 전체 확장
                     </button>
                     <button
                         onClick={handleCollapseAll}
-                        className="p-1.5 rounded-md transition-colors flex items-center text-xs gap-1 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10"
+                        className="p-1.5 rounded-md transition-all flex items-center text-xs gap-1 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 cursor-pointer active:scale-95"
                         title="시드 노드만 표시"
                     >
                         <Minimize2 size={14} /> 축소
@@ -1026,7 +1038,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                     <button
                         onClick={() => { setLinkCreationMode(!linkCreationMode); setLinkDragSource(null); linkDragCursorRef.current = null; setShowRelationPicker(null); }}
                         className={cn(
-                            "p-1.5 rounded-md transition-colors flex items-center text-xs gap-1.5 font-medium",
+                            "p-1.5 rounded-md transition-all flex items-center text-xs gap-1.5 font-medium cursor-pointer active:scale-95",
                             linkCreationMode
                                 ? "bg-violet-500/20 text-violet-300 border border-violet-500/40"
                                 : "text-slate-400 hover:text-violet-400 hover:bg-violet-500/10"
@@ -1042,10 +1054,10 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                             onClick={onGenerateLinks}
                             disabled={isLinkGenerating}
                             className={cn(
-                                "p-1.5 rounded-md transition-colors flex items-center text-xs gap-1.5 font-medium",
+                                "p-1.5 rounded-md transition-all flex items-center text-xs gap-1.5 font-medium",
                                 isLinkGenerating
                                     ? "bg-violet-500/20 text-violet-300 border border-violet-500/40 cursor-not-allowed opacity-70"
-                                    : "text-slate-400 hover:text-violet-400 hover:bg-violet-500/10"
+                                    : "text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 cursor-pointer active:scale-95"
                             )}
                             title={linkCount && linkCount > 0 ? "AI 신경삭 최신화" : "AI 신경삭 자동 생성"}
                         >
@@ -1069,7 +1081,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                     {onToggleFullScreen && (
                         <button
                             onClick={onToggleFullScreen}
-                            className="p-1 rounded text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                            className="p-1 rounded text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all cursor-pointer active:scale-95"
                             title={isFullScreen ? '축소' : '전체 화면'}
                         >
                             {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}

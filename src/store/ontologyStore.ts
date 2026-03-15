@@ -755,6 +755,10 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 
 // Write-lock to prevent onSnapshot from overwriting during local writes
 let _writeInProgress = 0;
+// Timestamp of last hydration — used to skip onSnapshot echo after initial load
+let _lastHydrationAt = 0;
+const HYDRATION_COOLDOWN_MS = 2500;
+
 function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
     _writeInProgress++;
     return fn().finally(() => {
@@ -843,6 +847,9 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                     _unsubscribeGraph = null;
                 }
 
+                // Record hydration time so onSnapshot skips the initial echo
+                _lastHydrationAt = Date.now();
+
                 _unsubscribeGraph = subscribeOntologyGraph(
                     (snapshot) => {
                         // Skip if we are currently writing locally
@@ -851,17 +858,23 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                             return;
                         }
 
+                        // Skip the initial onSnapshot echo that fires right after hydration
+                        if (Date.now() - _lastHydrationAt < HYDRATION_COOLDOWN_MS) {
+                            console.info('[OntologyStore] onSnapshot ignored (hydration cooldown)');
+                            return;
+                        }
+
                         // Only apply if data actually changed (avoid loops from own writes)
                         const currentObjects = get().objects;
                         const currentLinks = get().links;
 
-                        // Robust change detection: compare length + JSON-length hash
+                        // Compare by count and ID sets for efficiency (avoid JSON.stringify)
                         const objectsChanged =
                             snapshot.objects.length !== currentObjects.length ||
-                            JSON.stringify(snapshot.objects).length !== JSON.stringify(currentObjects).length;
+                            snapshot.objects.some((o, i) => o.id !== currentObjects[i]?.id);
                         const linksChanged =
                             snapshot.links.length !== currentLinks.length ||
-                            JSON.stringify(snapshot.links).length !== JSON.stringify(currentLinks).length;
+                            snapshot.links.some((l, i) => l.id !== currentLinks[i]?.id);
 
                         if (objectsChanged || linksChanged) {
                             const fleet = mapOntologyToFleetVessels(snapshot.objects);
@@ -992,7 +1005,20 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             const { objects, links: existingLinks } = get();
             if (objects.length < 2) return 0;
 
-            const existingPairs = new Set(existingLinks.map(l => `${l.sourceId}::${l.targetId}`));
+            // Build a set of all existing pairs (both directions) to avoid duplicates
+            // and to ensure existing links are NEVER modified or replaced
+            const existingPairs = new Set<string>();
+            for (const l of existingLinks) {
+                existingPairs.add(`${l.sourceId}::${l.targetId}`);
+                existingPairs.add(`${l.targetId}::${l.sourceId}`);
+            }
+
+            // Also track which objects already have at least one link
+            const connectedObjectIds = new Set<string>();
+            for (const l of existingLinks) {
+                connectedObjectIds.add(l.sourceId);
+                connectedObjectIds.add(l.targetId);
+            }
 
             const RELATION_RULES: Array<{ from: string; to: string; rel: import('../types').OntologyLinkRelation; weight: number }> = [
                 { from: 'Vessel', to: 'Port', rel: 'OPERATES_AT', weight: 0.7 },
@@ -1016,8 +1042,8 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                     for (const tgt of targets) {
                         if (src.id === tgt.id) continue;
                         const pairKey = `${src.id}::${tgt.id}`;
-                        const reversePairKey = `${tgt.id}::${src.id}`;
-                        if (existingPairs.has(pairKey) || existingPairs.has(reversePairKey)) continue;
+                        // Skip if this pair already has a link in EITHER direction
+                        if (existingPairs.has(pairKey)) continue;
                         drafts.push({
                             id: `link-ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                             sourceId: src.id,
@@ -1026,20 +1052,25 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                             weight: Math.max(0.1, Math.min(1, rule.weight + (Math.random() - 0.5) * 0.2)),
                             metadata: { label: `${src.title} → ${tgt.title}`, createdAt: new Date().toISOString() },
                         });
+                        // Mark this pair to avoid creating duplicates within this batch
                         existingPairs.add(pairKey);
+                        existingPairs.add(`${tgt.id}::${src.id}`);
                     }
                 }
             }
 
-            if (drafts.length === 0) return 0;
+            if (drafts.length === 0) {
+                console.info('[OntologyStore] generateLinks: No new links needed — all objects already connected');
+                return 0;
+            }
 
-            // Batch add all links in a single store update + single Firestore write
+            // Strictly APPEND new drafts to existing links — never modify existing
             const allLinks = [...existingLinks, ...drafts];
             set({ links: allLinks });
             await withWriteLock(async () => {
                 try {
                     await persistOntologyLinksImmediate(allLinks);
-                    console.info(`[OntologyStore] generateLinks: Added ${drafts.length} draft links, total ${allLinks.length}`);
+                    console.info(`[OntologyStore] generateLinks: Added ${drafts.length} NEW draft links (existing ${existingLinks.length} preserved), total ${allLinks.length}`);
                 } catch (err) {
                     console.error('[OntologyStore] generateLinks persist error:', err);
                     set({ links: existingLinks }); // rollback

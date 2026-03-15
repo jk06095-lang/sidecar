@@ -418,6 +418,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                     (source.isQuantRiskAlert && target.type === 'Vessel') ||
                     (target.isQuantRiskAlert && source.type === 'Vessel')
                 );
+                const isAtRisk = link.relationType === 'AT_RISK';
 
                 ctx.beginPath();
                 const cp1x = source.x + (target.x - source.x) / 3;
@@ -472,6 +473,36 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                     ctx.fillStyle = `rgba(239, 68, 68, ${0.7 + Math.sin(t * 3) * 0.3})`;
                     ctx.textAlign = 'center';
                     ctx.fillText(lbl, midX, midY + 4);
+                } else if (isAtRisk) {
+                    // AT_RISK: Animated orange-red dashed line for proximity-based risk
+                    ctx.save();
+                    ctx.strokeStyle = `rgba(251, 146, 60, ${0.1 + Math.sin(t * 2.5) * 0.06})`;
+                    ctx.lineWidth = 8;
+                    ctx.stroke();
+                    ctx.restore();
+
+                    ctx.beginPath();
+                    ctx.moveTo(source.x, source.y);
+                    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, target.x, target.y);
+                    ctx.strokeStyle = `rgba(251, 146, 60, ${0.6 + Math.sin(t * 3) * 0.3})`;
+                    ctx.lineWidth = 3;
+                    ctx.setLineDash([5, 6]);
+                    ctx.lineDashOffset = -t * 25;
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.lineDashOffset = 0;
+
+                    // "⚠ AT_RISK" label
+                    const midX = (source.x + target.x) / 2;
+                    const midY = (source.y + target.y) / 2;
+                    ctx.font = 'bold 7px "JetBrains Mono", monospace';
+                    const atLabel = '⚠ AT_RISK';
+                    const atLblW = ctx.measureText(atLabel).width;
+                    ctx.fillStyle = '#0f172aDD';
+                    ctx.fillRect(midX - atLblW / 2 - 3, midY - 5, atLblW + 6, 12);
+                    ctx.fillStyle = `rgba(251, 146, 60, ${0.7 + Math.sin(t * 3) * 0.3})`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(atLabel, midX, midY + 3);
                 } else {
                     const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
                     const opacityMultiplier = isConnectedToSelected || isHovered ? 1 : 0.35;

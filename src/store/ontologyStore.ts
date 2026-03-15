@@ -31,6 +31,7 @@ import {
     persistOntologyLinks,
     persistOntologyObjectsImmediate,
     persistOntologyLinksImmediate,
+    subscribeOntologyGraph,
 } from '../services/firestoreService';
 
 // ============================================================
@@ -644,6 +645,7 @@ interface OntologyState {
     addLink: (link: OntologyLink) => Promise<void>;
     removeLink: (id: string) => Promise<void>;
     executeAction: (action: OntologyAction) => void;
+    ingestExtractedOntology: (extracted: import('../services/geminiService').ExtractedOntology) => Promise<void>;
 
     // ---- BEVI Actions ----
     addIntelArticles: (articles: IntelArticle[]) => void;
@@ -691,6 +693,16 @@ interface OntologyState {
     showExecutiveBriefingModal: boolean;
     requestExecutiveBriefing: () => Promise<void>;
     clearExecutiveBriefing: () => void;
+
+    // ---- Cleanup ----
+    teardownListeners: () => void;
+
+    // ---- AIS Position State ----
+    aisPositions: import('../services/aisService').AISPosition[];
+    setAISPositions: (positions: import('../services/aisService').AISPosition[]) => void;
+
+    // ---- Proximity Risk ----
+    evaluateProximityRisks: () => void;
 }
 
 // ============================================================
@@ -698,6 +710,43 @@ interface OntologyState {
 // ============================================================
 
 const initialParams = BASE_SCENARIOS[0].params;
+
+// Module-level unsubscribe handle for Firestore onSnapshot
+let _unsubscribeGraph: (() => void) | null = null;
+
+// ============================================================
+// DANGER ZONES — Maritime chokepoints and high-risk areas
+// ============================================================
+
+interface DangerZone {
+    id: string;
+    name: string;
+    center: [number, number]; // [lat, lng]
+    radiusKm: number;
+    riskCategory: string;
+}
+
+const DANGER_ZONES: DangerZone[] = [
+    { id: 'dz-hormuz', name: 'Strait of Hormuz', center: [26.56, 56.25], radiusKm: 150, riskCategory: 'Chokepoint' },
+    { id: 'dz-bab-el-mandeb', name: 'Bab el-Mandeb / Red Sea', center: [12.58, 43.33], radiusKm: 200, riskCategory: 'Piracy / Conflict' },
+    { id: 'dz-suez', name: 'Suez Canal', center: [30.58, 32.27], radiusKm: 80, riskCategory: 'Chokepoint' },
+    { id: 'dz-malacca', name: 'Malacca Strait', center: [2.50, 101.80], radiusKm: 120, riskCategory: 'Chokepoint' },
+    { id: 'dz-guinea', name: 'Gulf of Guinea', center: [3.00, 5.00], radiusKm: 300, riskCategory: 'Piracy' },
+    { id: 'dz-black-sea', name: 'Black Sea / Ukraine', center: [44.00, 34.00], radiusKm: 250, riskCategory: 'Conflict Zone' },
+    { id: 'dz-south-china-sea', name: 'South China Sea', center: [15.00, 115.00], radiusKm: 400, riskCategory: 'Territorial Dispute' },
+];
+
+/** Haversine distance in km between two lat/lng points */
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 export const useOntologyStore = create<OntologyState>((set, get) => {
     return {
@@ -735,13 +784,17 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
         lsegError: null as string | null,
         newsRiskBoost: 0,
 
+        // ---- AIS Positions ----
+        aisPositions: [] as import('../services/aisService').AISPosition[],
+
         // ---- Module 3: Executive Briefing ----
         executiveBriefing: null as AIPExecutiveBriefing | null,
         isExecutiveBriefingLoading: false,
         showExecutiveBriefingModal: false,
 
         // ============================================================
-        // HYDRATION — Load graph from Firestore, seed if empty
+        // HYDRATION — Load graph from Firestore, seed if empty,
+        // then subscribe to real-time updates via onSnapshot
         // ============================================================
         hydrateFromDB: async () => {
             try {
@@ -767,6 +820,46 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 });
 
                 console.info(`[OntologyStore] ✅ Hydrated: ${graph.objects.length} objects, ${graph.links.length} links`);
+
+                // --- Set up real-time listener for remote changes ---
+                // Unsubscribe any previous listener
+                if (_unsubscribeGraph) {
+                    _unsubscribeGraph();
+                    _unsubscribeGraph = null;
+                }
+
+                _unsubscribeGraph = subscribeOntologyGraph(
+                    (snapshot) => {
+                        // Only apply if data actually changed (avoid loops from own writes)
+                        const currentObjects = get().objects;
+                        const currentLinks = get().links;
+
+                        // Simple length + first-id check to detect remote changes
+                        const objectsChanged =
+                            snapshot.objects.length !== currentObjects.length ||
+                            (snapshot.objects.length > 0 && currentObjects.length > 0 &&
+                                snapshot.objects[0]?.id !== currentObjects[0]?.id);
+                        const linksChanged =
+                            snapshot.links.length !== currentLinks.length ||
+                            (snapshot.links.length > 0 && currentLinks.length > 0 &&
+                                snapshot.links[0]?.id !== currentLinks[0]?.id);
+
+                        if (objectsChanged || linksChanged) {
+                            const fleet = mapOntologyToFleetVessels(snapshot.objects);
+                            const bevi = deriveNewBEVI(get().bevi, snapshot.objects, get().intelArticles);
+                            set({
+                                objects: snapshot.objects,
+                                links: snapshot.links,
+                                bevi,
+                                dynamicFleetData: calculateDynamicFleetData(get().simulationParams, fleet),
+                            });
+                            console.info(`[OntologyStore] 🔴 LIVE sync: ${snapshot.objects.length} objects, ${snapshot.links.length} links`);
+                        }
+                    },
+                    (err) => {
+                        console.warn('[OntologyStore] onSnapshot error (non-fatal):', err);
+                    },
+                );
             } catch (err) {
                 console.error('[OntologyStore] Hydration failed:', err);
                 // Emergency fallback: load mockData directly so app is usable
@@ -898,6 +991,209 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             get().markBEVIDirty();
             // Debounced write-back for executeAction (action objects change frequently)
             persistOntologyObjects(get().objects);
+        },
+
+        // ============================================================
+        // ONTOLOGY INGESTION — Merge AI-extracted ontology data
+        // ============================================================
+        ingestExtractedOntology: async (extracted) => {
+            const state = get();
+            const existingTitles = new Set(state.objects.map(o => o.title.toLowerCase()));
+            const now = new Date().toISOString();
+
+            // 1. Create new OntologyObjects from extraction
+            const newObjects: OntologyObject[] = [];
+            for (const ext of extracted.newObjects) {
+                if (existingTitles.has(ext.title.toLowerCase())) continue;
+                const obj: OntologyObject = {
+                    id: ext.id || `auto-${ext.type.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    type: ext.type as OntologyObject['type'],
+                    title: ext.title,
+                    description: ext.description || '',
+                    properties: ext.properties || {},
+                    metadata: {
+                        createdAt: now,
+                        updatedAt: now,
+                        source: 'AI Extraction',
+                        status: 'active' as const,
+                    },
+                };
+                newObjects.push(obj);
+            }
+
+            // 2. Resolve title-based links to ID-based links
+            const allObjects = [...state.objects, ...newObjects];
+            const titleToId = new Map<string, string>();
+            for (const obj of allObjects) {
+                titleToId.set(obj.title.toLowerCase(), obj.id);
+            }
+
+            const newLinks: OntologyLink[] = [];
+            for (const ext of extracted.newLinks) {
+                const sourceId = titleToId.get(ext.sourceTitle.toLowerCase());
+                const targetId = titleToId.get(ext.targetTitle.toLowerCase());
+                if (!sourceId || !targetId) continue;
+
+                const link: OntologyLink = {
+                    id: ext.id || `link-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    sourceId,
+                    targetId,
+                    relationType: ext.relation as OntologyLink['relationType'],
+                    weight: ext.weight || 0.5,
+                    metadata: {
+                        createdAt: now,
+                        label: `AI: ${ext.description || ext.relation}`,
+                    },
+                };
+                newLinks.push(link);
+            }
+
+            // 3. Apply property updates to existing objects
+            let updatedObjects = [...state.objects];
+            for (const update of extracted.updatedObjects) {
+                const idx = updatedObjects.findIndex(o => o.title.toLowerCase() === update.title.toLowerCase());
+                if (idx === -1) continue;
+                updatedObjects[idx] = {
+                    ...updatedObjects[idx],
+                    properties: { ...updatedObjects[idx].properties, ...update.propertyUpdates },
+                    metadata: { ...updatedObjects[idx].metadata, updatedAt: now },
+                };
+            }
+
+            // 4. Merge and persist
+            const finalObjects = [...updatedObjects, ...newObjects];
+            const finalLinks = [...state.links, ...newLinks];
+
+            set({ objects: finalObjects, links: finalLinks });
+            get().markBEVIDirty();
+
+            try {
+                await persistOntologyObjectsImmediate(finalObjects);
+                await persistOntologyLinksImmediate(finalLinks);
+                console.info(`[OntologyStore] 🧠 Ingested: ${newObjects.length} objects, ${newLinks.length} links, ${extracted.updatedObjects.length} updates`);
+            } catch (err) {
+                console.error('[OntologyStore] ingestExtractedOntology persist failed:', err);
+            }
+        },
+
+        // ---- AIS Position Setter ----
+        setAISPositions: (positions) => set({ aisPositions: positions }),
+
+        // ============================================================
+        // PROXIMITY RISK — Auto AT_RISK edge generation
+        // ============================================================
+        evaluateProximityRisks: () => {
+            const state = get();
+            const vessels = state.objects.filter(o => o.type === 'Vessel' && o.metadata.status === 'active');
+            const riskEvents = state.objects.filter(o => o.type === 'RiskEvent');
+            const now = new Date().toISOString();
+
+            // Build a map of vessel positions from AIS or ontology properties
+            const vesselPositions = new Map<string, { lat: number; lng: number }>();
+            for (const vessel of vessels) {
+                // Try AIS position first
+                const mmsi = String(vessel.properties.mmsi || '');
+                const aisPos = state.aisPositions.find(p => String(p.mmsi) === mmsi);
+                if (aisPos) {
+                    vesselPositions.set(vessel.id, { lat: aisPos.lat, lng: aisPos.lng });
+                    continue;
+                }
+                // Fallback to ontology lat/lng properties
+                const lat = Number(vessel.properties.lat);
+                const lng = Number(vessel.properties.lng);
+                if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                    vesselPositions.set(vessel.id, { lat, lng });
+                }
+            }
+
+            if (vesselPositions.size === 0) return;
+
+            // Remove existing auto AT_RISK edges (they'll be recalculated)
+            const autoRiskPrefix = 'auto-at-risk-';
+            const existingLinks = state.links.filter(l => !l.id.startsWith(autoRiskPrefix));
+
+            // Find or create RiskEvent objects for each danger zone
+            const zoneRiskMap = new Map<string, string>(); // zone.id → riskEvent.id
+            const newRiskObjects: OntologyObject[] = [];
+
+            for (const zone of DANGER_ZONES) {
+                const existing = riskEvents.find(r =>
+                    r.title.toLowerCase().includes(zone.name.toLowerCase()) ||
+                    r.id === zone.id
+                );
+                if (existing) {
+                    zoneRiskMap.set(zone.id, existing.id);
+                } else {
+                    // Auto-create a RiskEvent node for this danger zone
+                    const riskObj: OntologyObject = {
+                        id: zone.id,
+                        type: 'RiskEvent',
+                        title: `${zone.name} Risk Zone`,
+                        description: `Auto-detected ${zone.riskCategory} zone`,
+                        properties: {
+                            region: zone.name,
+                            category: zone.riskCategory,
+                            riskScore: 65,
+                            severity: 'Medium',
+                            lat: zone.center[0],
+                            lng: zone.center[1],
+                        },
+                        metadata: {
+                            createdAt: now,
+                            updatedAt: now,
+                            source: 'Proximity Engine',
+                            status: 'active',
+                        },
+                    };
+                    newRiskObjects.push(riskObj);
+                    zoneRiskMap.set(zone.id, zone.id);
+                }
+            }
+
+            // Generate AT_RISK edges
+            const newAtRiskLinks: OntologyLink[] = [];
+            let alertCount = 0;
+
+            for (const [vesselId, pos] of vesselPositions) {
+                for (const zone of DANGER_ZONES) {
+                    const dist = haversineKm(pos.lat, pos.lng, zone.center[0], zone.center[1]);
+                    if (dist <= zone.radiusKm) {
+                        const riskEventId = zoneRiskMap.get(zone.id);
+                        if (!riskEventId) continue;
+
+                        // Weight based on proximity (closer = higher)
+                        const weight = Math.round((1 - dist / zone.radiusKm) * 100) / 100;
+
+                        newAtRiskLinks.push({
+                            id: `${autoRiskPrefix}${vesselId}-${zone.id}`,
+                            sourceId: vesselId,
+                            targetId: riskEventId,
+                            relationType: 'AT_RISK',
+                            weight,
+                            metadata: {
+                                label: `${Math.round(dist)}km from ${zone.name}`,
+                                createdAt: now,
+                            },
+                        });
+                        alertCount++;
+                    }
+                }
+            }
+
+            // Merge and set
+            const finalObjects = newRiskObjects.length > 0
+                ? [...state.objects, ...newRiskObjects]
+                : state.objects;
+            const finalLinks = [...existingLinks, ...newAtRiskLinks];
+
+            set({ objects: finalObjects, links: finalLinks });
+
+            if (alertCount > 0) {
+                console.info(`[OntologyStore] ⚠️ Proximity risks: ${alertCount} AT_RISK edges generated`);
+                // Persist (debounced)
+                persistOntologyObjects(finalObjects);
+                persistOntologyLinks(finalLinks);
+            }
         },
 
         // ---- BEVI Actions ----
@@ -1199,6 +1495,15 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             isExecutiveBriefingLoading: false,
             showExecutiveBriefingModal: false,
         }),
+
+        // ---- Cleanup: Unsubscribe all Firestore listeners ----
+        teardownListeners: () => {
+            if (_unsubscribeGraph) {
+                _unsubscribeGraph();
+                _unsubscribeGraph = null;
+                console.info('[OntologyStore] Tore down all Firestore listeners');
+            }
+        },
     };
 });
 

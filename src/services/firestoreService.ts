@@ -38,7 +38,9 @@ import {
     doc, getDoc, setDoc, deleteDoc,
     collection, getDocs, writeBatch,
     serverTimestamp, Timestamp,
-    type DocumentData
+    onSnapshot,
+    type DocumentData,
+    type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink } from '../types';
@@ -563,5 +565,153 @@ export async function persistOntologyLinksImmediate(links: OntologyLink[]): Prom
     } catch (err) {
         console.error('[Firestore] persistOntologyLinksImmediate failed:', err);
         throw err;
+    }
+}
+
+// ============================================================
+// ONTOLOGY GRAPH — Real-time onSnapshot listener
+// Returns unsubscribe functions for cleanup.
+// Uses the same single-doc pattern (app/ontology_objects, app/ontology_links).
+// ============================================================
+
+export interface OntologySnapshot {
+    objects: OntologyObject[];
+    links: OntologyLink[];
+}
+
+/**
+ * Subscribe to real-time ontology graph updates via onSnapshot.
+ * Calls `onChange` whenever either objects or links doc changes.
+ * Returns a cleanup function that unsubscribes both listeners.
+ *
+ * On first call, the snapshot fires immediately with current data.
+ * Subsequent fires = remote changes from other tabs/clients.
+ */
+export function subscribeOntologyGraph(
+    onChange: (snapshot: OntologySnapshot) => void,
+    onError?: (error: Error) => void,
+): Unsubscribe {
+    let latestObjects: OntologyObject[] = [];
+    let latestLinks: OntologyLink[] = [];
+    let objectsReceived = false;
+    let linksReceived = false;
+
+    const emit = () => {
+        if (objectsReceived && linksReceived) {
+            onChange({ objects: latestObjects, links: latestLinks });
+        }
+    };
+
+    const unsubObjects = onSnapshot(
+        doc(db, 'app', 'ontology_objects'),
+        (snap) => {
+            if (snap.exists()) {
+                latestObjects = (snap.data().items as OntologyObject[]) || [];
+            } else {
+                latestObjects = [];
+            }
+            objectsReceived = true;
+            emit();
+        },
+        (err) => {
+            console.error('[Firestore] onSnapshot ontology_objects error:', err);
+            onError?.(err);
+        },
+    );
+
+    const unsubLinks = onSnapshot(
+        doc(db, 'app', 'ontology_links'),
+        (snap) => {
+            if (snap.exists()) {
+                latestLinks = (snap.data().items as OntologyLink[]) || [];
+            } else {
+                latestLinks = [];
+            }
+            linksReceived = true;
+            emit();
+        },
+        (err) => {
+            console.error('[Firestore] onSnapshot ontology_links error:', err);
+            onError?.(err);
+        },
+    );
+
+    console.info('[Firestore] 🔴 LIVE: Subscribed to ontology graph (onSnapshot)');
+
+    return () => {
+        unsubObjects();
+        unsubLinks();
+        console.info('[Firestore] Unsubscribed from ontology graph');
+    };
+}
+
+// ============================================================
+// FLEET TELEMETRY — Real-time onSnapshot listener
+// Listens to app/fleet_telemetry for vessel position updates.
+// ============================================================
+
+export interface FleetTelemetryEntry {
+    mmsi: string;
+    lat: number;
+    lng: number;
+    speed: number;
+    heading: number;
+    vesselName?: string;
+    timestamp: string;
+}
+
+/**
+ * Subscribe to fleet telemetry updates.
+ * Fires onChange with the full array whenever any position doc changes.
+ */
+export function subscribeFleetTelemetry(
+    onChange: (entries: FleetTelemetryEntry[]) => void,
+    onError?: (error: Error) => void,
+): Unsubscribe {
+    const colRef = collection(db, 'app', 'fleet_telemetry', 'positions');
+
+    const unsub = onSnapshot(
+        colRef,
+        (snapshot) => {
+            const entries: FleetTelemetryEntry[] = [];
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                entries.push({
+                    mmsi: docSnap.id,
+                    lat: data.lat ?? 0,
+                    lng: data.lng ?? 0,
+                    speed: data.speed ?? 0,
+                    heading: data.heading ?? 0,
+                    vesselName: data.vesselName,
+                    timestamp: data.timestamp ?? new Date().toISOString(),
+                });
+            });
+            onChange(entries);
+        },
+        (err) => {
+            console.warn('[Firestore] onSnapshot fleet_telemetry error:', err);
+            onError?.(err);
+        },
+    );
+
+    console.info('[Firestore] 🔴 LIVE: Subscribed to fleet telemetry (onSnapshot)');
+    return unsub;
+}
+
+/**
+ * Write a single vessel telemetry position to Firestore.
+ * Used by AIS service to persist received positions.
+ */
+export async function writeFleetTelemetryPosition(entry: FleetTelemetryEntry): Promise<void> {
+    try {
+        await setDoc(
+            doc(db, 'app', 'fleet_telemetry', 'positions', entry.mmsi),
+            {
+                ...entry,
+                serverTimestamp: serverTimestamp(),
+            },
+        );
+    } catch (err) {
+        console.warn('[Firestore] writeFleetTelemetryPosition failed:', err);
     }
 }

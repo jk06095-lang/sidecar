@@ -13,6 +13,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor, Maximize2, Minimize2, AlertTriangle } from 'lucide-react';
 import type { FleetVessel } from '../../types';
+import type { AISPosition } from '../../services/aisService';
 
 // Location string → coordinates mapping
 const LOCATION_COORDS: Record<string, [number, number]> = {
@@ -70,10 +71,11 @@ const DERIVED_RISK_CONFIG: Record<string, { color: string; pulseClass: string; b
 
 interface FleetMapWidgetProps {
     vessels: FleetVessel[];
+    aisPositions?: AISPosition[];
     onSelectVessel?: (vessel: FleetVessel) => void;
 }
 
-export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidgetProps) {
+export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVessel }: FleetMapWidgetProps) {
     const mapRef = useRef<HTMLDivElement>(null);
     const leafletMap = useRef<L.Map | null>(null);
     const markersRef = useRef<L.Marker[]>([]);
@@ -136,7 +138,14 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
         markersRef.current = [];
 
         vessels.forEach((vessel) => {
-            const coords = resolveCoords(vessel.location);
+            // Prefer AIS live position if available (match by MMSI from vessel properties)
+            const vesselMMSI = vessel.voyage_info?.departure_port ? undefined : undefined; // MMSI from ontology
+            const mmsiStr = String((vessel as any).mmsi || '');
+            const aisMatch = aisPositions.find(p => String(p.mmsi) === mmsiStr);
+            const isLiveAIS = !!aisMatch;
+            const coords: [number, number] = aisMatch
+                ? [aisMatch.lat, aisMatch.lng]
+                : resolveCoords(vessel.location);
             const baseColor = RISK_COLORS[vessel.riskLevel] || '#3b82f6';
 
             // Determine visual config from derived risk
@@ -164,6 +173,23 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                 ">${derivedCfg.badge}</div>`
                 : '';
 
+            // AIS data source badge
+            const aisSourceBadge = isLiveAIS
+                ? `<div style="
+                    position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);
+                    background:#065f4620;border:1px solid #06b6d480;
+                    color:#22d3ee;font-size:7px;font-weight:800;
+                    padding:0px 3px;border-radius:2px;white-space:nowrap;
+                    pointer-events:none;letter-spacing:0.5px;
+                ">📡 LIVE AIS</div>`
+                : `<div style="
+                    position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);
+                    background:#78350f20;border:1px solid #f59e0b40;
+                    color:#fbbf24;font-size:7px;font-weight:800;
+                    padding:0px 3px;border-radius:2px;white-space:nowrap;
+                    pointer-events:none;letter-spacing:0.5px;
+                ">EST</div>`;
+
             const icon = L.divIcon({
                 className: '',
                 html: `
@@ -186,6 +212,7 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                             pointer-events:none;
                         ">${vessel.vessel_name}</div>
                         ${riskBadgeHtml}
+                        ${aisSourceBadge}
                     </div>
                 `,
                 iconSize: [32, 32],
@@ -212,7 +239,7 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
 
             markersRef.current.push(marker);
         });
-    }, [vessels, onSelectVessel, clearHideTimer, scheduleHide]);
+    }, [vessels, aisPositions, onSelectVessel, clearHideTimer, scheduleHide]);
 
     // Resize map when expanded/collapsed
     useEffect(() => {
@@ -234,6 +261,11 @@ export default function FleetMapWidget({ vessels, onSelectVessel }: FleetMapWidg
                     <span className="text-xs font-bold text-white tracking-wide">FLEET TRACKER</span>
                     <span className="text-[9px] text-slate-400 font-mono ml-1">LIVE</span>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    {aisPositions.length > 0 && (
+                        <span className="text-[8px] text-cyan-400 font-mono ml-1 px-1 py-0.5 bg-cyan-500/10 border border-cyan-500/30 rounded">
+                            📡 {aisPositions.length} AIS
+                        </span>
+                    )}
                     {/* Derived Risk Summary Badge */}
                     {(criticalCount > 0 || warningCount > 0) && (
                         <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5 bg-rose-500/10 border border-rose-500/30 rounded text-[8px] font-bold text-rose-400">

@@ -231,7 +231,11 @@ export type OntologyLinkRelation =
   | 'OPERATES_ON'       // Vessel → Route (active voyage)
   | 'HEDGES'            // Strategy → MarketIndicator
   | 'CONSUMES_FUEL'     // Vessel → MarketIndicator (fuel consumption)
-  | 'EXPOSES_TO';       // RiskEvent → Vessel (risk exposure)
+  | 'EXPOSES_TO'        // RiskEvent → Vessel (risk exposure)
+  | 'AT_RISK'           // Vessel → RiskEvent (proximity-based auto risk)
+  | 'NEAR'              // Object → Object (geographic proximity)
+  | 'IMPACTS'           // Event → Object (causal impact)
+  | 'COMPETES_WITH';    // Object → Object (competitive relationship)
 
 /** An edge in the ontology graph */
 export interface OntologyLink {

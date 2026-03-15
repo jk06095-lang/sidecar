@@ -1040,3 +1040,103 @@ export async function generateVoyageInstruction(
         ].join('\n');
     }
 }
+
+// ============================================================
+// ONTOLOGY EXTRACTION — Extract nodes/edges from unstructured text
+// Uses Gemini to identify maritime entities and relationships
+// ============================================================
+
+export interface ExtractedOntology {
+    newObjects: Array<{
+        id: string;
+        type: string;
+        title: string;
+        description: string;
+        properties: Record<string, string | number | boolean>;
+    }>;
+    newLinks: Array<{
+        id: string;
+        sourceTitle: string;
+        targetTitle: string;
+        relation: string;
+        weight: number;
+        description: string;
+    }>;
+    updatedObjects: Array<{
+        title: string;
+        propertyUpdates: Record<string, string | number | boolean>;
+    }>;
+}
+
+/**
+ * Extract ontology nodes and edges from unstructured text (news, reports, etc.)
+ * Uses Gemini to identify maritime entities and their relationships.
+ *
+ * @param text The source text to extract from
+ * @param existingObjectTitles Titles of existing objects (to link to, not duplicate)
+ * @returns Extracted ontology data ready for ingestion
+ */
+export async function extractOntologyFromText(
+    text: string,
+    existingObjectTitles: string[] = [],
+): Promise<ExtractedOntology> {
+    const existingList = existingObjectTitles.length > 0
+        ? `\nEXISTING OBJECTS (link to these, do NOT create duplicates):\n${existingObjectTitles.map(t => `- ${t}`).join('\n')}`
+        : '';
+
+    const prompt = `You are a maritime intelligence analyst. Extract structured ontology data from the following text.
+
+ENTITY TYPES (use exactly these):
+- Vessel: Ships, tankers, carriers. Properties: vesselType, flag, dwt, imo, mmsi, location, riskScore (0-100)
+- Port: Ports, terminals. Properties: country, region, congestionLevel, riskScore
+- Route: Shipping lanes, routes. Properties: origin, destination, distanceNm, estimatedDays
+- RiskEvent: Geopolitical events, sanctions, weather hazards, piracy. Properties: severity (Low/Medium/High/Critical), region, riskScore, category
+- MarketIndicator: Commodities, indices, FX rates. Properties: symbol, currentValue, unit
+
+RELATIONSHIP TYPES: OPERATES_AT, TRANSITS, NEAR, AT_RISK, SUPPLIES, IMPACTS, COMPETES_WITH
+
+${existingList}
+
+TEXT TO ANALYZE:
+"""
+${text.slice(0, 4000)}
+"""
+
+RESPOND WITH ONLY A JSON OBJECT (no markdown fences):
+{
+  "newObjects": [
+    { "id": "auto-<type>-<shortname>", "type": "<EntityType>", "title": "<name>", "description": "<1 sentence>", "properties": { ... } }
+  ],
+  "newLinks": [
+    { "id": "link-<source>-<target>", "sourceTitle": "<existing or new title>", "targetTitle": "<existing or new title>", "relation": "<RELATION_TYPE>", "weight": 0.0-1.0, "description": "<why>" }
+  ],
+  "updatedObjects": [
+    { "title": "<existing object title>", "propertyUpdates": { "riskScore": 75, "location": "Strait of Hormuz" } }
+  ]
+}
+
+Rules:
+- Only extract entities clearly mentioned in the text
+- Always link to existing objects when referenced
+- Set riskScore 0-100 based on severity mentioned
+- Generate stable IDs using the pattern auto-<type>-<kebab-name>
+- Keep descriptions concise (1 sentence max)
+- Return empty arrays if nothing relevant is found`;
+
+    try {
+        const raw = await bffGenerate(prompt, 'gemini-2.0-flash', 0.1);
+        const cleaned = cleanMarkdownFences(raw);
+        const parsed = JSON.parse(cleaned) as ExtractedOntology;
+
+        // Validate structure
+        if (!Array.isArray(parsed.newObjects)) parsed.newObjects = [];
+        if (!Array.isArray(parsed.newLinks)) parsed.newLinks = [];
+        if (!Array.isArray(parsed.updatedObjects)) parsed.updatedObjects = [];
+
+        console.info(`[GeminiService] Ontology extraction: ${parsed.newObjects.length} objects, ${parsed.newLinks.length} links, ${parsed.updatedObjects.length} updates`);
+        return parsed;
+    } catch (err) {
+        console.warn('[GeminiService] Ontology extraction failed:', err);
+        return { newObjects: [], newLinks: [], updatedObjects: [] };
+    }
+}

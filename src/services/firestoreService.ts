@@ -43,7 +43,7 @@ import {
     type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink } from '../types';
+import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink, IntelArticle } from '../types';
 
 // ============================================================
 // DEBOUNCE UTILITY — Prevent rapid Firestore writes
@@ -825,5 +825,85 @@ export async function writeFleetTelemetryPosition(entry: FleetTelemetryEntry): P
         );
     } catch (err) {
         console.warn('[Firestore] writeFleetTelemetryPosition failed:', err);
+    }
+}
+
+// ============================================================
+// INTELLIGENCE ARTICLES — Cached news feed (chat-like history)
+// Documents: app/intel_osint, app/intel_official
+// TTL: 14 days — scrapped/ontology-linked articles exempt
+// ============================================================
+
+type IntelCategory = 'osint' | 'official';
+
+const INTEL_DOC_KEY: Record<IntelCategory, string> = {
+    osint: 'intel_osint',
+    official: 'intel_official',
+};
+
+const INTEL_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+const INTEL_MAX_ITEMS = 100;
+
+/**
+ * Load cached Intel articles from Firestore.
+ * Automatically prunes articles older than 14 days,
+ * but preserves any articles whose IDs appear in the scrappedIds set.
+ */
+export async function loadIntelArticles(
+    category: IntelCategory,
+    scrappedArticleUrls?: Set<string>,
+): Promise<IntelArticle[]> {
+    try {
+        const snap = await getDoc(doc(db, 'app', INTEL_DOC_KEY[category]));
+        if (!snap.exists()) return [];
+
+        const data = snap.data();
+        const items: IntelArticle[] = data.items || [];
+
+        // TTL cleanup: remove articles older than 14 days, but keep scrapped ones
+        const cutoff = Date.now() - INTEL_TTL_MS;
+        const filtered = items.filter(article => {
+            const fetchedAt = new Date(article.fetchedAt || article.publishedAt).getTime();
+            const isExpired = fetchedAt < cutoff;
+            const isScrapped = scrappedArticleUrls?.has(article.url) ?? false;
+            return !isExpired || isScrapped;
+        });
+
+        // If we pruned any, persist the cleaned list back
+        if (filtered.length < items.length) {
+            console.info(`[Firestore] Intel ${category}: pruned ${items.length - filtered.length} expired articles (14d TTL)`);
+            persistIntelArticlesImmediate(category, filtered);
+        }
+
+        console.info(`[Firestore] Loaded ${filtered.length} cached ${category} articles`);
+        return filtered;
+    } catch (err) {
+        console.warn(`[Firestore] loadIntelArticles(${category}) failed:`, err);
+        return [];
+    }
+}
+
+/**
+ * Persist Intel articles to Firestore (debounced, 2s).
+ * Caps at INTEL_MAX_ITEMS to stay within Firestore document size limits.
+ */
+export function persistIntelArticles(category: IntelCategory, articles: IntelArticle[]): void {
+    debouncedWrite(`intel_${category}`, async () => {
+        await persistIntelArticlesImmediate(category, articles);
+    }, 2000);
+}
+
+/** Immediate (non-debounced) persist for cleanup writes */
+async function persistIntelArticlesImmediate(category: IntelCategory, articles: IntelArticle[]): Promise<void> {
+    try {
+        // Keep only the most recent items
+        const trimmed = articles.slice(0, INTEL_MAX_ITEMS);
+        await setDoc(doc(db, 'app', INTEL_DOC_KEY[category]), {
+            items: trimmed,
+            updatedAt: serverTimestamp(),
+        });
+        console.info(`[Firestore] Persisted ${trimmed.length} ${category} articles`);
+    } catch (err) {
+        console.warn(`[Firestore] persistIntelArticles(${category}) failed:`, err);
     }
 }

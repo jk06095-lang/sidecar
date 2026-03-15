@@ -4,12 +4,21 @@ import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
 import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, type FinOpsStats } from '../../services/newsService';
 import { evaluateNewsSignals, triageWithFlash, escalateWithPro } from '../../services/geminiService';
+import { loadIntelArticles, persistIntelArticles } from '../../services/firestoreService';
 import { useOntologyStore } from '../../store/ontologyStore';
 
 // ============================================================
 // CONSTANTS
 // ============================================================
 const POLL_INTERVAL_MS = 600_000; // 10-minute batch cycle
+
+/** Read scrapped article URLs from localStorage — used to protect them from TTL pruning */
+function getScrappedUrls(): Set<string> {
+    try {
+        const scraps = JSON.parse(localStorage.getItem('sidecar_scraps') || '[]');
+        return new Set(scraps.map((s: { url?: string }) => s.url).filter(Boolean));
+    } catch { return new Set(); }
+}
 
 const RISK_COLORS: Record<string, string> = {
     Critical: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
@@ -179,7 +188,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     const existing = new Set(prev.map(a => a.id));
                     const truly_new = passed.filter(a => !existing.has(a.id));
                     if (truly_new.length === 0) return prev;
-                    return [...truly_new, ...prev].slice(0, 50);
+                    const merged = [...truly_new, ...prev].slice(0, 100);
+                    // Persist merged articles to Firebase
+                    persistIntelArticles('osint', merged);
+                    return merged;
                 });
                 // Push to global store for BEVI
                 addIntelArticles(passed);
@@ -207,12 +219,23 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         setOfficialLoading(true);
 
         try {
+            // Load cached official articles from Firebase first
+            const scrappedUrls = getScrappedUrls();
+            const cached = await loadIntelArticles('official', scrappedUrls);
+            if (cached.length > 0) {
+                setOfficialArticles(cached);
+                console.info(`[GlobalNewsWidget] Loaded ${cached.length} cached official articles from Firebase`);
+            }
+
             const results = await fetchOfficialSources();
             if (results.length > 0) {
                 setOfficialArticles(prev => {
                     const existing = new Set(prev.map(a => a.id));
                     const newItems = results.filter(a => !existing.has(a.id));
-                    return [...newItems, ...prev];
+                    const merged = [...newItems, ...prev];
+                    // Persist to Firebase
+                    persistIntelArticles('official', merged);
+                    return merged;
                 });
             }
         } catch (err) {
@@ -223,14 +246,28 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     }, []);
 
     // ============================================================
-    // INIT: Backfill → then start 10-min polling
+    // INIT: Load Firebase cache → Backfill → then start 10-min polling
     // ============================================================
     useEffect(() => {
         if (initialized.current) return;
         initialized.current = true;
 
         (async () => {
-            // Step 1: Bootstrap historical data
+            // Step 0: Load cached OSINT articles from Firebase (instant display)
+            try {
+                const scrappedUrls = getScrappedUrls();
+                const cached = await loadIntelArticles('osint', scrappedUrls);
+                if (cached.length > 0) {
+                    setArticles(cached);
+                    addIntelArticles(cached);
+                    setLoading(false);
+                    console.info(`[GlobalNewsWidget] Loaded ${cached.length} cached OSINT articles from Firebase`);
+                }
+            } catch (err) {
+                console.warn('[GlobalNewsWidget] Firebase cache load error:', err);
+            }
+
+            // Step 1: Bootstrap historical data (skip if cache has enough articles)
             setBackfilling(true);
             try {
                 const historical = await bootstrapHistoricalData();
@@ -238,7 +275,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     setArticles(prev => {
                         const existing = new Set(prev.map(a => a.id));
                         const newItems = historical.filter(a => !existing.has(a.id));
-                        return [...newItems, ...prev];
+                        if (newItems.length === 0) return prev;
+                        const merged = [...newItems, ...prev];
+                        persistIntelArticles('osint', merged);
+                        return merged;
                     });
                     // Push historical to global store for BEVI
                     addIntelArticles(historical);
@@ -275,7 +315,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             if (pollTimer.current) clearInterval(pollTimer.current);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [fetchAndMerge]);
+    }, [fetchAndMerge, addIntelArticles]);
 
     // Load official sources when tab switches to 'official'
     useEffect(() => {

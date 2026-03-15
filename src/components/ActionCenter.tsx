@@ -1,16 +1,15 @@
 /**
  * ActionCenter — Pillar 4: Unified 결재/보고 Hub
  * 
- * 5-Tab composite merging:
+ * 4-Tab composite merging:
  *  Tab 1: 결재 대기 (Draft + Pending Approval actions)
  *  Tab 2: 실행 완료 (Executed actions with audit trail)
  *  Tab 3: AI 보고서 (Reports generation + list)
  *  Tab 4: 문서 에디터 (IntegratedEditor)
- *  Tab 5: Data Lineage (DataLineagePanel)
  */
 import { useState, useMemo, useEffect } from 'react';
 import {
-    FileCheck, CheckCircle2, FileText, Edit3, GitBranch,
+    FileCheck, CheckCircle2, FileText, Edit3,
     Gavel, Clock, ArrowRight, Shield, Sparkles,
     TrendingDown, Anchor, DollarSign, AlertTriangle,
 } from 'lucide-react';
@@ -18,7 +17,6 @@ import { cn } from '../lib/utils';
 import { useActionStore } from '../store/actionStore';
 import Reports from './Reports';
 import IntegratedEditor from './IntegratedEditor';
-import DataLineagePanel from './DataLineagePanel';
 
 // ============================================================
 // ACTION CENTER TABS
@@ -28,7 +26,6 @@ const TABS = [
     { id: 'executed', label: '실행 완료', icon: CheckCircle2, accent: 'emerald' },
     { id: 'reports', label: 'AI 보고서', icon: FileText, accent: 'cyan' },
     { id: 'editor', label: '문서 에디터', icon: Edit3, accent: 'violet' },
-    { id: 'lineage', label: 'Data Lineage', icon: GitBranch, accent: 'blue' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -261,7 +258,7 @@ export default function ActionCenter() {
                     </div>
                     <div>
                         <h1 className="text-xl font-bold text-slate-100">Action Center</h1>
-                        <p className="text-[11px] text-slate-500">전략 결재 · AI 보고서 · 문서 편집 · 데이터 리니지</p>
+                        <p className="text-[11px] text-slate-500">전략 결재 · AI 보고서 · 문서 편집</p>
                     </div>
                 </div>
 
@@ -309,7 +306,7 @@ export default function ActionCenter() {
                 {activeTab === 'executed' && renderExecutedTab()}
                 {activeTab === 'reports' && <Reports />}
                 {activeTab === 'editor' && <IntegratedEditor />}
-                {activeTab === 'lineage' && <DataLineagePanel />}
+
             </div>
         </div>
     );

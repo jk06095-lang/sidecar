@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { FileText, Plus, FileEdit, Trash2, Download, Printer, Sparkles, Loader2, Zap, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { FileText, Plus, FileEdit, Trash2, Download, Printer, Sparkles, Loader2, Zap, AlertTriangle, ChevronRight, ChevronDown, FolderOpen, Folder, File } from 'lucide-react';
 import { cn } from '../lib/utils';
 import BriefingModal from './BriefingModal';
 import { useOntologyStore } from '../store/ontologyStore';
@@ -11,6 +11,11 @@ import {
     LOADING_MESSAGES,
     AIP_LOADING_MESSAGES,
 } from '../services/geminiService';
+import {
+    saveReport as firestoreSaveReport,
+    loadReports as firestoreLoadReports,
+    deleteReport as firestoreDeleteReport,
+} from '../services/firestoreService';
 
 interface ReportInfo {
     id: string;
@@ -21,17 +26,39 @@ interface ReportInfo {
 }
 
 export default function Reports() {
-    const [reports, setReports] = useState<ReportInfo[]>(() => {
-        try {
-            const saved = localStorage.getItem('sidecar_reports');
-            if (saved) return JSON.parse(saved);
-        } catch { return []; }
-        return [];
-    });
+    const [reports, setReports] = useState<ReportInfo[]>([]);
+    const [isLoadingReports, setIsLoadingReports] = useState(true);
+
+    // Load reports from Firestore on mount (with localStorage migration)
+    useEffect(() => {
+        (async () => {
+            const firestoreReports = await firestoreLoadReports();
+            if (firestoreReports.length > 0) {
+                setReports(firestoreReports);
+            } else {
+                // Migrate from localStorage if Firestore is empty
+                try {
+                    const saved = localStorage.getItem('sidecar_reports');
+                    if (saved) {
+                        const parsed: ReportInfo[] = JSON.parse(saved);
+                        setReports(parsed);
+                        // Migrate each to Firestore
+                        for (const r of parsed) {
+                            firestoreSaveReport({ id: r.id, title: r.title, date: r.date, content: r.content, type: r.type });
+                        }
+                    }
+                } catch { /* ignore */ }
+            }
+            setIsLoadingReports(false);
+        })();
+    }, []);
 
     const [activeReportId, setActiveReportId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState('');
     const [showViewer, setShowViewer] = useState(false);
+
+    // File tree expansion
+    const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ aip: true, marp: true });
 
     // Streaming / Generation state
     const [isGenerating, setIsGenerating] = useState(false);
@@ -50,21 +77,18 @@ export default function Reports() {
     const links = useOntologyStore(s => s.links);
     const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
-    useEffect(() => {
-        localStorage.setItem('sidecar_reports', JSON.stringify(reports));
+    const activeReport = reports.find(r => r.id === activeReportId);
+
+    // Grouped file tree data
+    const groupedReports = useMemo(() => {
+        const aip = reports.filter(r => r.type === 'aip');
+        const marp = reports.filter(r => r.type !== 'aip');
+        return { aip, marp };
     }, [reports]);
 
-    useEffect(() => {
-        const handleStorageChange = (e: StorageEvent) => {
-            if (e.key === 'sidecar_reports' && e.newValue) {
-                setReports(JSON.parse(e.newValue));
-            }
-        };
-        window.addEventListener('storage', handleStorageChange);
-        return () => window.removeEventListener('storage', handleStorageChange);
-    }, []);
-
-    const activeReport = reports.find(r => r.id === activeReportId);
+    const toggleFolder = (folder: string) => {
+        setExpandedFolders(prev => ({ ...prev, [folder]: !prev[folder] }));
+    };
 
     const handleEditClick = (report: ReportInfo) => {
         setActiveReportId(report.id);
@@ -73,13 +97,16 @@ export default function Reports() {
 
     const handleSaveEdit = () => {
         if (!activeReportId) return;
-        setReports(reports.map(r => r.id === activeReportId ? { ...r, content: editingContent, date: new Date().toLocaleDateString('ko-KR') } : r));
-        setActiveReportId(null);
+        const updated = reports.map(r => r.id === activeReportId ? { ...r, content: editingContent, date: new Date().toLocaleDateString('ko-KR') } : r);
+        setReports(updated);
+        const report = updated.find(r => r.id === activeReportId);
+        if (report) firestoreSaveReport({ id: report.id, title: report.title, date: report.date, content: report.content, type: report.type });
     };
 
     const handleDelete = (id: string) => {
         if (confirm('보고서를 삭제하시겠습니까?')) {
             setReports(reports.filter(r => r.id !== id));
+            firestoreDeleteReport(id);
             if (activeReportId === id) setActiveReportId(null);
         }
     };
@@ -101,6 +128,7 @@ export default function Reports() {
             type: 'marp',
         };
         setReports([newReport, ...reports]);
+        firestoreSaveReport({ id: newReport.id, title: newReport.title, date: newReport.date, content: newReport.content, type: newReport.type });
         handleEditClick(newReport);
     };
 
@@ -164,6 +192,7 @@ export default function Reports() {
                 type: 'marp',
             };
             setReports(prev => [newReport, ...prev]);
+            firestoreSaveReport({ id: newReport.id, title: newReport.title, date: newReport.date, content: newReport.content, type: newReport.type });
             setActiveReportId(newReport.id);
             setEditingContent(cleaned);
         } catch (err) {
@@ -223,6 +252,7 @@ export default function Reports() {
                 type: 'aip',
             };
             setReports(prev => [newReport, ...prev]);
+            firestoreSaveReport({ id: newReport.id, title: newReport.title, date: newReport.date, content: newReport.content, type: newReport.type });
             setActiveReportId(newReport.id);
             setEditingContent(accumulated);
         } catch (err) {
@@ -344,42 +374,59 @@ export default function Reports() {
             )}
 
             <div className="flex gap-6 flex-1 overflow-hidden">
-                {/* Report List */}
-                <div className="w-80 shrink-0 flex flex-col min-w-0 bg-slate-900/50 border border-slate-800/80 rounded-2xl overflow-hidden">
-                    <div className="p-4 border-b border-slate-800/80 bg-slate-900/80 font-semibold text-slate-200">
-                        보관함 ({reports.length})
+                {/* File Tree Sidebar */}
+                <div className="w-72 shrink-0 flex flex-col min-w-0 bg-slate-900/50 border border-slate-800/80 rounded-2xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-slate-800/80 bg-slate-900/80 flex items-center justify-between">
+                        <span className="font-semibold text-slate-200 text-sm">📁 보관함</span>
+                        <span className="text-[10px] text-slate-500 font-mono">{reports.length}건</span>
                     </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                        {reports.length === 0 ? (
-                            <div className="text-center py-10 text-slate-500 text-sm">저장된 보고서가 없습니다.<br />위 버튼으로 생성해보세요.</div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar py-1">
+                        {isLoadingReports ? (
+                            <div className="flex items-center justify-center py-10">
+                                <Loader2 size={20} className="animate-spin text-slate-500" />
+                            </div>
+                        ) : reports.length === 0 ? (
+                            <div className="text-center py-10 text-slate-500 text-xs px-4">저장된 보고서가 없습니다.<br />위 버튼으로 생성해보세요.</div>
                         ) : (
-                            reports.map(r => (
-                                <div
-                                    key={r.id}
-                                    className={cn(
-                                        "p-3 rounded-lg border cursor-pointer transition-all",
-                                        activeReportId === r.id ? "bg-cyan-500/10 border-cyan-500/30" : "bg-slate-800/40 border-slate-700/50 hover:bg-slate-800/80"
-                                    )}
-                                    onClick={() => activeReportId === r.id ? null : handleEditClick(r)}
-                                >
-                                    <div className="flex items-center gap-2 mb-1.5">
-                                        {r.type === 'aip' ? (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">AIP</span>
-                                        ) : (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 font-bold">MARP</span>
-                                        )}
-                                        <h4 className={cn("text-sm font-medium truncate flex-1", activeReportId === r.id ? "text-cyan-400" : "text-slate-200")}>{r.title}</h4>
-                                    </div>
-                                    <div className="flex items-center justify-between text-[10px] text-slate-500">
-                                        <span>{r.date}</span>
-                                        <div className="flex gap-1">
-                                            <button onClick={(e) => { e.stopPropagation(); handleViewShow(r); }} className="hover:text-cyan-400" title="보기"><Printer size={12} /></button>
-                                            <button onClick={(e) => { e.stopPropagation(); handleEditClick(r); }} className="hover:text-cyan-400" title="편집"><FileEdit size={12} /></button>
-                                            <button onClick={(e) => { e.stopPropagation(); handleDelete(r.id); }} className="hover:text-rose-400" title="삭제"><Trash2 size={12} /></button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))
+                            <>
+                                {/* AIP Folder */}
+                                <FileTreeFolder
+                                    label="AIP 보고서"
+                                    count={groupedReports.aip.length}
+                                    color="emerald"
+                                    isExpanded={!!expandedFolders.aip}
+                                    onToggle={() => toggleFolder('aip')}
+                                />
+                                {expandedFolders.aip && groupedReports.aip.map(r => (
+                                    <FileTreeItem
+                                        key={r.id}
+                                        report={r}
+                                        isActive={activeReportId === r.id}
+                                        onSelect={() => handleEditClick(r)}
+                                        onView={() => handleViewShow(r)}
+                                        onDelete={() => handleDelete(r.id)}
+                                    />
+                                ))}
+
+                                {/* Marp Folder */}
+                                <FileTreeFolder
+                                    label="Marp 브리핑"
+                                    count={groupedReports.marp.length}
+                                    color="cyan"
+                                    isExpanded={!!expandedFolders.marp}
+                                    onToggle={() => toggleFolder('marp')}
+                                />
+                                {expandedFolders.marp && groupedReports.marp.map(r => (
+                                    <FileTreeItem
+                                        key={r.id}
+                                        report={r}
+                                        isActive={activeReportId === r.id}
+                                        onSelect={() => handleEditClick(r)}
+                                        onView={() => handleViewShow(r)}
+                                        onDelete={() => handleDelete(r.id)}
+                                    />
+                                ))}
+                            </>
                         )}
                     </div>
                 </div>
@@ -441,6 +488,66 @@ export default function Reports() {
                 ontologyObjects={objects}
                 ontologyLinks={links}
             />
+        </div>
+    );
+}
+
+// ============================================================
+// FILE TREE SUB-COMPONENTS
+// ============================================================
+
+function FileTreeFolder({ label, count, color, isExpanded, onToggle }: {
+    label: string;
+    count: number;
+    color: 'emerald' | 'cyan';
+    isExpanded: boolean;
+    onToggle: () => void;
+}) {
+    const colorMap = {
+        emerald: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
+        cyan: { text: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/30' },
+    };
+    const c = colorMap[color];
+
+    return (
+        <button
+            onClick={onToggle}
+            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-800/40 transition-colors text-left"
+        >
+            {isExpanded ? <ChevronDown size={12} className="text-slate-400 shrink-0" /> : <ChevronRight size={12} className="text-slate-400 shrink-0" />}
+            {isExpanded ? <FolderOpen size={14} className={c.text} /> : <Folder size={14} className={c.text} />}
+            <span className={cn("text-xs font-bold flex-1", c.text)}>{label}</span>
+            <span className={cn("text-[9px] font-mono px-1.5 py-0.5 rounded-full", c.bg, c.border, c.text, "border")}>{count}</span>
+        </button>
+    );
+}
+
+function FileTreeItem({ report, isActive, onSelect, onView, onDelete }: {
+    report: { id: string; title: string; date: string; type?: 'marp' | 'aip' };
+    isActive: boolean;
+    onSelect: () => void;
+    onView: () => void;
+    onDelete: () => void;
+}) {
+    return (
+        <div
+            onClick={onSelect}
+            className={cn(
+                "group flex items-center gap-2 pl-9 pr-3 py-1.5 cursor-pointer transition-all",
+                isActive
+                    ? "bg-cyan-500/10 border-r-2 border-cyan-400"
+                    : "hover:bg-slate-800/30 border-r-2 border-transparent"
+            )}
+        >
+            <File size={12} className={isActive ? "text-cyan-400 shrink-0" : "text-slate-500 shrink-0"} />
+            <div className="flex-1 min-w-0">
+                <div className={cn("text-[11px] font-medium truncate", isActive ? "text-cyan-300" : "text-slate-300")}>{report.title}</div>
+                <div className="text-[9px] text-slate-600">{report.date}</div>
+            </div>
+            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); onView(); }} className="p-0.5 text-slate-500 hover:text-cyan-400 rounded" title="뷰어"><Printer size={10} /></button>
+                <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-0.5 text-slate-500 hover:text-rose-400 rounded" title="삭제"><Trash2 size={10} /></button>
+            </div>
         </div>
     );
 }

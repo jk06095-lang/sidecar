@@ -2,18 +2,19 @@ import React, { useState, useMemo } from 'react';
 import {
     Settings, X, Save, Palette, Globe, Radio, Plus, Tag,
     Search, Sliders, Key, Filter, Zap, AlertTriangle, Clock,
-    Shield, ChevronRight, Hash, Gauge, Server
+    Shield, ChevronRight, Hash, Gauge, Server, GitBranch
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { AppSettings } from '../types';
 import { DEFAULT_OSINT_SOURCES, DEFAULT_OSINT_KEYWORDS, DEFAULT_CRISIS_TERMS } from '../services/newsService';
 import ApiManager from './ApiManager';
+import DataLineagePanel from './DataLineagePanel';
 
 // ============================================================
 // CATEGORY DEFINITIONS
 // ============================================================
 
-type SettingsCategory = 'general' | 'intelligence' | 'pipeline' | 'api';
+type SettingsCategory = 'general' | 'intelligence' | 'pipeline' | 'api' | 'lineage';
 
 interface CategoryDef {
     id: SettingsCategory;
@@ -29,6 +30,7 @@ const CATEGORIES: CategoryDef[] = [
     { id: 'intelligence', label: '인텔리전스', labelEn: 'Intelligence', icon: <Radio size={16} />, color: 'text-amber-400', description: 'OSINT 소스 및 키워드' },
     { id: 'pipeline', label: '파이프라인', labelEn: 'Pipeline', icon: <Sliders size={16} />, color: 'text-emerald-400', description: '위기 감지, 임계치 설정' },
     { id: 'api', label: '데이터 커넥션', labelEn: 'Data Connections', icon: <Key size={16} />, color: 'text-rose-400', description: '외부 API 파이프라인 관리' },
+    { id: 'lineage', label: 'Data Lineage', labelEn: 'Data Lineage', icon: <GitBranch size={16} />, color: 'text-blue-400', description: '데이터 리니지 모니터' },
 ];
 
 // All searchable setting labels for filtering
@@ -37,6 +39,7 @@ const SEARCHABLE_ITEMS: Record<SettingsCategory, string[]> = {
     intelligence: ['OSINT', '소스', 'Sources', '키워드', 'Keywords', 'Bloomberg', 'Reuters', 'AP News', 'Hormuz', 'UKMTO'],
     pipeline: ['임계치', 'Threshold', '지속성', 'Persistence', '위기 키워드', 'Crisis', '폴링', 'Polling', '배치', 'Batch', '에스컬레이션'],
     api: ['API', 'Gemini', 'Key', '키', '커넥션', 'Connection', '파이프라인', 'Pipeline', 'LSEG', 'Data'],
+    lineage: ['Lineage', '리니지', 'Health', 'Monitor', '데이터 파이프라인'],
 };
 
 // ============================================================
@@ -106,7 +109,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-            <div className="relative w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl animate-slide-up overflow-hidden max-h-[85vh] flex flex-col">
+            <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl animate-slide-up overflow-hidden max-h-[85vh] flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50 shrink-0">
                     <div className="flex items-center gap-3">
@@ -362,6 +365,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                                     </p>
                                     <ApiManager />
                                 </div>
+                            </div>
+                        )}
+
+                        {/* ==================== DATA LINEAGE ==================== */}
+                        {activeCategory === 'lineage' && (
+                            <div className="animate-fade-in -mx-2">
+                                <DataLineagePanel />
                             </div>
                         )}
                     </div>

@@ -291,7 +291,7 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
     return (
         <div className={`relative bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden transition-all duration-300 h-full flex flex-col ${isExpanded ? 'col-span-2 row-span-2' : ''}`}>
             {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-[400] flex items-center justify-between px-4 py-2 bg-gradient-to-b from-slate-900/90 to-transparent pointer-events-none">
+            <div className="absolute top-0 left-0 right-0 z-[1000] flex items-center justify-between px-4 py-2 bg-gradient-to-b from-slate-900/90 to-transparent pointer-events-none">
                 <div className="flex items-center gap-2 pointer-events-auto">
                     <div className="w-6 h-6 rounded bg-cyan-500/20 flex items-center justify-center">
                         <Navigation size={12} className="text-cyan-400" />

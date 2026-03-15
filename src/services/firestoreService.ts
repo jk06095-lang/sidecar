@@ -463,6 +463,61 @@ export async function saveActionState(
 }
 
 // ============================================================
+// REPORTS — Individual document persistence
+//   reports/{id} — { id, title, date, content, type, updatedAt }
+// ============================================================
+
+export interface ReportDoc {
+    id: string;
+    title: string;
+    date: string;
+    content: string;
+    type?: 'marp' | 'aip';
+}
+
+export async function saveReport(report: ReportDoc): Promise<void> {
+    try {
+        await setDoc(doc(db, 'reports', report.id), {
+            ...report,
+            updatedAt: serverTimestamp(),
+        });
+    } catch (err) {
+        console.warn('[Firestore] saveReport failed:', err);
+    }
+}
+
+export async function loadReports(): Promise<ReportDoc[]> {
+    try {
+        const snap = await getDocs(collection(db, 'reports'));
+        const reports: ReportDoc[] = [];
+        snap.forEach(d => {
+            const data = d.data();
+            reports.push({
+                id: d.id,
+                title: data.title || '',
+                date: data.date || '',
+                content: data.content || '',
+                type: data.type || 'marp',
+            });
+        });
+        // Sort newest first
+        reports.sort((a, b) => b.id.localeCompare(a.id));
+        return reports;
+    } catch (err) {
+        console.warn('[Firestore] loadReports failed:', err);
+        return [];
+    }
+}
+
+export async function deleteReport(reportId: string): Promise<void> {
+    try {
+        await deleteDoc(doc(db, 'reports', reportId));
+    } catch (err) {
+        console.warn('[Firestore] deleteReport failed:', err);
+    }
+}
+
+// ============================================================
 // ONTOLOGY GRAPH — Single-document persistence
 //   app/ontology_objects  — { items: OntologyObject[] }
 //   app/ontology_links    — { items: OntologyLink[] }

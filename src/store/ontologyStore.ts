@@ -333,13 +333,13 @@ const INITIAL_BEVI: BEVIState = {
 
 function mapOntologyToFleetVessels(objects: OntologyObject[]): FleetVessel[] {
     return objects
-        .filter((o) => o.type === 'Vessel' && o.metadata.status === 'active')
+        .filter((o) => o.type === 'Vessel' && (o.metadata.status === 'active' || !o.metadata.status))
         .map((o) => {
             const p = o.properties;
             let riskLevel: FleetVessel['riskLevel'] = 'Low';
             const rs = (p.riskScore as number) || 0;
             if (rs > 80) riskLevel = 'Critical';
-            else if (rs > 50) riskLevel = 'Medium';
+            else if (rs > 50) riskLevel = 'High';
             else if (rs > 30) riskLevel = 'Medium';
 
             return {

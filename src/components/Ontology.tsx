@@ -556,6 +556,16 @@ export default function Ontology() {
                     /* ========== GRAPH + 360 Inspector ========== */
                     <div className="flex-1 flex overflow-hidden min-h-0">
                         <div className="flex-1 bg-slate-950 overflow-hidden relative min-h-0">
+                            {/* Loading overlay during link generation */}
+                            {isLinkGenerating && (
+                                <div className="absolute inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3 animate-in fade-in">
+                                    <div className="w-16 h-16 rounded-2xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
+                                        <Loader2 size={28} className="text-violet-400 animate-spin" />
+                                    </div>
+                                    <p className="text-sm font-bold text-violet-300">AI 신경삭 생성 중...</p>
+                                    <p className="text-[10px] text-slate-500">객체 간 관계를 분석하고 있습니다</p>
+                                </div>
+                            )}
                             <OntologyGraph
                                 onSelectObject={handleSelectObject}
                                 selectedObjectId={selectedObjectId}
@@ -697,7 +707,7 @@ export default function Ontology() {
                                     좌측 트리 또는 중앙 그래프에서 노드·엣지를 클릭하면 인스펙터가 표시됩니다.
                                 </p>
 
-                                {/* AI 신경삭 생성 Button */}
+                                {/* AI 신경삭 생성/최신화 Button */}
                                 <button
                                     onClick={async () => {
                                         setIsLinkGenerating(true);
@@ -715,11 +725,17 @@ export default function Ontology() {
                                 >
                                     {isLinkGenerating ? (
                                         <><Loader2 size={14} className="animate-spin" /> AI 생성 중...</>
+                                    ) : storeLinks.length > 0 ? (
+                                        <><Zap size={14} /> 신경삭 최신화</>
                                     ) : (
                                         <><Sparkles size={14} /> AI 신경삭 자동 생성</>
                                     )}
                                 </button>
-                                <p className="text-[9px] text-zinc-600 mt-2">객체 간 관계를 AI가 자동으로 분석합니다</p>
+                                <p className="text-[9px] text-zinc-600 mt-2">
+                                    {storeLinks.length > 0
+                                        ? `현재 ${storeLinks.length}개 신경삭 연결됨 · 클릭하여 새 관계 추가`
+                                        : '객체 간 관계를 AI가 자동으로 분석합니다'}
+                                </p>
                             </div>
                         )}
                     </div>

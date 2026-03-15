@@ -197,7 +197,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                 borderColor: getRiskColor(riskScore),
                 riskScore,
                 expanded: existing?.expanded ?? isSeed,
-                visible: existing?.visible ?? true,
+                visible: existing?.visible ?? isSeed,
                 isQuantRiskAlert,
             });
         });
@@ -980,7 +980,40 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     // EXPAND ALL / COLLAPSE ALL
     // ============================================================
     const handleExpandAll = () => {
-        setGraphNodes((prev) => prev.map((n) => ({ ...n, visible: true, expanded: true })));
+        const canvasW = canvasRef.current?.width || 800;
+        const canvasH = canvasRef.current?.height || 600;
+        const centerX = canvasW / 2;
+        const centerY = canvasH / 2;
+
+        setGraphNodes((prev) => {
+            // Count currently visible nodes to find a good center
+            const visibleNodes = prev.filter(n => n.visible);
+            const avgX = visibleNodes.length > 0
+                ? visibleNodes.reduce((s, n) => s + n.x, 0) / visibleNodes.length
+                : centerX;
+            const avgY = visibleNodes.length > 0
+                ? visibleNodes.reduce((s, n) => s + n.y, 0) / visibleNodes.length
+                : centerY;
+
+            return prev.map((n, i) => {
+                if (n.visible) {
+                    // Already visible — just mark expanded
+                    return { ...n, expanded: true };
+                }
+                // Position newly visible nodes in a circle around the center of existing nodes
+                const angle = (i / prev.length) * Math.PI * 2;
+                const radius = 180 + Math.random() * 80;
+                return {
+                    ...n,
+                    visible: true,
+                    expanded: true,
+                    x: avgX + Math.cos(angle) * radius + (Math.random() - 0.5) * 30,
+                    y: avgY + Math.sin(angle) * radius + (Math.random() - 0.5) * 30,
+                    vx: 0,
+                    vy: 0,
+                };
+            });
+        });
         setGraphLinks((prev) => prev.map((l) => ({ ...l, visible: true })));
         setExpandedIds(new Set(storeObjects.map((o) => o.id)));
     };

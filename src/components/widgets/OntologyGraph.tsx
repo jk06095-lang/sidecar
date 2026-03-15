@@ -182,7 +182,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
             // Preserve existing position if node already exists
             const existing = nodesRef.current.find(n => n.id === obj.id);
             const angle = (i / storeObjects.length) * Math.PI * 2;
-            const radius_spread = isSeed ? 180 : 280;
+            const radius_spread = isSeed ? 250 : 350;
 
             newNodes.push({
                 id: obj.id,
@@ -197,7 +197,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                 borderColor: getRiskColor(riskScore),
                 riskScore,
                 expanded: existing?.expanded ?? isSeed,
-                visible: existing?.visible ?? isSeed,
+                visible: existing?.visible ?? true,
                 isQuantRiskAlert,
             });
         });
@@ -263,7 +263,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
             const updated = prevNodes.map((node) => {
                 if (connectedIds.has(node.id) && !node.visible) {
                     const angle = Math.random() * Math.PI * 2;
-                    const dist = 100 + Math.random() * 60;
+                    const dist = 140 + Math.random() * 60;
                     return {
                         ...node,
                         visible: true,
@@ -365,7 +365,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
 
         const alpha = 0.04;
         const friction = 0.65;
-        const repulsion = 120;
+        const repulsion = 160;
 
         const tick = () => {
             timeRef.current += 0.016;
@@ -419,7 +419,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                 const dy = target.y - source.y;
                 const l = Math.sqrt(dx * dx + dy * dy);
                 if (l > 0) {
-                    const idealLength = 140 + (1 - link.weight) * 60;
+                    const idealLength = 190 + (1 - link.weight) * 80;
                     const f = 0.015 * alpha * (l - idealLength);
                     if (draggedNodeRef.current?.id !== source.id) {
                         source.vx += dx * f;

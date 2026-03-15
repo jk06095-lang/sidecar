@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-    Filter, AlertTriangle, Newspaper, Search, Folder, FolderOpen, FileText,
-    ChevronRight, Tag, Bookmark, ShieldAlert, GitBranch, ChevronDown,
-    Radio, Zap, Hash, RefreshCw, Loader2, Shield, Landmark, Globe, Clock, Timer
+    Newspaper, Search, Bookmark, BookmarkCheck, Trash2, Globe, Landmark,
+    Timer, Shield, AlertTriangle, Loader2, Sparkles, ArrowRight,
+    ExternalLink, X, Send, MessageSquare, FileText
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
@@ -12,313 +12,407 @@ import type { IntelArticle } from '../types';
 
 type FeedTab = 'osint' | 'official';
 
+interface ScrapItem {
+    id: string;
+    title: string;
+    source: string;
+    url: string;
+    description: string;
+    tags: string[];
+    scrapDate: string;
+    articleData: IntelArticle;
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
 export default function News() {
-    const [scrapedData, setScrapedData] = useState<any[]>([]);
-    const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
-    const [showSkeletons, setShowSkeletons] = useState(true);
-    const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
     const [activeTab, setActiveTab] = useState<FeedTab>('osint');
-    const [countdownSeconds, setCountdownSeconds] = useState(600); // 10 min
+    const [countdownSeconds, setCountdownSeconds] = useState(600);
+    const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
+    const [scraps, setScraps] = useState<ScrapItem[]>([]);
+    const [researchQuery, setResearchQuery] = useState('');
+    const [researchResults, setResearchResults] = useState<string[]>([]);
+    const [isResearching, setIsResearching] = useState(false);
+    const [selectedScrap, setSelectedScrap] = useState<ScrapItem | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
 
-    // Ontology store for tag navigation
+    // Ontology store for tag navigation & article storage
     const objects = useOntologyStore(s => s.objects);
+    const intelArticles = useOntologyStore(s => s.intelArticles);
 
-    const toggleFolder = (folderName: string) => {
-        setExpandedFolders(prev => ({ ...prev, [folderName]: !prev[folderName] }));
-    };
-
-    // Load ontology data for the dossier
+    // Load scraps from localStorage on mount
     useEffect(() => {
         try {
-            const data = JSON.parse(localStorage.getItem('sidecar_ontology') || '[]');
-            setScrapedData(data);
-            if (data.length > 0) setSelectedDoc(data[0]);
-        } catch (e) { }
-        setTimeout(() => setShowSkeletons(false), 1500);
+            const saved = JSON.parse(localStorage.getItem('sidecar_scraps') || '[]');
+            setScraps(saved);
+        } catch { }
     }, []);
 
-    // Refresh data handler if a new item is bookmarked from the widget
-    const handleBookmarkUpdate = () => {
-        try {
-            const data = JSON.parse(localStorage.getItem('sidecar_ontology') || '[]');
-            setScrapedData(data);
-        } catch (e) { }
+    // Persist scraps to localStorage
+    const persistScraps = (items: ScrapItem[]) => {
+        setScraps(items);
+        localStorage.setItem('sidecar_scraps', JSON.stringify(items));
     };
 
-    // Keep polling to catch changes made inside the widget (10s interval)
-    useEffect(() => {
-        const interval = setInterval(handleBookmarkUpdate, 10000);
-        return () => clearInterval(interval);
-    }, []);
-
-    // Countdown timer callback from GlobalNewsWidget
+    // Countdown callback
     const handleCountdownUpdate = useCallback((seconds: number) => {
         setCountdownSeconds(seconds);
     }, []);
 
-    // Format countdown MM:SS
     const formatCountdown = (totalSeconds: number): string => {
         const m = Math.floor(totalSeconds / 60);
         const s = totalSeconds % 60;
         return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     };
 
-    const filteredData = scrapedData.filter(d =>
-        (d.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (d.content || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (d.category || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (d.subCategory || '').toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    // Group by SubCategory (for factors) or Category (for documents)
-    const groupedData = filteredData.reduce((acc: any, doc: any) => {
-        const folderName = doc.type === 'factor' && doc.subCategory ? doc.subCategory : (doc.category || 'Uncategorized');
-        if (!acc[folderName]) acc[folderName] = { type: doc.type, items: [] };
-        acc[folderName].items.push(doc);
-        return acc;
-    }, {});
-
-    // Handle ontology tag clicks from the news widget
+    // Handle ontology tag clicks
     const handleTagClick = useCallback((tag: string) => {
-        const matchingObj = objects.find(o =>
-            o.title.toLowerCase().includes(tag.toLowerCase()) ||
-            tag.toLowerCase().includes(o.title.toLowerCase())
-        );
-        if (matchingObj) {
-            setSelectedDoc({
-                id: matchingObj.id,
-                title: matchingObj.title,
-                content: matchingObj.description + '\n\n' + Object.entries(matchingObj.properties).map(([k, v]) => `${k}: ${v}`).join('\n'),
-                category: matchingObj.type,
-                type: 'ontology-object',
-                lastUpdated: matchingObj.metadata.createdAt,
+        setSearchQuery(tag);
+    }, []);
+
+    // Handle scrap from GlobalNewsWidget
+    const handleScrap = useCallback((article: IntelArticle) => {
+        setScraps(prev => {
+            if (prev.find(s => s.url === article.url)) return prev; // no dupes
+            const newScrap: ScrapItem = {
+                id: `scrap-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                title: article.title,
+                source: article.source,
+                url: article.url,
+                description: article.description,
+                tags: article.ontologyTags || [],
+                scrapDate: new Date().toISOString(),
+                articleData: article,
+            };
+            const updated = [newScrap, ...prev];
+            localStorage.setItem('sidecar_scraps', JSON.stringify(updated));
+            return updated;
+        });
+    }, []);
+
+    // Delete a scrap
+    const handleDeleteScrap = (id: string) => {
+        const updated = scraps.filter(s => s.id !== id);
+        persistScraps(updated);
+        if (selectedScrap?.id === id) setSelectedScrap(null);
+    };
+
+    // Perplexity-style follow-up research
+    const handleResearch = async () => {
+        if (!researchQuery.trim()) return;
+        setIsResearching(true);
+        setResearchResults([]);
+
+        // Search through existing articles for related content
+        const query = researchQuery.toLowerCase();
+        const matchedArticles = intelArticles
+            .filter(a =>
+                a.title.toLowerCase().includes(query) ||
+                a.description.toLowerCase().includes(query) ||
+                (a.ontologyTags || []).some(t => t.toLowerCase().includes(query))
+            )
+            .slice(0, 5);
+
+        // Also search ontology objects
+        const matchedObjects = objects
+            .filter(o =>
+                o.title.toLowerCase().includes(query) ||
+                o.description.toLowerCase().includes(query) ||
+                o.type.toLowerCase().includes(query)
+            )
+            .slice(0, 3);
+
+        const results: string[] = [];
+
+        if (matchedArticles.length > 0) {
+            results.push(`📰 **관련 뉴스 ${matchedArticles.length}건 발견:**`);
+            matchedArticles.forEach(a => {
+                results.push(`• ${a.title} — ${a.source} ${a.riskLevel ? `[${a.riskLevel}]` : ''}`);
             });
         }
-    }, [objects]);
+
+        if (matchedObjects.length > 0) {
+            results.push(`\n🔗 **연관 온톨로지 ${matchedObjects.length}건:**`);
+            matchedObjects.forEach(o => {
+                results.push(`• [${o.type}] ${o.title}`);
+            });
+        }
+
+        if (results.length === 0) {
+            results.push(`🔍 "${researchQuery}"에 대한 결과가 없습니다. 다른 키워드로 검색해보세요.`);
+        }
+
+        // Simulate slight delay for UX
+        await new Promise(r => setTimeout(r, 600));
+        setResearchResults(results);
+        setIsResearching(false);
+    };
 
     return (
         <div className="flex h-full bg-slate-950 overflow-hidden font-mono">
-            {/* Left/Center Area: Wiki Dossier Database */}
-            <div className="flex-1 flex overflow-hidden border-r border-slate-800/50">
-                {/* Dossier List (Sidebar-ish) */}
-                <div className="w-80 bg-slate-900/60 border-r border-slate-800/50 flex flex-col">
-                    <div className="p-5 border-b border-slate-800/50">
-                        <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2 tracking-wider">
-                            <ShieldAlert className="text-cyan-500" />
-                            INTELLIGENCE DB
-                        </h1>
-                        <p className="text-xs text-slate-500 mt-2">Central Wiki & Montage Registry</p>
-
-                        <div className="relative mt-4">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                            <input
-                                type="text"
-                                placeholder="Search records..."
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-8 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 transition-colors"
-                            />
+            {/* ========== CENTER: Signal Feed ========== */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header toolbar */}
+                <div className="shrink-0 px-6 pt-5 pb-3 border-b border-slate-800/50 bg-slate-950">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
+                                <Newspaper className="text-cyan-400" size={20} />
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-bold text-slate-100 tracking-wide">인텔리전스 피드</h1>
+                                <p className="text-[10px] text-slate-500">Maritime OSINT · 공식 지침 · AI 시그널 분석</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            {/* Live badge */}
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                <span className="text-[10px] text-rose-400 font-bold tracking-widest uppercase">Live</span>
+                            </div>
+                            {/* Countdown */}
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/40">
+                                <Timer size={13} className="text-amber-400" />
+                                <span className="text-[10px] text-slate-400 font-mono">다음 배치:</span>
+                                <span className="text-sm font-mono font-bold text-amber-300 tracking-widest tabular-nums">
+                                    {formatCountdown(countdownSeconds)}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                        {Object.entries(groupedData).map(([folderName, folderData]: [string, any]) => {
-                            const isExpanded = expandedFolders[folderName] ?? true;
-                            return (
-                                <div key={folderName} className="select-none">
-                                    <button
-                                        onClick={() => toggleFolder(folderName)}
-                                        className="w-full flex items-center gap-2 p-2 hover:bg-slate-800/40 rounded-md text-slate-300 transition-colors"
-                                    >
-                                        <ChevronDown size={14} className={cn("transition-transform text-slate-500", !isExpanded && "-rotate-90")} />
-                                        {isExpanded ? <FolderOpen size={14} className="text-amber-500" /> : <Folder size={14} className="text-amber-500" />}
-                                        <span className="text-sm font-semibold tracking-wide">{folderName}</span>
-                                        <span className="ml-auto text-[10px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded-full">{folderData.items.length}</span>
-                                    </button>
-
-                                    {isExpanded && (
-                                        <div className="ml-6 mt-1 space-y-1 relative before:absolute before:left-[-11px] before:top-0 before:bottom-2 before:w-px before:bg-slate-800">
-                                            {folderData.items.map((doc: any) => (
-                                                <button
-                                                    key={doc.id}
-                                                    onClick={() => setSelectedDoc(doc)}
-                                                    className={cn(
-                                                        "w-full text-left py-2 px-3 rounded-md flex items-center gap-2 transition-colors relative",
-                                                        "before:absolute before:left-[-11px] before:top-1/2 before:w-2 before:h-px before:bg-slate-800",
-                                                        selectedDoc?.id === doc.id ? "bg-cyan-950/40 text-cyan-400" : "hover:bg-slate-800/40 text-slate-400 hover:text-slate-200"
-                                                    )}
-                                                >
-                                                    {doc.type === 'factor' ? <GitBranch size={12} className="shrink-0" /> : <FileText size={12} className="shrink-0" />}
-                                                    <span className="text-xs truncate">{doc.title}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                        {Object.keys(groupedData).length === 0 && (
-                            <div className="text-center text-xs text-slate-500 mt-10">No records found.</div>
+                    {/* Search bar */}
+                    <div className="relative mb-3">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                        <input
+                            type="text"
+                            placeholder="뉴스 검색... (키워드, 소스, 태그)"
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            className="w-full bg-slate-900/60 border border-slate-800 rounded-lg px-9 py-2.5 text-sm text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+                        />
+                        {searchQuery && (
+                            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                                <X size={14} />
+                            </button>
                         )}
                     </div>
-                </div>
 
-                {/* Dossier Content Reading Pane */}
-                <div className="flex-1 bg-slate-950/90 overflow-y-auto custom-scrollbar p-8 relative">
-                    {selectedDoc ? (
-                        <div className="max-w-3xl mx-auto">
-                            <div className="flex items-center gap-2 text-xs font-bold tracking-widest text-cyan-500 mb-6 uppercase">
-                                <span>Database</span> <ChevronRight size={12} /> <span>{selectedDoc.type === 'factor' ? 'Operational Factor' : selectedDoc.type === 'ontology-object' ? 'Ontology Object' : 'Intelligence Scrap'}</span> <ChevronRight size={12} /> <span>{selectedDoc.category}</span>
-                            </div>
-
-                            <h2 className="text-3xl font-bold text-slate-100 mb-4 tracking-tight leading-tight">
-                                {selectedDoc.title}
-                            </h2>
-
-                            <div className="flex flex-wrap items-center gap-3 mb-8 border-b border-slate-800/80 pb-6">
-                                <span className={cn(
-                                    "text-xs px-2.5 py-1 rounded-sm uppercase tracking-wider font-semibold border",
-                                    selectedDoc.type === 'factor' ? "bg-amber-950/40 text-amber-500 border-amber-900" :
-                                        selectedDoc.type === 'ontology-object' ? "bg-emerald-950/40 text-emerald-500 border-emerald-900" :
-                                            "bg-cyan-950/40 text-cyan-500 border-cyan-900"
-                                )}>
-                                    {selectedDoc.type === 'factor' ? 'FACTOR' : selectedDoc.type === 'ontology-object' ? 'ONTOLOGY' : 'DOCUMENT'}
-                                </span>
-                                <span className="text-xs text-slate-500 flex items-center gap-1">
-                                    <Bookmark size={12} /> RECORD ID: {selectedDoc.id.split('_')[0].substring(0, 8).toUpperCase()}
-                                </span>
-                                <span className="text-xs text-slate-500">
-                                    LAST UPDATED: {selectedDoc.lastUpdated || 'Unknown'}
-                                </span>
-                            </div>
-
-                            <div className="prose prose-invert prose-slate max-w-none text-sm text-slate-300 leading-relaxed font-sans">
-                                {selectedDoc.content.split('\n').map((paragraph: string, i: number) => (
-                                    <p key={i} className="mb-4">{paragraph}</p>
-                                ))}
-                            </div>
-
-                            <div className="mt-12 pt-6 border-t border-slate-800/80">
-                                <h3 className="text-sm font-semibold text-slate-400 mb-4 flex items-center gap-2">
-                                    <Tag size={14} className="text-emerald-500" />
-                                    Montage / Node Relations
-                                </h3>
-                                <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-lg text-xs text-slate-400">
-                                    <p className="mb-2 italic">이 레코드는 중앙 온톨로지 신경망(Ontology Network)에 실시간 연동되어 있습니다. 온톨로지 탭에서 시각적 관계망(Multiverse)을 확인하고 편집할 수 있습니다.</p>
-                                    <div className="flex gap-2 mt-3">
-                                        <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700">#Scrap</span>
-                                        <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700">#{selectedDoc.category?.replace(/\s/g, '') || 'Unknown'}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-500">
-                            <ShieldAlert size={48} className="text-slate-800 mb-4" />
-                            <p className="tracking-widest uppercase text-sm font-semibold">Select a document to retrieve intel</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Right panel: Enhanced Live Intelligence Feed */}
-            <div className="w-[440px] shrink-0 overflow-y-auto custom-scrollbar flex flex-col p-5 bg-slate-900/30">
-                <div className="mb-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                            <Newspaper className="text-cyan-400" size={20} />
-                            <h2 className="text-xl font-bold text-slate-100">시그널 피드</h2>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="flex gap-1">
-                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                                <div className="text-[10px] text-rose-500 font-bold tracking-widest uppercase">Live</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Bloomberg-style Countdown Timer */}
-                    <div className="flex items-center gap-2 px-3 py-2.5 mb-3 rounded-lg bg-slate-800/50 border border-slate-700/40">
-                        <Timer size={14} className="text-amber-400 shrink-0" />
-                        <span className="text-[11px] text-slate-400 font-mono">Next Intel Batch in:</span>
-                        <span className="text-[15px] font-mono font-bold text-amber-300 tracking-widest tabular-nums ml-auto">
-                            ⏳ {formatCountdown(countdownSeconds)}
-                        </span>
-                    </div>
-
-                    <p className="text-xs text-slate-400 mb-2">
-                        10분 배치 사이클: RSS 수집 → 3-Tier 퍼널 필터 → AIP 시그널 평가 → 온톨로지 연동
-                    </p>
-
-                    {/* Two-Track Tab Navigation */}
-                    <div className="mt-2 flex rounded-lg bg-slate-800/40 border border-slate-700/50 p-0.5">
+                    {/* Tab navigation */}
+                    <div className="flex gap-2">
                         <button
                             onClick={() => setActiveTab('osint')}
                             className={cn(
-                                "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-all",
+                                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all",
                                 activeTab === 'osint'
-                                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
-                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/30 border border-transparent"
+                                    ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-lg shadow-cyan-900/10"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
                             )}
                         >
-                            <Globe size={13} />
-                            🌍 매크로 뉴스
+                            <Globe size={14} />
+                            매크로 뉴스
                         </button>
                         <button
                             onClick={() => setActiveTab('official')}
                             className={cn(
-                                "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-all",
+                                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all",
                                 activeTab === 'official'
-                                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30 shadow-sm"
-                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/30 border border-transparent"
+                                    ? "bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-lg shadow-rose-900/10"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
                             )}
                         >
-                            <Landmark size={13} />
-                            🏛️ 공식 지침 & 경보
+                            <Landmark size={14} />
+                            공식 지침 & 경보
                         </button>
                     </div>
 
-                    {/* FinOps Shield Stats Banner */}
-                    <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/20 border border-emerald-800/20">
-                        <Shield size={14} className="text-emerald-500 shrink-0" />
-                        <span className="text-[10px] text-emerald-400/90 font-mono leading-relaxed">
-                            ⚡ FinOps Shield: {finOpsStats.droppedByLocalFilter + finOpsStats.droppedByDedup} filtered locally → {finOpsStats.sentToAIP} via AIP ({finOpsStats.apiCallCount} batch, ~{finOpsStats.costSavingsPercent}% saved)
+                    {/* FinOps stats bar */}
+                    <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-950/15 border border-emerald-800/15">
+                        <Shield size={12} className="text-emerald-500 shrink-0" />
+                        <span className="text-[9px] text-emerald-400/80 font-mono leading-tight truncate">
+                            FinOps Shield: {finOpsStats.droppedByLocalFilter + finOpsStats.droppedByDedup} filtered → {finOpsStats.sentToAIP} via AIP ({finOpsStats.apiCallCount} calls, ~{finOpsStats.costSavingsPercent}% saved)
                         </span>
                     </div>
                 </div>
 
-                {/* Skeleton loading state */}
-                {showSkeletons && (
-                    <div className="space-y-3 mb-4 animate-pulse">
-                        {[1, 2, 3].map(i => (
-                            <div key={i} className="bg-slate-800/40 border border-slate-700/30 rounded-xl p-4">
-                                <div className="flex gap-2 mb-3">
-                                    <div className="w-16 h-4 bg-slate-700/50 rounded" />
-                                    <div className="w-10 h-4 bg-slate-700/30 rounded" />
-                                </div>
-                                <div className="w-full h-4 bg-slate-700/40 rounded mb-2" />
-                                <div className="w-3/4 h-4 bg-slate-700/30 rounded mb-3" />
-                                <div className="w-full h-3 bg-slate-700/20 rounded" />
-                            </div>
-                        ))}
+                {/* News feed body */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                    <div className="max-w-4xl mx-auto px-4 py-3">
+                        <GlobalNewsWidget
+                            onTagClick={handleTagClick}
+                            onStatsUpdate={setFinOpsStats}
+                            activeTab={activeTab}
+                            onCountdownUpdate={handleCountdownUpdate}
+                            onScrap={handleScrap}
+                        />
                     </div>
-                )}
+                </div>
+            </div>
 
-                {/* The global news widget */}
-                <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                    <GlobalNewsWidget
-                        onTagClick={handleTagClick}
-                        onStatsUpdate={setFinOpsStats}
-                        activeTab={activeTab}
-                        onCountdownUpdate={handleCountdownUpdate}
-                    />
+            {/* ========== RIGHT SIDEBAR: Scrapbook + Research ========== */}
+            <div className="w-[380px] shrink-0 border-l border-slate-800/50 bg-slate-900/40 flex flex-col overflow-hidden">
+                {/* Scrapbook header */}
+                <div className="shrink-0 p-4 border-b border-slate-800/50">
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                            <BookmarkCheck size={16} className="text-amber-400" />
+                        </div>
+                        <div className="flex-1">
+                            <h2 className="text-sm font-bold text-slate-100">스크랩 북</h2>
+                            <p className="text-[9px] text-slate-500">{scraps.length}건 저장됨</p>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="mt-4 p-3.5 rounded-xl border border-amber-900/30 bg-amber-950/20 text-xs text-amber-200/80 leading-relaxed shadow-lg">
-                    <AlertTriangle size={14} className="text-amber-500 mb-1.5 inline-block mr-1.5" />
-                    <strong>10-Min Batch Intelligence Cycle:</strong> Tier 1 로컬 키워드/온톨로지 필터($0) → Tier 2 중복 캐시($0) → Tier 3 마이크로배치 5건/1호출(gemini-flash) → Impact ≥50 시그널만 표시. 10분 주기로 API 비용을 90% 이상 절감.
+                {/* Scrapbook list */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
+                    {scraps.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-48 text-center px-6">
+                            <Bookmark size={24} className="text-slate-700 mb-3" />
+                            <p className="text-xs text-slate-500 font-medium mb-1">스크랩이 없습니다</p>
+                            <p className="text-[10px] text-slate-600 leading-relaxed">
+                                뉴스 카드의 ★ 버튼을 눌러<br />중요 뉴스를 스크랩하세요
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="p-2 space-y-1">
+                            {scraps.map(scrap => (
+                                <div
+                                    key={scrap.id}
+                                    onClick={() => setSelectedScrap(selectedScrap?.id === scrap.id ? null : scrap)}
+                                    className={cn(
+                                        "group p-3 rounded-lg cursor-pointer transition-all border",
+                                        selectedScrap?.id === scrap.id
+                                            ? "bg-amber-500/10 border-amber-500/30"
+                                            : "bg-slate-800/30 border-slate-800/50 hover:bg-slate-800/50 hover:border-slate-700/50"
+                                    )}
+                                >
+                                    <div className="flex items-start gap-2 mb-1.5">
+                                        <FileText size={12} className="text-amber-400 mt-0.5 shrink-0" />
+                                        <h4 className="text-xs font-medium text-slate-200 leading-snug line-clamp-2 flex-1">{scrap.title}</h4>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteScrap(scrap.id); }}
+                                            className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
+                                        >
+                                            <Trash2 size={10} />
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 text-[9px] text-slate-500 ml-5">
+                                        <span className="font-mono">{scrap.source}</span>
+                                        <span>·</span>
+                                        <span>{new Date(scrap.scrapDate).toLocaleDateString('ko-KR')}</span>
+                                    </div>
+
+                                    {/* Tags */}
+                                    {scrap.tags.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2 ml-5">
+                                            {scrap.tags.slice(0, 3).map(tag => (
+                                                <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
+                                                    #{tag}
+                                                </span>
+                                            ))}
+                                            {scrap.tags.length > 3 && (
+                                                <span className="text-[9px] text-slate-600">+{scrap.tags.length - 3}</span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Expanded detail */}
+                                    {selectedScrap?.id === scrap.id && (
+                                        <div className="mt-3 ml-5 space-y-2 animate-in slide-in-from-top-1">
+                                            <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-4">
+                                                {scrap.description}
+                                            </p>
+                                            <a
+                                                href={scrap.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                onClick={e => e.stopPropagation()}
+                                                className="inline-flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 transition-colors"
+                                            >
+                                                원문 보기 <ExternalLink size={10} />
+                                            </a>
+
+                                            {/* Quick research button */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setResearchQuery(scrap.title.slice(0, 40));
+                                                }}
+                                                className="flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300 transition-colors"
+                                            >
+                                                <Sparkles size={10} /> 이어서 조사하기
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* ========== Research Panel (Perplexity-style follow-up) ========== */}
+                <div className="shrink-0 border-t border-slate-800/50 bg-slate-900/60">
+                    <div className="p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                            <MessageSquare size={13} className="text-violet-400" />
+                            <span className="text-xs font-bold text-slate-200">이어서 조사</span>
+                            <span className="text-[9px] text-slate-600 ml-auto">Perplexity-style Research</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={researchQuery}
+                                onChange={e => setResearchQuery(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleResearch()}
+                                placeholder="관련 키워드 입력... (예: 호르무즈 해협)"
+                                className="flex-1 bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                            />
+                            <button
+                                onClick={handleResearch}
+                                disabled={isResearching || !researchQuery.trim()}
+                                className="px-3 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-500 text-white text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                            >
+                                {isResearching ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                            </button>
+                        </div>
+
+                        {/* Research results */}
+                        {researchResults.length > 0 && (
+                            <div className="mt-3 p-3 rounded-lg bg-violet-950/20 border border-violet-800/20 max-h-48 overflow-y-auto custom-scrollbar">
+                                {researchResults.map((line, i) => (
+                                    <p key={i} className="text-[11px] text-slate-300 leading-relaxed mb-1 last:mb-0">
+                                        {line}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Quick research suggestions */}
+                        {researchResults.length === 0 && !isResearching && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                                {['호르무즈 해협', 'VLCC', '유가 변동', '해적', 'P&I 보험'].map(keyword => (
+                                    <button
+                                        key={keyword}
+                                        onClick={() => { setResearchQuery(keyword); }}
+                                        className="text-[9px] px-2 py-1 rounded-full bg-slate-800/60 text-slate-400 border border-slate-700/40 hover:bg-violet-500/10 hover:text-violet-300 hover:border-violet-500/30 transition-all"
+                                    >
+                                        {keyword}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Batch cycle footer */}
+                    <div className="px-3 pb-3">
+                        <div className="p-2.5 rounded-lg border border-amber-900/20 bg-amber-950/10 text-[9px] text-amber-200/70 leading-relaxed">
+                            <AlertTriangle size={10} className="text-amber-500 inline-block mr-1" />
+                            10분 배치 사이클: Tier 1 키워드 필터 → Tier 2 중복 제거 → Tier 3 AI 분석 → 시그널 표시
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

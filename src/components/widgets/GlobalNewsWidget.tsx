@@ -23,9 +23,10 @@ interface GlobalNewsWidgetProps {
     onStatsUpdate?: (stats: FinOpsStats) => void;
     activeTab?: 'osint' | 'official';
     onCountdownUpdate?: (secondsRemaining: number) => void;
+    onScrap?: (article: IntelArticle) => void;
 }
 
-export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab = 'osint', onCountdownUpdate }: GlobalNewsWidgetProps) {
+export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab = 'osint', onCountdownUpdate, onScrap }: GlobalNewsWidgetProps) {
     const [articles, setArticles] = useState<IntelArticle[]>([]);
     const [officialArticles, setOfficialArticles] = useState<IntelArticle[]>([]);
     const [loading, setLoading] = useState(true);
@@ -345,6 +346,9 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             dateAdded: new Date().toISOString().split('T')[0],
         };
         localStorage.setItem('sidecar_ontology', JSON.stringify([newEntry, ...currentOntology]));
+
+        // Notify parent about the scrap
+        onScrap?.(article);
 
         const btn = e.currentTarget;
         btn.classList.add('text-amber-400', 'scale-125');

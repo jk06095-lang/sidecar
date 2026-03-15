@@ -8,10 +8,10 @@
  *   Right  (400px)  : Object360Panel (slides in on object select)
  *   Bottom (260px)  : MacroIntelligenceBoard (collapsible)
  */
-import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Search, Ship, Anchor, Navigation, Fuel, Zap, Shield, DollarSign,
-    AlertTriangle, FileText, Map, GitBranch, ChevronRight, TrendingUp,
+    AlertTriangle, FileText, Map, ChevronRight, TrendingUp,
     Filter, X, Loader2, Route as RouteIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -23,8 +23,7 @@ import FleetMapWidget from './widgets/FleetMapWidget';
 import Object360Panel from './widgets/Object360Panel';
 import MacroIntelligenceBoard from './widgets/MacroIntelligenceBoard';
 
-// Lazy-load OntologyGraph (heavy D3/force dependency)
-const OntologyGraphView = lazy(() => import('./Ontology'));
+
 
 // ============================================================
 // CONSTANTS
@@ -58,7 +57,6 @@ interface DashboardGridProps {
 
 export default function DashboardGrid({ simulationParams, dynamicFleetData, onNavigateTab }: DashboardGridProps) {
     const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
-    const [centerView, setCenterView] = useState<'map' | 'graph'>('map');
     const [macroExpanded, setMacroExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [typeFilter, setTypeFilter] = useState<OntologyObjectType | 'all'>('all');
@@ -233,56 +231,23 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
                     CENTER PANEL — Map / Graph
                    ════════════════════════════════════════════ */}
                 <div className="flex-1 flex flex-col min-w-0">
-                    {/* View Toggle */}
+                    {/* Header */}
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800/40 bg-slate-950/30">
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setCenterView('map')}
-                                className={cn(
-                                    "flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-medium transition-all",
-                                    centerView === 'map'
-                                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                                        : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                                )}
-                            >
-                                <Map size={12} />
-                                Fleet Map
-                            </button>
-                            <button
-                                onClick={() => setCenterView('graph')}
-                                className={cn(
-                                    "flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-medium transition-all",
-                                    centerView === 'graph'
-                                        ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
-                                        : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                                )}
-                            >
-                                <GitBranch size={12} />
-                                Knowledge Graph
-                            </button>
+                        <div className="flex items-center gap-1.5 text-[10px] font-medium text-cyan-400">
+                            <Map size={12} />
+                            Fleet Map
                         </div>
                         <div className="text-[9px] text-slate-600 font-mono">
-                            {centerView === 'map' ? `${dynamicFleetData.length} vessels` : `${objects.length} nodes`}
+                            {dynamicFleetData.length} vessels
                         </div>
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 relative min-h-0">
-                        {centerView === 'map' ? (
-                            <FleetMapWidget
-                                vessels={dynamicFleetData}
-                                onSelectVessel={handleMapVesselClick}
-                            />
-                        ) : (
-                            <Suspense fallback={
-                                <div className="flex items-center justify-center h-full gap-2 text-slate-500">
-                                    <Loader2 size={16} className="animate-spin" />
-                                    <span className="text-xs">Loading Knowledge Graph...</span>
-                                </div>
-                            }>
-                                <OntologyGraphView />
-                            </Suspense>
-                        )}
+                        <FleetMapWidget
+                            vessels={dynamicFleetData}
+                            onSelectVessel={handleMapVesselClick}
+                        />
                     </div>
                 </div>
 

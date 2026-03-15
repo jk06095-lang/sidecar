@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Network, Plus, Share2, Workflow, Save, Trash2, GitMerge, MousePointer2, PlusCircle, Folder, Sparkles, Loader2, X, Maximize2, Minimize2, Link2, Unlink } from 'lucide-react';
+import { Network, Plus, Share2, Workflow, Save, Trash2, GitMerge, MousePointer2, PlusCircle, Folder, Sparkles, Loader2, X, Maximize2, Minimize2, Link2, Unlink, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
 import type { OntologyObject, OntologyLink as OntologyLinkType, OntologyObjectType, OntologyLinkRelation } from '../../types';
@@ -42,6 +42,9 @@ interface OntologyGraphProps {
     selectedLinkId?: string | null;
     isFullScreen?: boolean;
     onToggleFullScreen?: () => void;
+    onGenerateLinks?: () => void;
+    isLinkGenerating?: boolean;
+    linkCount?: number;
 }
 
 const RELATION_OPTIONS: { value: OntologyLinkRelation; label: string; color: string }[] = [
@@ -83,7 +86,7 @@ function getRiskRadius(baseRadius: number, score: number): number {
 // ============================================================
 // COMPONENT
 // ============================================================
-export default function OntologyGraph({ onSelectObject, selectedObjectId, onSelectLink, selectedLinkId, isFullScreen, onToggleFullScreen }: OntologyGraphProps) {
+export default function OntologyGraph({ onSelectObject, selectedObjectId, onSelectLink, selectedLinkId, isFullScreen, onToggleFullScreen, onGenerateLinks, isLinkGenerating, linkCount }: OntologyGraphProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     // Zustand store
@@ -1032,6 +1035,29 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
                     >
                         <Link2 size={14} /> 신경삭 추가
                     </button>
+
+                    {/* AI Neural Link Generation */}
+                    {onGenerateLinks && (
+                        <button
+                            onClick={onGenerateLinks}
+                            disabled={isLinkGenerating}
+                            className={cn(
+                                "p-1.5 rounded-md transition-colors flex items-center text-xs gap-1.5 font-medium",
+                                isLinkGenerating
+                                    ? "bg-violet-500/20 text-violet-300 border border-violet-500/40 cursor-not-allowed opacity-70"
+                                    : "text-slate-400 hover:text-violet-400 hover:bg-violet-500/10"
+                            )}
+                            title={linkCount && linkCount > 0 ? "AI 신경삭 최신화" : "AI 신경삭 자동 생성"}
+                        >
+                            {isLinkGenerating ? (
+                                <><Loader2 size={14} className="animate-spin" /> AI 생성 중...</>
+                            ) : linkCount && linkCount > 0 ? (
+                                <><Zap size={14} /> 신경삭 최신화</>
+                            ) : (
+                                <><Sparkles size={14} /> AI 신경삭 자동생성</>
+                            )}
+                        </button>
+                    )}
                 </div>
 
                 <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-slate-500">

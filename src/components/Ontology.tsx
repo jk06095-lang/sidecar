@@ -553,36 +553,53 @@ export default function Ontology() {
                         </div>
                     </div>
                 ) : (
-                    /* ========== GRAPH + 360 Inspector ========== */
-                    <div className="flex-1 flex overflow-hidden min-h-0">
-                        <div className="flex-1 bg-slate-950 overflow-hidden relative min-h-0">
-                            {/* Loading overlay during link generation */}
-                            {isLinkGenerating && (
-                                <div className="absolute inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3 animate-in fade-in">
-                                    <div className="w-16 h-16 rounded-2xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
-                                        <Loader2 size={28} className="text-violet-400 animate-spin" />
-                                    </div>
-                                    <p className="text-sm font-bold text-violet-300">AI 신경삭 생성 중...</p>
-                                    <p className="text-[10px] text-slate-500">객체 간 관계를 분석하고 있습니다</p>
+                    /* ========== GRAPH (full width) + Overlay Inspectors ========== */
+                    <div className="flex-1 relative overflow-hidden min-h-0">
+                        {/* Loading overlay during link generation */}
+                        {isLinkGenerating && (
+                            <div className="absolute inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3 animate-in fade-in">
+                                <div className="w-16 h-16 rounded-2xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
+                                    <Loader2 size={28} className="text-violet-400 animate-spin" />
                                 </div>
-                            )}
-                            <OntologyGraph
-                                onSelectObject={handleSelectObject}
-                                selectedObjectId={selectedObjectId}
-                                onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedObjectId(null); }}
-                                selectedLinkId={selectedLinkId}
-                                isFullScreen={isGraphFullScreen}
-                                onToggleFullScreen={() => setIsGraphFullScreen(!isGraphFullScreen)}
-                            />
-                        </div>
-                        {/* Right 360 Pane / Edge Inspector */}
-                        {selectedObjectId ? (
-                            <Object360Panel
-                                objectId={selectedObjectId}
-                                onClose={() => setSelectedObjectId(null)}
-                                onNavigate={handleNavigateObject}
-                            />
-                        ) : selectedLinkId ? (() => {
+                                <p className="text-sm font-bold text-violet-300">AI 신경삭 생성 중...</p>
+                                <p className="text-[10px] text-slate-500">객체 간 관계를 분석하고 있습니다</p>
+                            </div>
+                        )}
+                        <OntologyGraph
+                            onSelectObject={handleSelectObject}
+                            selectedObjectId={selectedObjectId}
+                            onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedObjectId(null); }}
+                            selectedLinkId={selectedLinkId}
+                            isFullScreen={isGraphFullScreen}
+                            onToggleFullScreen={() => setIsGraphFullScreen(!isGraphFullScreen)}
+                            onGenerateLinks={async () => {
+                                setIsLinkGenerating(true);
+                                try {
+                                    const count = await generateLinks();
+                                    console.info(`[AI] Generated ${count} neural links`);
+                                } catch (err) {
+                                    console.error('[AI] Link generation failed:', err);
+                                } finally {
+                                    setIsLinkGenerating(false);
+                                }
+                            }}
+                            isLinkGenerating={isLinkGenerating}
+                            linkCount={storeLinks.length}
+                        />
+
+                        {/* ---- Overlay: Object 360 Panel ---- */}
+                        {selectedObjectId && (
+                            <div className="absolute top-0 right-0 bottom-0 z-40 w-[380px] shadow-2xl shadow-black/50 animate-in slide-in-from-right duration-200">
+                                <Object360Panel
+                                    objectId={selectedObjectId}
+                                    onClose={() => setSelectedObjectId(null)}
+                                    onNavigate={handleNavigateObject}
+                                />
+                            </div>
+                        )}
+
+                        {/* ---- Overlay: Link / Edge Inspector ---- */}
+                        {!selectedObjectId && selectedLinkId && (() => {
                             const link = storeLinks.find(l => l.id === selectedLinkId);
                             if (!link) return null;
                             const srcObj = storeObjects.find(o => o.id === link.sourceId);
@@ -610,7 +627,7 @@ export default function Ontology() {
                             ];
 
                             return (
-                                <div className="w-[360px] shrink-0 bg-zinc-900/60 border-l border-zinc-800 flex flex-col overflow-y-auto custom-scrollbar">
+                                <div className="absolute top-0 right-0 bottom-0 z-40 w-[380px] bg-zinc-900/95 backdrop-blur-xl border-l border-zinc-800 flex flex-col overflow-y-auto custom-scrollbar shadow-2xl shadow-black/50 animate-in slide-in-from-right duration-200">
                                     {/* Header */}
                                     <div className="p-4 border-b border-zinc-800/60 flex items-center gap-3">
                                         <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
@@ -696,48 +713,7 @@ export default function Ontology() {
                                     </div>
                                 </div>
                             );
-                        })() : (
-                            <div className="w-[360px] shrink-0 bg-zinc-900/60 border-l border-zinc-800 flex flex-col items-center justify-center text-center p-8">
-                                <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/30 flex items-center justify-center mb-4">
-                                    <Database size={24} className="text-zinc-600" />
-                                </div>
-                                <p className="text-sm font-medium text-zinc-500 mb-1">자산 또는 신경삭을 선택하여</p>
-                                <p className="text-sm font-medium text-zinc-500">상세 속성을 확인하세요</p>
-                                <p className="text-[10px] text-zinc-600 mt-3 max-w-[200px] leading-relaxed">
-                                    좌측 트리 또는 중앙 그래프에서 노드·엣지를 클릭하면 인스펙터가 표시됩니다.
-                                </p>
-
-                                {/* AI 신경삭 생성/최신화 Button */}
-                                <button
-                                    onClick={async () => {
-                                        setIsLinkGenerating(true);
-                                        try {
-                                            const count = await generateLinks();
-                                            console.info(`[AI] Generated ${count} neural links`);
-                                        } catch (err) {
-                                            console.error('[AI] Link generation failed:', err);
-                                        } finally {
-                                            setIsLinkGenerating(false);
-                                        }
-                                    }}
-                                    disabled={isLinkGenerating}
-                                    className="mt-6 px-4 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-violet-600/80 to-purple-600/80 hover:from-violet-500 hover:to-purple-500 text-white shadow-lg shadow-violet-900/30 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {isLinkGenerating ? (
-                                        <><Loader2 size={14} className="animate-spin" /> AI 생성 중...</>
-                                    ) : storeLinks.length > 0 ? (
-                                        <><Zap size={14} /> 신경삭 최신화</>
-                                    ) : (
-                                        <><Sparkles size={14} /> AI 신경삭 자동 생성</>
-                                    )}
-                                </button>
-                                <p className="text-[9px] text-zinc-600 mt-2">
-                                    {storeLinks.length > 0
-                                        ? `현재 ${storeLinks.length}개 신경삭 연결됨 · 클릭하여 새 관계 추가`
-                                        : '객체 간 관계를 AI가 자동으로 분석합니다'}
-                                </p>
-                            </div>
-                        )}
+                        })()}
                     </div>
                 )}
             </div>

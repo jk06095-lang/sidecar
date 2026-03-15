@@ -229,6 +229,10 @@ export type OntologyLinkRelation =
   | 'DEPENDS_ON'        // RiskFactor → Resource
   | 'TRANSITS'          // Vessel → Route
   | 'OPERATES_ON'       // Vessel → Route (active voyage)
+  | 'OPERATES_AT'       // Vessel → Port (operational base)
+  | 'SAILS'             // Vessel → Route (sailing assignment)
+  | 'CALLS_AT'          // Route → Port (port of call)
+  | 'AFFECTS_COST'      // MarketIndicator → Vessel/Route (cost effect)
   | 'HEDGES'            // Strategy → MarketIndicator
   | 'CONSUMES_FUEL'     // Vessel → MarketIndicator (fuel consumption)
   | 'EXPOSES_TO'        // RiskEvent → Vessel (risk exposure)

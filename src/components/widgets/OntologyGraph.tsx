@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Network, Plus, Share2, Workflow, Save, Trash2, GitMerge, MousePointer2, PlusCircle, Folder, Sparkles, Loader2, X, Maximize2, Minimize2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Network, Plus, Share2, Workflow, Save, Trash2, GitMerge, MousePointer2, PlusCircle, Folder, Sparkles, Loader2, X, Maximize2, Minimize2, Link2, Unlink } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
-import type { OntologyObject, OntologyLink as OntologyLinkType, OntologyObjectType } from '../../types';
+import type { OntologyObject, OntologyLink as OntologyLinkType, OntologyObjectType, OntologyLinkRelation } from '../../types';
 
 // ============================================================
 // TYPES
@@ -37,7 +38,25 @@ interface GraphLink {
 interface OntologyGraphProps {
     onSelectObject?: (id: string | null) => void;
     selectedObjectId?: string | null;
+    onSelectLink?: (linkId: string | null) => void;
+    selectedLinkId?: string | null;
+    isFullScreen?: boolean;
+    onToggleFullScreen?: () => void;
 }
+
+const RELATION_OPTIONS: { value: OntologyLinkRelation; label: string; color: string }[] = [
+    { value: 'OPERATES_AT', label: '운항 위치', color: '#06b6d4' },
+    { value: 'SAILS', label: '항해 경로', color: '#38bdf8' },
+    { value: 'CALLS_AT', label: '기항', color: '#a855f7' },
+    { value: 'INSURES', label: '보험 관계', color: '#22c55e' },
+    { value: 'TRIGGERS', label: '유발', color: '#f97316' },
+    { value: 'EXPOSES_TO', label: '리스크 노출', color: '#ef4444' },
+    { value: 'AFFECTS_COST', label: '비용 영향', color: '#eab308' },
+    { value: 'AT_RISK', label: '위험 근접', color: '#f43f5e' },
+    { value: 'NEAR', label: '지리적 근접', color: '#64748b' },
+    { value: 'IMPACTS', label: '인과 영향', color: '#f59e0b' },
+    { value: 'COMPETES_WITH', label: '경쟁 관계', color: '#8b5cf6' },
+];
 
 // ============================================================
 // CONSTANTS
@@ -64,7 +83,7 @@ function getRiskRadius(baseRadius: number, score: number): number {
 // ============================================================
 // COMPONENT
 // ============================================================
-export default function OntologyGraph({ onSelectObject, selectedObjectId }: OntologyGraphProps) {
+export default function OntologyGraph({ onSelectObject, selectedObjectId, onSelectLink, selectedLinkId, isFullScreen, onToggleFullScreen }: OntologyGraphProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     // Zustand store
@@ -81,6 +100,16 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
     const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
     const draggedNodeRef = useRef<GraphNode | null>(null);
+
+    // Link creation mode
+    const [linkCreationMode, setLinkCreationMode] = useState(false);
+    const [linkDragSource, setLinkDragSource] = useState<GraphNode | null>(null);
+    const linkDragCursorRef = useRef<{ x: number; y: number } | null>(null);
+    const [showRelationPicker, setShowRelationPicker] = useState<{ sourceId: string; targetId: string; screenX: number; screenY: number } | null>(null);
+
+    // Store actions
+    const addLink = useOntologyStore((s) => s.addLink);
+    const removeLink = useOntologyStore((s) => s.removeLink);
 
     // Figma-like pan/zoom
     const [panX, setPanX] = useState(0);
@@ -672,6 +701,52 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 }
             });
 
+            // ---- RUBBER-BAND LINE (link creation drag) ----
+            if (linkDragSource && linkDragCursorRef.current) {
+                const src = visibleNodes.find(n => n.id === linkDragSource.id);
+                if (src) {
+                    const cursor = linkDragCursorRef.current;
+                    ctx.beginPath();
+                    ctx.moveTo(src.x, src.y);
+                    ctx.lineTo(cursor.x, cursor.y);
+                    ctx.strokeStyle = 'rgba(167, 139, 250, 0.7)';
+                    ctx.lineWidth = 2.5;
+                    ctx.setLineDash([6, 4]);
+                    ctx.lineDashOffset = -timeRef.current * 30;
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.lineDashOffset = 0;
+
+                    // Glow circle at source
+                    ctx.beginPath();
+                    ctx.arc(src.x, src.y, src.radius + 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(167, 139, 250, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+
+            // ---- HIGHLIGHT SELECTED LINK ----
+            if (selectedLinkId) {
+                const selLink = visibleLinks.find(l => l.id === selectedLinkId);
+                if (selLink) {
+                    const src = visibleNodes.find(n => n.id === selLink.source);
+                    const tgt = visibleNodes.find(n => n.id === selLink.target);
+                    if (src && tgt) {
+                        ctx.beginPath();
+                        ctx.moveTo(src.x, src.y);
+                        ctx.lineTo(tgt.x, tgt.y);
+                        ctx.strokeStyle = 'rgba(139, 92, 246, 0.9)';
+                        ctx.lineWidth = 4;
+                        ctx.setLineDash([8, 4]);
+                        ctx.lineDashOffset = -timeRef.current * 25;
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        ctx.lineDashOffset = 0;
+                    }
+                }
+            }
+
             ctx.restore();
 
             animFrameRef.current = requestAnimationFrame(tick);
@@ -742,11 +817,30 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
         }
         const { x, y } = getMousePos(e);
         const clicked = getNodeAt(x, y);
+
+        if (linkCreationMode) {
+            if (clicked) {
+                // Start rubber-band drag from this node
+                setLinkDragSource(clicked);
+                linkDragCursorRef.current = { x: clicked.x, y: clicked.y };
+            }
+            return;
+        }
+
         if (clicked) {
             draggedNodeRef.current = clicked;
             onSelectObject?.(clicked.id);
+            onSelectLink?.(null);
         } else {
-            onSelectObject?.(null);
+            // Check if an edge was clicked
+            const clickedLink = getLinkAt(x, y);
+            if (clickedLink) {
+                onSelectLink?.(clickedLink.id);
+                onSelectObject?.(null);
+            } else {
+                onSelectObject?.(null);
+                onSelectLink?.(null);
+            }
         }
     };
 
@@ -759,6 +853,19 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
         }
 
         const pos = getMousePos(e);
+
+        // Link creation rubber-band
+        if (linkCreationMode && linkDragSource) {
+            linkDragCursorRef.current = { x: pos.x, y: pos.y };
+            // Check if hovering over a potential target
+            const target = getNodeAt(pos.x, pos.y);
+            if (target && target.id !== linkDragSource.id) {
+                setHoveredNode(target);
+            } else {
+                setHoveredNode(null);
+            }
+            return;
+        }
 
         const node = getNodeAt(pos.x, pos.y);
         if (node !== hoveredNode) setHoveredNode(node);
@@ -776,9 +883,41 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
         }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: React.MouseEvent) => {
+        // Link creation: complete if dropped on a valid target
+        if (linkCreationMode && linkDragSource) {
+            const pos = getMousePos(e);
+            const target = getNodeAt(pos.x, pos.y);
+            if (target && target.id !== linkDragSource.id) {
+                // Show relation type picker
+                const rect = canvasRef.current?.getBoundingClientRect();
+                setShowRelationPicker({
+                    sourceId: linkDragSource.id,
+                    targetId: target.id,
+                    screenX: e.clientX - (rect?.left || 0),
+                    screenY: e.clientY - (rect?.top || 0),
+                });
+            }
+            setLinkDragSource(null);
+            linkDragCursorRef.current = null;
+            return;
+        }
         draggedNodeRef.current = null;
         isPanningRef.current = false;
+    };
+
+    const handleCreateLink = async (relationType: OntologyLinkRelation) => {
+        if (!showRelationPicker) return;
+        const { sourceId, targetId } = showRelationPicker;
+        await addLink({
+            id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            sourceId,
+            targetId,
+            relationType,
+            weight: 0.7,
+            metadata: { createdAt: new Date().toISOString() },
+        });
+        setShowRelationPicker(null);
     };
 
     const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -838,8 +977,8 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
     const totalNodeCount = graphNodes.length;
     const visibleLinkCount = graphLinks.filter((l) => l.visible).length;
 
-    return (
-        <div className="w-full h-full relative bg-slate-950 overflow-hidden flex flex-col">
+    const graphContent = (
+        <div className={cn("w-full h-full relative bg-slate-950 overflow-hidden flex flex-col", isFullScreen && "fixed inset-0 z-[9999]")}>
             {/* Toolbar */}
             <div className="shrink-0 bg-slate-900/80 border-b border-slate-700/50 p-2.5 flex items-center gap-4 z-20">
                 <div className="flex items-center gap-2 pr-4 border-r border-slate-700">
@@ -862,14 +1001,58 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                     >
                         <Minimize2 size={14} /> 축소
                     </button>
+
+                    {/* Divider */}
+                    <div className="w-px h-5 bg-slate-700" />
+
+                    {/* Link Creation Mode Toggle */}
+                    <button
+                        onClick={() => { setLinkCreationMode(!linkCreationMode); setLinkDragSource(null); linkDragCursorRef.current = null; setShowRelationPicker(null); }}
+                        className={cn(
+                            "p-1.5 rounded-md transition-colors flex items-center text-xs gap-1.5 font-medium",
+                            linkCreationMode
+                                ? "bg-violet-500/20 text-violet-300 border border-violet-500/40"
+                                : "text-slate-400 hover:text-violet-400 hover:bg-violet-500/10"
+                        )}
+                        title="신경삭 추가 모드 (노드를 드래그하여 연결)"
+                    >
+                        <Link2 size={14} /> 신경삭 추가
+                    </button>
                 </div>
 
                 <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-slate-500">
                     <span>Nodes: <span className="text-slate-300">{visibleNodeCount}</span>/{totalNodeCount}</span>
                     <span>Links: <span className="text-slate-300">{visibleLinkCount}</span></span>
                     <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">ONTOLOGY STORE</span>
+
+                    {/* Full-screen toggle */}
+                    {onToggleFullScreen && (
+                        <button
+                            onClick={onToggleFullScreen}
+                            className="p-1 rounded text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                            title={isFullScreen ? '축소' : '전체 화면'}
+                        >
+                            {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {/* Link Creation Mode Banner */}
+            {linkCreationMode && (
+                <div className="shrink-0 bg-violet-950/40 border-b border-violet-800/30 px-4 py-1.5 flex items-center gap-3 z-20">
+                    <Link2 size={12} className="text-violet-400 animate-pulse" />
+                    <span className="text-[11px] text-violet-300 font-medium">
+                        노드에서 노드로 드래그하여 신경삭(연결)을 생성하세요
+                    </span>
+                    <button
+                        onClick={() => { setLinkCreationMode(false); setLinkDragSource(null); }}
+                        className="ml-auto text-[10px] text-violet-400 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded bg-violet-900/30 hover:bg-violet-800/40 transition-colors"
+                    >
+                        <X size={10} /> 모드 종료
+                    </button>
+                </div>
+            )}
 
             {/* Canvas */}
             <div className="flex-1 relative overflow-hidden">
@@ -877,12 +1060,17 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                     ref={canvasRef}
                     className={cn(
                         'w-full h-full',
-                        spaceHeldRef.current ? (isPanningRef.current ? 'cursor-grabbing' : 'cursor-grab') : hoveredNode ? 'cursor-pointer' : 'cursor-default',
+                        linkCreationMode
+                            ? (linkDragSource ? 'cursor-crosshair' : hoveredNode ? 'cursor-cell' : 'cursor-crosshair')
+                            : spaceHeldRef.current ? (isPanningRef.current ? 'cursor-grabbing' : 'cursor-grab') : hoveredNode ? 'cursor-pointer' : hoveredLink ? 'cursor-pointer' : 'cursor-default',
                     )}
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseUp}
+                    onMouseLeave={(e) => {
+                        if (linkCreationMode) { setLinkDragSource(null); linkDragCursorRef.current = null; }
+                        else handleMouseUp(e as unknown as React.MouseEvent);
+                    }}
                     onDoubleClick={handleDoubleClick}
                     onWheel={handleWheel}
                     style={{
@@ -890,6 +1078,35 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                         backgroundSize: '24px 24px',
                     }}
                 />
+
+                {/* Relation Type Picker Overlay */}
+                {showRelationPicker && (
+                    <div
+                        className="absolute z-50 bg-slate-900/95 backdrop-blur-lg border border-violet-500/40 rounded-xl shadow-2xl shadow-violet-900/30 p-2 min-w-[200px]"
+                        style={{ left: showRelationPicker.screenX, top: showRelationPicker.screenY }}
+                    >
+                        <div className="text-[9px] text-violet-300 font-bold uppercase tracking-widest mb-2 px-2">관계 유형 선택</div>
+                        <div className="space-y-0.5 max-h-[300px] overflow-y-auto custom-scrollbar">
+                            {RELATION_OPTIONS.map((opt) => (
+                                <button
+                                    key={opt.value}
+                                    onClick={() => handleCreateLink(opt.value)}
+                                    className="w-full text-left px-2.5 py-1.5 text-[11px] rounded-lg hover:bg-slate-800 transition-colors flex items-center gap-2 group"
+                                >
+                                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: opt.color }} />
+                                    <span className="text-slate-300 group-hover:text-white font-medium">{opt.label}</span>
+                                    <span className="ml-auto text-[9px] text-slate-600 font-mono">{opt.value}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => setShowRelationPicker(null)}
+                            className="mt-1.5 w-full text-center text-[10px] text-slate-500 hover:text-slate-300 py-1 rounded hover:bg-slate-800 transition-colors"
+                        >
+                            취소
+                        </button>
+                    </div>
+                )}
 
                 {/* Legend */}
                 <div className="absolute bottom-4 left-4 z-30 bg-slate-900/90 backdrop-blur border border-slate-700/50 rounded-xl p-3 shadow-xl">
@@ -908,7 +1125,7 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                 </div>
 
                 {/* Hovered node tooltip */}
-                {hoveredNode && !draggedNodeRef.current && (
+                {hoveredNode && !draggedNodeRef.current && !linkDragSource && (
                     <div
                         className="absolute z-40 bg-slate-900/95 backdrop-blur border border-slate-700 rounded-lg p-3 shadow-xl pointer-events-none min-w-[180px]"
                         style={{
@@ -929,7 +1146,28 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId }: Onto
                         )}
                     </div>
                 )}
+
+                {/* Link drag target hint */}
+                {linkDragSource && hoveredNode && hoveredNode.id !== linkDragSource.id && (
+                    <div className="absolute z-40 bg-violet-900/90 backdrop-blur border border-violet-500/50 rounded-lg px-3 py-2 shadow-xl pointer-events-none"
+                        style={{
+                            left: Math.min((hoveredNode.x * zoomRef.current + panRef.current.x) + 25, (canvasRef.current?.width || 800) - 150),
+                            top: (hoveredNode.y * zoomRef.current + panRef.current.y) - 15,
+                        }}
+                    >
+                        <div className="text-[10px] text-violet-200 font-medium flex items-center gap-1.5">
+                            <Link2 size={10} /> 연결: {hoveredNode.label}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
+
+    // Full-screen: render via portal
+    if (isFullScreen) {
+        return createPortal(graphContent, document.body);
+    }
+
+    return graphContent;
 }

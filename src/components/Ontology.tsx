@@ -12,7 +12,7 @@ import ObjectTypeWizard from './widgets/ObjectTypeWizard';
 import { VESSEL_PRESETS, FLAG_OPTIONS } from '../services/maritimeIntegrationService';
 import { useOntologyStore } from '../store/ontologyStore';
 import { extractOntologyFromText } from '../services/geminiService';
-import type { ObjectTypeDefinition, OntologyObject, OntologyObjectType } from '../types';
+import type { ObjectTypeDefinition, OntologyObject, OntologyObjectType, OntologyLink, OntologyLinkRelation } from '../types';
 
 // ============================================================
 // TREE CATEGORY CONFIG — Maps OntologyObjectType → UI folder
@@ -76,12 +76,17 @@ function getTemplatePrompt(templateId: string): string {
 export default function Ontology() {
     // ---- Zustand store (SSOT for all ontology data) ----
     const storeObjects = useOntologyStore(s => s.objects);
+    const storeLinks = useOntologyStore(s => s.links);
     const addObject = useOntologyStore(s => s.addObject);
     const removeObject = useOntologyStore(s => s.removeObject);
     const ingestExtractedOntology = useOntologyStore(s => s.ingestExtractedOntology);
+    const updateLink = useOntologyStore(s => s.updateLink);
+    const removeLinkAction = useOntologyStore(s => s.removeLink);
+    const generateLinks = useOntologyStore(s => s.generateLinks);
     const isHydrated = useOntologyStore(s => s.isHydrated);
 
     const [isAIGenerating, setIsAIGenerating] = useState(false);
+    const [isLinkGenerating, setIsLinkGenerating] = useState(false);
     const [showTemplateMenu, setShowTemplateMenu] = useState(false);
 
     const [searchTerm, setSearchTerm] = useState('');
@@ -89,6 +94,8 @@ export default function Ontology() {
     const [showAddForm, setShowAddForm] = useState(false);
     const [showObjectWizard, setShowObjectWizard] = useState(false);
     const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+    const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+    const [isGraphFullScreen, setIsGraphFullScreen] = useState(false);
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
     const treeListRef = useRef<HTMLDivElement>(null);
 
@@ -549,25 +556,170 @@ export default function Ontology() {
                     /* ========== GRAPH + 360 Inspector ========== */
                     <div className="flex-1 flex overflow-hidden min-h-0">
                         <div className="flex-1 bg-slate-950 overflow-hidden relative min-h-0">
-                            <OntologyGraph onSelectObject={handleSelectObject} selectedObjectId={selectedObjectId} />
+                            <OntologyGraph
+                                onSelectObject={handleSelectObject}
+                                selectedObjectId={selectedObjectId}
+                                onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedObjectId(null); }}
+                                selectedLinkId={selectedLinkId}
+                                isFullScreen={isGraphFullScreen}
+                                onToggleFullScreen={() => setIsGraphFullScreen(!isGraphFullScreen)}
+                            />
                         </div>
-                        {/* Right 360 Pane */}
+                        {/* Right 360 Pane / Edge Inspector */}
                         {selectedObjectId ? (
                             <Object360Panel
                                 objectId={selectedObjectId}
                                 onClose={() => setSelectedObjectId(null)}
                                 onNavigate={handleNavigateObject}
                             />
-                        ) : (
+                        ) : selectedLinkId ? (() => {
+                            const link = storeLinks.find(l => l.id === selectedLinkId);
+                            if (!link) return null;
+                            const srcObj = storeObjects.find(o => o.id === link.sourceId);
+                            const tgtObj = storeObjects.find(o => o.id === link.targetId);
+
+                            const RELATION_OPTS: { value: OntologyLinkRelation; label: string }[] = [
+                                { value: 'OPERATES_AT', label: '운항 위치' },
+                                { value: 'SAILS', label: '항해 경로' },
+                                { value: 'CALLS_AT', label: '기항' },
+                                { value: 'INSURES', label: '보험 관계' },
+                                { value: 'TRIGGERS', label: '유발' },
+                                { value: 'EXPOSES_TO', label: '리스크 노출' },
+                                { value: 'AFFECTS_COST', label: '비용 영향' },
+                                { value: 'AT_RISK', label: '위험 근접' },
+                                { value: 'NEAR', label: '지리적 근접' },
+                                { value: 'IMPACTS', label: '인과 영향' },
+                                { value: 'COMPETES_WITH', label: '경쟁 관계' },
+                                { value: 'OPERATES_ON', label: '운항 경로' },
+                                { value: 'TRANSITS', label: '통과' },
+                                { value: 'LOCATED_AT', label: '현재 위치' },
+                                { value: 'MONITORS', label: '모니터링' },
+                                { value: 'DEPENDS_ON', label: '의존' },
+                                { value: 'HEDGES', label: '헤지' },
+                                { value: 'CONSUMES_FUEL', label: '연료 소비' },
+                            ];
+
+                            return (
+                                <div className="w-[360px] shrink-0 bg-zinc-900/60 border-l border-zinc-800 flex flex-col overflow-y-auto custom-scrollbar">
+                                    {/* Header */}
+                                    <div className="p-4 border-b border-zinc-800/60 flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
+                                            <Link2 size={16} className="text-violet-400" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-sm font-bold text-white truncate">신경삭 편집</h3>
+                                            <p className="text-[10px] text-zinc-500 font-mono truncate">{link.id}</p>
+                                        </div>
+                                        <button onClick={() => setSelectedLinkId(null)} className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300">
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+
+                                    {/* Source → Target */}
+                                    <div className="p-4 space-y-3">
+                                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">연결 노드</div>
+                                        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-zinc-800/40 border border-zinc-700/30">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-[9px] text-zinc-500 uppercase">Source</div>
+                                                <div className="text-xs text-cyan-300 font-semibold truncate">{srcObj?.title || link.sourceId}</div>
+                                                <div className="text-[9px] text-zinc-600 font-mono">{srcObj?.type || '?'}</div>
+                                            </div>
+                                            <div className="text-violet-400 text-lg">→</div>
+                                            <div className="flex-1 min-w-0 text-right">
+                                                <div className="text-[9px] text-zinc-500 uppercase">Target</div>
+                                                <div className="text-xs text-cyan-300 font-semibold truncate">{tgtObj?.title || link.targetId}</div>
+                                                <div className="text-[9px] text-zinc-600 font-mono">{tgtObj?.type || '?'}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Relation Type */}
+                                    <div className="px-4 pb-3 space-y-2">
+                                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">관계 유형</div>
+                                        <select
+                                            value={link.relationType}
+                                            onChange={(e) => updateLink(link.id, { relationType: e.target.value as OntologyLinkRelation })}
+                                            className="w-full bg-zinc-800 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 outline-none"
+                                        >
+                                            {RELATION_OPTS.map(opt => (
+                                                <option key={opt.value} value={opt.value}>{opt.label} ({opt.value})</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {/* Weight Slider */}
+                                    <div className="px-4 pb-4 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">가중치 (Weight)</div>
+                                            <span className="text-xs font-mono text-violet-400">{link.weight.toFixed(2)}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={link.weight}
+                                            onChange={(e) => updateLink(link.id, { weight: parseFloat(e.target.value) })}
+                                            className="w-full accent-violet-500"
+                                        />
+                                        <div className="flex justify-between text-[9px] text-zinc-600">
+                                            <span>약함 (0.0)</span>
+                                            <span>강함 (1.0)</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Metadata */}
+                                    {link.metadata?.createdAt && (
+                                        <div className="px-4 pb-3">
+                                            <div className="text-[9px] text-zinc-600">생성: {new Date(link.metadata.createdAt).toLocaleString('ko-KR')}</div>
+                                        </div>
+                                    )}
+
+                                    {/* Delete button */}
+                                    <div className="mt-auto p-4 border-t border-zinc-800/60">
+                                        <button
+                                            onClick={() => { removeLinkAction(link.id); setSelectedLinkId(null); }}
+                                            className="w-full py-2 rounded-lg text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 hover:text-red-300 transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <Trash2 size={12} /> 신경삭 삭제
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })() : (
                             <div className="w-[360px] shrink-0 bg-zinc-900/60 border-l border-zinc-800 flex flex-col items-center justify-center text-center p-8">
                                 <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/30 flex items-center justify-center mb-4">
                                     <Database size={24} className="text-zinc-600" />
                                 </div>
-                                <p className="text-sm font-medium text-zinc-500 mb-1">자산을 선택하여</p>
+                                <p className="text-sm font-medium text-zinc-500 mb-1">자산 또는 신경삭을 선택하여</p>
                                 <p className="text-sm font-medium text-zinc-500">상세 속성을 확인하세요</p>
                                 <p className="text-[10px] text-zinc-600 mt-3 max-w-[200px] leading-relaxed">
-                                    좌측 트리 또는 중앙 그래프에서 노드를 클릭하면 360° 인스펙터가 표시됩니다.
+                                    좌측 트리 또는 중앙 그래프에서 노드·엣지를 클릭하면 인스펙터가 표시됩니다.
                                 </p>
+
+                                {/* AI 신경삭 생성 Button */}
+                                <button
+                                    onClick={async () => {
+                                        setIsLinkGenerating(true);
+                                        try {
+                                            const count = await generateLinks();
+                                            console.info(`[AI] Generated ${count} neural links`);
+                                        } catch (err) {
+                                            console.error('[AI] Link generation failed:', err);
+                                        } finally {
+                                            setIsLinkGenerating(false);
+                                        }
+                                    }}
+                                    disabled={isLinkGenerating}
+                                    className="mt-6 px-4 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-violet-600/80 to-purple-600/80 hover:from-violet-500 hover:to-purple-500 text-white shadow-lg shadow-violet-900/30 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isLinkGenerating ? (
+                                        <><Loader2 size={14} className="animate-spin" /> AI 생성 중...</>
+                                    ) : (
+                                        <><Sparkles size={14} /> AI 신경삭 자동 생성</>
+                                    )}
+                                </button>
+                                <p className="text-[9px] text-zinc-600 mt-2">객체 간 관계를 AI가 자동으로 분석합니다</p>
                             </div>
                         )}
                     </div>

@@ -644,6 +644,8 @@ interface OntologyState {
     updateObjectProperty: (id: string, key: string, value: string | number | boolean) => void;
     addLink: (link: OntologyLink) => Promise<void>;
     removeLink: (id: string) => Promise<void>;
+    updateLink: (id: string, patch: Partial<Pick<OntologyLink, 'relationType' | 'weight' | 'metadata'>>) => Promise<void>;
+    generateLinks: () => Promise<number>;  // AI auto-link, returns count of new links
     executeAction: (action: OntologyAction) => void;
     ingestExtractedOntology: (extracted: import('../services/geminiService').ExtractedOntology) => Promise<void>;
 
@@ -947,6 +949,74 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
                 console.error('[OntologyStore] removeLink rollback:', err);
                 set({ links: prev });
             }
+        },
+
+        updateLink: async (id, patch) => {
+            const prev = get().links;
+            const newLinks = prev.map((l) =>
+                l.id === id ? { ...l, ...patch } : l,
+            );
+            set({ links: newLinks });
+            try {
+                await persistOntologyLinksImmediate(newLinks);
+            } catch (err) {
+                console.error('[OntologyStore] updateLink rollback:', err);
+                set({ links: prev });
+            }
+        },
+
+        generateLinks: async () => {
+            const { objects, links: existingLinks, addLink: storeAddLink } = get();
+            if (objects.length < 2) return 0;
+
+            // Build a simple AI prompt to generate links between objects
+            const objectSummaries = objects.map(o => `${o.id}|${o.type}|${o.title}`).join('\n');
+            const existingPairs = new Set(existingLinks.map(l => `${l.sourceId}::${l.targetId}`));
+
+            // Use heuristic link generation (no API key dependency)
+            const RELATION_RULES: Array<{ from: string; to: string; rel: import('../types').OntologyLinkRelation; weight: number }> = [
+                { from: 'Vessel', to: 'Port', rel: 'OPERATES_AT', weight: 0.7 },
+                { from: 'Vessel', to: 'Route', rel: 'SAILS', weight: 0.8 },
+                { from: 'RiskEvent', to: 'Vessel', rel: 'EXPOSES_TO', weight: 0.9 },
+                { from: 'RiskEvent', to: 'Port', rel: 'IMPACTS', weight: 0.85 },
+                { from: 'RiskEvent', to: 'Route', rel: 'TRIGGERS', weight: 0.75 },
+                { from: 'Route', to: 'Port', rel: 'CALLS_AT', weight: 0.65 },
+                { from: 'MarketIndicator', to: 'Vessel', rel: 'AFFECTS_COST', weight: 0.6 },
+                { from: 'MarketIndicator', to: 'Route', rel: 'IMPACTS', weight: 0.5 },
+                { from: 'Vessel', to: 'Vessel', rel: 'COMPETES_WITH', weight: 0.3 },
+                { from: 'Port', to: 'Port', rel: 'NEAR', weight: 0.4 },
+            ];
+
+            const drafts: import('../types').OntologyLink[] = [];
+
+            for (const rule of RELATION_RULES) {
+                const sources = objects.filter(o => o.type === rule.from);
+                const targets = objects.filter(o => o.type === rule.to);
+                for (const src of sources) {
+                    for (const tgt of targets) {
+                        if (src.id === tgt.id) continue;
+                        const pairKey = `${src.id}::${tgt.id}`;
+                        const reversePairKey = `${tgt.id}::${src.id}`;
+                        if (existingPairs.has(pairKey) || existingPairs.has(reversePairKey)) continue;
+                        drafts.push({
+                            id: `link-ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                            sourceId: src.id,
+                            targetId: tgt.id,
+                            relationType: rule.rel,
+                            weight: rule.weight + (Math.random() - 0.5) * 0.2,
+                            metadata: { label: `${src.title} → ${tgt.title}`, createdAt: new Date().toISOString() },
+                        });
+                        existingPairs.add(pairKey);
+                    }
+                }
+            }
+
+            // Batch add
+            for (const draft of drafts) {
+                await storeAddLink(draft);
+            }
+
+            return drafts.length;
         },
 
         executeAction: (action) => {

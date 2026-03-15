@@ -224,16 +224,17 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             const cached = await loadIntelArticles('official', scrappedUrls);
             if (cached.length > 0) {
                 setOfficialArticles(cached);
-                console.info(`[GlobalNewsWidget] Loaded ${cached.length} cached official articles from Firebase`);
+                setOfficialLoading(false); // Show cached data immediately
+                console.info(`[GlobalNewsWidget] ✅ Loaded ${cached.length} cached official articles from Firebase`);
             }
 
+            // Fetch fresh data in background (no loading spinner if cache existed)
             const results = await fetchOfficialSources();
             if (results.length > 0) {
                 setOfficialArticles(prev => {
                     const existing = new Set(prev.map(a => a.id));
                     const newItems = results.filter(a => !existing.has(a.id));
                     const merged = [...newItems, ...prev];
-                    // Persist to Firebase
                     persistIntelArticles('official', merged);
                     return merged;
                 });
@@ -246,7 +247,8 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     }, []);
 
     // ============================================================
-    // INIT: Load Firebase cache → Backfill → then start 10-min polling
+    // INIT: Load Firebase cache → (background) Backfill → 10-min polling
+    // Cache-first: show cached articles IMMEDIATELY, fetch only in background
     // ============================================================
     useEffect(() => {
         if (initialized.current) return;
@@ -254,6 +256,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
         (async () => {
             // Step 0: Load cached OSINT articles from Firebase (instant display)
+            let hasCachedData = false;
             try {
                 const scrappedUrls = getScrappedUrls();
                 const cached = await loadIntelArticles('osint', scrappedUrls);
@@ -261,35 +264,38 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     setArticles(cached);
                     addIntelArticles(cached);
                     setLoading(false);
-                    console.info(`[GlobalNewsWidget] Loaded ${cached.length} cached OSINT articles from Firebase`);
+                    setBackfilling(false);
+                    hasCachedData = true;
+                    console.info(`[GlobalNewsWidget] ✅ Loaded ${cached.length} cached OSINT articles from Firebase`);
                 }
             } catch (err) {
                 console.warn('[GlobalNewsWidget] Firebase cache load error:', err);
             }
 
-            // Step 1: Bootstrap historical data (skip if cache has enough articles)
-            setBackfilling(true);
-            try {
-                const historical = await bootstrapHistoricalData();
-                if (historical.length > 0) {
-                    setArticles(prev => {
-                        const existing = new Set(prev.map(a => a.id));
-                        const newItems = historical.filter(a => !existing.has(a.id));
-                        if (newItems.length === 0) return prev;
-                        const merged = [...newItems, ...prev];
-                        persistIntelArticles('osint', merged);
-                        return merged;
-                    });
-                    // Push historical to global store for BEVI
-                    addIntelArticles(historical);
+            // Step 1: Bootstrap historical data (SKIP if cache already has articles)
+            if (!hasCachedData) {
+                setBackfilling(true);
+                try {
+                    const historical = await bootstrapHistoricalData();
+                    if (historical.length > 0) {
+                        setArticles(prev => {
+                            const existing = new Set(prev.map(a => a.id));
+                            const newItems = historical.filter(a => !existing.has(a.id));
+                            if (newItems.length === 0) return prev;
+                            const merged = [...newItems, ...prev];
+                            persistIntelArticles('osint', merged);
+                            return merged;
+                        });
+                        addIntelArticles(historical);
+                    }
+                } catch (err) {
+                    console.warn('[GlobalNewsWidget] Backfill error:', err);
+                } finally {
+                    setBackfilling(false);
                 }
-            } catch (err) {
-                console.warn('[GlobalNewsWidget] Backfill error:', err);
-            } finally {
-                setBackfilling(false);
             }
 
-            // Step 2: First live fetch
+            // Step 2: First live fetch (runs silently in background if cache exists)
             await fetchAndMerge();
 
             // Step 3: Start 10-minute polling

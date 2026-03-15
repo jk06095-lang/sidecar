@@ -209,35 +209,24 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
 
     // ============================================================
     // BUILD GRAPH LINKS FROM STORE (runs when links or nodes change)
-    // Preserves previous visibility to prevent flicker on re-render.
     // ============================================================
     useEffect(() => {
         const currentNodes = nodesRef.current;
-        const prevLinkMap = new Map(linksRef.current.map(l => [l.id, l]));
 
-        const newLinks: GraphLink[] = storeLinks.map((link) => {
-            const prev = prevLinkMap.get(link.id);
-            // Preserve previous visibility for existing links to avoid flicker
-            const defaultVisible = prev?.visible ?? false;
-            return {
-                id: link.id,
-                source: link.sourceId,
-                target: link.targetId,
-                weight: link.weight,
-                relationType: link.relationType,
-                visible: defaultVisible,
-            };
-        });
+        const newLinks: GraphLink[] = storeLinks.map((link) => ({
+            id: link.id,
+            source: link.sourceId,
+            target: link.targetId,
+            weight: link.weight,
+            relationType: link.relationType,
+            visible: false,
+        }));
 
-        // Recalculate visibility based on node visibility
+        // Always recalculate visibility from current node state
         newLinks.forEach((link) => {
             const src = currentNodes.find((n) => n.id === link.source);
             const tgt = currentNodes.find((n) => n.id === link.target);
-            const shouldBeVisible = !!(src?.visible && tgt?.visible);
-            // Only update if both endpoints exist; otherwise keep previous state
-            if (src && tgt) {
-                link.visible = shouldBeVisible;
-            }
+            link.visible = !!(src?.visible && tgt?.visible);
         });
 
         setGraphLinks(newLinks);
@@ -980,40 +969,9 @@ export default function OntologyGraph({ onSelectObject, selectedObjectId, onSele
     // EXPAND ALL / COLLAPSE ALL
     // ============================================================
     const handleExpandAll = () => {
-        const canvasW = canvasRef.current?.width || 800;
-        const canvasH = canvasRef.current?.height || 600;
-        const centerX = canvasW / 2;
-        const centerY = canvasH / 2;
-
-        setGraphNodes((prev) => {
-            // Count currently visible nodes to find a good center
-            const visibleNodes = prev.filter(n => n.visible);
-            const avgX = visibleNodes.length > 0
-                ? visibleNodes.reduce((s, n) => s + n.x, 0) / visibleNodes.length
-                : centerX;
-            const avgY = visibleNodes.length > 0
-                ? visibleNodes.reduce((s, n) => s + n.y, 0) / visibleNodes.length
-                : centerY;
-
-            return prev.map((n, i) => {
-                if (n.visible) {
-                    // Already visible — just mark expanded
-                    return { ...n, expanded: true };
-                }
-                // Position newly visible nodes in a circle around the center of existing nodes
-                const angle = (i / prev.length) * Math.PI * 2;
-                const radius = 180 + Math.random() * 80;
-                return {
-                    ...n,
-                    visible: true,
-                    expanded: true,
-                    x: avgX + Math.cos(angle) * radius + (Math.random() - 0.5) * 30,
-                    y: avgY + Math.sin(angle) * radius + (Math.random() - 0.5) * 30,
-                    vx: 0,
-                    vy: 0,
-                };
-            });
-        });
+        setGraphNodes((prev) => prev.map((n) => ({
+            ...n, visible: true, expanded: true,
+        })));
         setGraphLinks((prev) => prev.map((l) => ({ ...l, visible: true })));
         setExpandedIds(new Set(storeObjects.map((o) => o.id)));
     };

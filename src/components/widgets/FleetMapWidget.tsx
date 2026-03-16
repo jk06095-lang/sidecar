@@ -86,6 +86,10 @@ const LOCATION_COORDS: Record<string, [number, number]> = {
     'Antwerp': [51.22, 4.40],
     'Hamburg': [53.55, 9.99],
     'Piraeus': [37.94, 23.63],
+    'Sharjah': [25.36, 55.40],
+    'Shinas': [24.74, 56.46],
+    'Fujairah': [25.12, 56.33],
+    'Sohar': [24.36, 56.73],
 };
 
 function resolveCoords(location: string): [number, number] {
@@ -515,8 +519,37 @@ export default function FleetMapWidget({
             const destId = String(route.properties.destinationPortId || '');
             const routeLat = Number(route.properties.lat || 0);
             const routeLng = Number(route.properties.lng || 0);
-            const originCoords = portCoordsMap.get(originId);
-            const destCoords = portCoordsMap.get(destId);
+            let originCoords = portCoordsMap.get(originId);
+            let destCoords = portCoordsMap.get(destId);
+
+            // Fallback: resolve coords from route title (e.g. "Sharjah — Shinas (Short-Sea Gulf)")
+            // by looking up port names in LOCATION_COORDS
+            if (!originCoords || !destCoords) {
+                const titleParts = route.title.split(/\s*[—–\-→]\s*/);
+                if (titleParts.length >= 2) {
+                    if (!originCoords) {
+                        const originName = titleParts[0].trim();
+                        for (const [key, coords] of Object.entries(LOCATION_COORDS)) {
+                            if (originName.toLowerCase().includes(key.toLowerCase()) ||
+                                key.toLowerCase().includes(originName.toLowerCase())) {
+                                originCoords = coords;
+                                break;
+                            }
+                        }
+                    }
+                    if (!destCoords) {
+                        // Take last meaningful part, strip parenthetical suffixes
+                        const destName = titleParts[titleParts.length - 1].replace(/\s*\(.*\)/, '').trim();
+                        for (const [key, coords] of Object.entries(LOCATION_COORDS)) {
+                            if (destName.toLowerCase().includes(key.toLowerCase()) ||
+                                key.toLowerCase().includes(destName.toLowerCase())) {
+                                destCoords = coords;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
 
             // Build waypoints: prefer ontology waypoints → auto maritime → fallback
             let routePoints: [number, number][] = [];
@@ -561,24 +594,35 @@ export default function FleetMapWidget({
             const routeColor = ROUTE_STATUS_COLORS[status] || '#06b6d4';
             const riskScore = Number(route.properties.riskScore || 0);
 
-            // Background glow
+            // Background glow (non-interactive)
             const glowLine = L.polyline(routePoints, {
                 color: routeColor,
                 weight: 6,
                 opacity: 0.12,
                 smoothFactor: 1.5,
+                interactive: false,
             }).addTo(map);
 
-            // Main dashed line
+            // Main dashed line (non-interactive — hit detection via hitLine)
             const mainLine = L.polyline(routePoints, {
                 color: routeColor,
                 weight: 2,
                 opacity: 0.6,
                 dashArray: '8, 6',
                 smoothFactor: 1.5,
+                interactive: false,
             }).addTo(map);
 
-            mainLine.bindTooltip(`
+            // Invisible wide hit-area line for click + hover (prevents event ping-pong)
+            const hitLine = L.polyline(routePoints, {
+                color: 'transparent',
+                weight: 16,
+                opacity: 0,
+                smoothFactor: 1.5,
+                interactive: true,
+            }).addTo(map);
+
+            hitLine.bindTooltip(`
                 <div style="font-family:ui-monospace,monospace;font-size:10px;max-width:240px;">
                     <div style="font-weight:800;color:${routeColor};margin-bottom:2px;">
                         ▸ ${route.title}
@@ -600,32 +644,21 @@ export default function FleetMapWidget({
             });
 
             // Click handler → open Object360Panel for this route
-            mainLine.on('click', () => onSelectRoute?.(route.id));
-            // Also make the glow line clickable (wider hit area)
-            glowLine.on('click', () => onSelectRoute?.(route.id));
-            // Pointer cursor on hover
-            mainLine.on('mouseover', () => {
-                mainLine.setStyle({ weight: 4, opacity: 0.9 });
-                glowLine.setStyle({ weight: 10, opacity: 0.25 });
+            hitLine.on('click', () => onSelectRoute?.(route.id));
+
+            // Hover highlight — only on the single hitLine to avoid ping-pong
+            hitLine.on('mouseover', () => {
+                mainLine.setStyle({ weight: 3, opacity: 0.9 });
+                glowLine.setStyle({ weight: 10, opacity: 0.2 });
                 map.getContainer().style.cursor = 'pointer';
             });
-            mainLine.on('mouseout', () => {
-                mainLine.setStyle({ weight: 2, opacity: 0.6 });
-                glowLine.setStyle({ weight: 6, opacity: 0.12 });
-                map.getContainer().style.cursor = '';
-            });
-            glowLine.on('mouseover', () => {
-                mainLine.setStyle({ weight: 4, opacity: 0.9 });
-                glowLine.setStyle({ weight: 10, opacity: 0.25 });
-                map.getContainer().style.cursor = 'pointer';
-            });
-            glowLine.on('mouseout', () => {
+            hitLine.on('mouseout', () => {
                 mainLine.setStyle({ weight: 2, opacity: 0.6 });
                 glowLine.setStyle({ weight: 6, opacity: 0.12 });
                 map.getContainer().style.cursor = '';
             });
 
-            routePolylinesRef.current.push(glowLine, mainLine);
+            routePolylinesRef.current.push(glowLine, mainLine, hitLine);
         });
     }, [routes, portCoordsMap, layers.routes, onSelectRoute]);
 

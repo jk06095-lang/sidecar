@@ -10,18 +10,24 @@
  *   vessel    — bound to an OntologyObject of type Vessel
  *
  * Edges can have labels describing the cause-effect relationship.
+ *
+ * Multi-select:
+ *   - Right-click: toggle node selection (maintains current selection)
+ *   - Ctrl + Left-click: add/toggle node to selection
+ *   - Left-click (no modifier): single-select (clears others)
  */
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
     Network, Plus, Trash2, Link as LinkIcon, Zap, X,
     Ship, Fuel, AlertTriangle, Shield, TrendingUp,
-    ChevronDown, Search,
+    ChevronDown, Search, RotateCcw,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Scenario } from '../../types';
 import { useOntologyStore } from '../../store/ontologyStore';
 import { SCENARIO_VARIABLE_CATALOG, CATEGORY_META, VARIABLE_MAP } from '../../data/scenarioVariables';
 import { loadLogicMap as firestoreLoadLogicMap, saveLogicMap as firestoreSaveLogicMap } from '../../services/firestoreService';
+import { getPresetForScenario } from '../../data/logicTreePresets';
 
 // ============================================================
 // TYPES
@@ -69,30 +75,54 @@ const EDGE_LABEL_PRESETS = [
 export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicMapCanvasProps) {
     const [nodes, setNodes] = useState<ProcessNode[]>([]);
     const [edges, setEdges] = useState<ProcessEdge[]>([]);
-    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+    // Multi-select: Set of selected node IDs
+    const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [linkMode, setLinkMode] = useState<string | null>(null);
     const [dragState, setDragState] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
     const [showAddMenu, setShowAddMenu] = useState<LogicNodeType | null>(null);
     const [varSearch, setVarSearch] = useState('');
     const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
+    const [isPresetActive, setIsPresetActive] = useState(false);
     const canvasRef = useRef<HTMLDivElement>(null);
 
     // Ontology store for vessel nodes
     const ontologyObjects = useOntologyStore(s => s.objects);
     const vessels = useMemo(() => ontologyObjects.filter(o => o.type === 'Vessel' && o.metadata.status === 'active'), [ontologyObjects]);
 
-    // ── Persistence ──
+    // ── Persistence: Load from Firebase, fallback to preset ──
     useEffect(() => {
         (async () => {
             try {
                 const map = await firestoreLoadLogicMap(activeScenario.id);
-                if (map) {
+                if (map && (map.nodes.length > 0 || map.edges.length > 0)) {
                     setNodes(map.nodes || []);
                     setEdges(map.edges || []);
+                    setIsPresetActive(false);
+                } else {
+                    // No saved data — load preset if available
+                    const preset = getPresetForScenario(activeScenario.id);
+                    if (preset) {
+                        setNodes(preset.nodes);
+                        setEdges(preset.edges);
+                        setIsPresetActive(true);
+                        // Auto-save preset to Firebase
+                        try { firestoreSaveLogicMap(activeScenario.id, preset.nodes, preset.edges); } catch { /* ignore */ }
+                    } else {
+                        setNodes([]);
+                        setEdges([]);
+                        setIsPresetActive(false);
+                    }
                 }
             } catch {
-                // Ignore load errors — start with empty canvas
+                // Ignore load errors — try preset
+                const preset = getPresetForScenario(activeScenario.id);
+                if (preset) {
+                    setNodes(preset.nodes);
+                    setEdges(preset.edges);
+                    setIsPresetActive(true);
+                }
             }
+            setSelectedNodeIds(new Set());
         })();
     }, [activeScenario.id]);
 
@@ -100,6 +130,18 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
         try { firestoreSaveLogicMap(activeScenario.id, n, e); } catch { /* ignore */ }
         onEdgesChange?.(e);
     }, [activeScenario.id, onEdgesChange]);
+
+    // ── Reset to preset ──
+    const handleResetToPreset = useCallback(() => {
+        const preset = getPresetForScenario(activeScenario.id);
+        if (!preset) return;
+        if (!confirm('현재 로직 트리를 프리셋으로 초기화하시겠습니까? 사용자 수정 사항이 모두 복원됩니다.')) return;
+        setNodes(preset.nodes);
+        setEdges(preset.edges);
+        setSelectedNodeIds(new Set());
+        setIsPresetActive(true);
+        autoSave(preset.nodes, preset.edges);
+    }, [activeScenario.id, autoSave]);
 
     // ── Node creation helpers ──
     const addGenericNode = (type: LogicNodeType, text: string, extra?: Partial<ProcessNode>) => {
@@ -111,6 +153,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
         autoSave(next, edges);
         setShowAddMenu(null);
         setVarSearch('');
+        setIsPresetActive(false);
     };
 
     const addVariableNode = (variableId: string) => {
@@ -125,24 +168,26 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
         addGenericNode('vessel', obj.title, { objectId });
     };
 
-    // ── Deletion ──
+    // ── Deletion (multi-select aware) ──
     const handleDeleteSelected = () => {
-        if (!selectedNodeId) return;
-        const nextNodes = nodes.filter(n => n.id !== selectedNodeId);
-        const nextEdges = edges.filter(e => e.source !== selectedNodeId && e.target !== selectedNodeId);
+        if (selectedNodeIds.size === 0) return;
+        const nextNodes = nodes.filter(n => !selectedNodeIds.has(n.id));
+        const nextEdges = edges.filter(e => !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target));
         setNodes(nextNodes);
         setEdges(nextEdges);
-        setSelectedNodeId(null);
+        setSelectedNodeIds(new Set());
+        setIsPresetActive(false);
         autoSave(nextNodes, nextEdges);
     };
 
     const handleDeleteEdge = (edgeId: string) => {
         const next = edges.filter(e => e.id !== edgeId);
         setEdges(next);
+        setIsPresetActive(false);
         autoSave(nodes, next);
     };
 
-    // ── Drag logic ──
+    // ── Node mouse down (drag + link + selection) ──
     const handleNodeMouseDown = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
 
@@ -166,6 +211,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                         const edgeId = `edge-${Date.now()}`;
                         const nextEdges = [...edges, { id: edgeId, source: linkMode, target: id, label: '' }];
                         setEdges(nextEdges);
+                        setIsPresetActive(false);
                         autoSave(nodes, nextEdges);
                     }
                 }
@@ -174,7 +220,23 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
             return;
         }
 
-        setSelectedNodeId(id);
+        // Ctrl+Click: toggle add/remove from multi-selection
+        if (e.ctrlKey || e.metaKey) {
+            setSelectedNodeIds(prev => {
+                const next = new Set(prev);
+                if (next.has(id)) {
+                    next.delete(id);
+                } else {
+                    next.add(id);
+                }
+                return next;
+            });
+            return; // Don't start drag on Ctrl+click
+        }
+
+        // Normal click: single-select and start drag
+        setSelectedNodeIds(new Set([id]));
+
         const node = nodes.find(n => n.id === id);
         if (!node || !canvasRef.current) return;
 
@@ -183,6 +245,21 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
             id,
             offsetX: e.clientX - rect.left - node.x,
             offsetY: e.clientY - rect.top - node.y,
+        });
+    };
+
+    // ── Right-click: toggle selection (maintains existing) ──
+    const handleNodeContextMenu = (e: React.MouseEvent, id: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setSelectedNodeIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
         });
     };
 
@@ -275,6 +352,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
 
         setNodes(newNodes);
         setEdges(newEdges);
+        setIsPresetActive(false);
         autoSave(newNodes, newEdges);
     };
 
@@ -295,7 +373,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
     };
 
     const handleBackgroundClick = () => {
-        setSelectedNodeId(null);
+        setSelectedNodeIds(new Set());
         setLinkMode(null);
         setShowAddMenu(null);
     };
@@ -337,8 +415,13 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
     const updateEdgeLabel = (edgeId: string, label: string) => {
         const next = edges.map(e => e.id === edgeId ? { ...e, label } : e);
         setEdges(next);
+        setIsPresetActive(false);
         autoSave(nodes, next);
     };
+
+    // ── First selected node (for link mode) ──
+    const firstSelectedId = selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null;
+    const hasPreset = !!getPresetForScenario(activeScenario.id);
 
     return (
         <div className="relative select-none">
@@ -447,7 +530,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
 
                 {/* Link + Delete controls */}
                 <button
-                    onClick={() => selectedNodeId ? setLinkMode(selectedNodeId) : null}
+                    onClick={() => firstSelectedId ? setLinkMode(firstSelectedId) : null}
                     className={cn("flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
                         linkMode ? "bg-amber-500/20 border-amber-500/50 text-amber-300" : "bg-slate-800/40 border-slate-700/40 text-slate-400 hover:text-slate-200"
                     )}
@@ -457,12 +540,23 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                 </button>
                 <button
                     onClick={handleDeleteSelected}
-                    disabled={!selectedNodeId}
+                    disabled={selectedNodeIds.size === 0}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40 text-slate-400 hover:text-rose-400 text-[10px] font-bold transition-all disabled:opacity-30"
                     title="선택 노드 삭제"
                 >
-                    <Trash2 size={10} /> 삭제
+                    <Trash2 size={10} /> 삭제{selectedNodeIds.size > 1 && ` (${selectedNodeIds.size})`}
                 </button>
+
+                {/* Preset reset button */}
+                {hasPreset && (
+                    <button
+                        onClick={handleResetToPreset}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40 text-slate-400 hover:text-amber-400 text-[10px] font-bold transition-all"
+                        title="프리셋으로 복원"
+                    >
+                        <RotateCcw size={10} /> 프리셋
+                    </button>
+                )}
 
                 {linkMode && (
                     <div className="flex items-center gap-1 text-[9px] text-amber-400 animate-pulse">
@@ -471,8 +565,11 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                     </div>
                 )}
 
-                {/* Node count */}
-                <span className="ml-auto text-[9px] text-slate-600 font-mono">{nodes.length} nodes · {edges.length} edges</span>
+                {/* Selection + Node count */}
+                <span className="ml-auto text-[9px] text-slate-600 font-mono">
+                    {selectedNodeIds.size > 0 && <span className="text-cyan-500 mr-2">{selectedNodeIds.size}개 선택</span>}
+                    {nodes.length} nodes · {edges.length} edges
+                </span>
             </div>
 
             {/* Canvas */}
@@ -484,6 +581,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
                 onClick={handleBackgroundClick}
+                onContextMenu={e => e.preventDefault()}
             >
                 {/* Grid pattern */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
@@ -586,7 +684,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                 {/* Nodes */}
                 {nodes.map(node => {
                     const style = getNodeStyle(node.type);
-                    const isSelected = selectedNodeId === node.id;
+                    const isSelected = selectedNodeIds.has(node.id);
                     const isLinkSource = linkMode === node.id;
 
                     return (
@@ -601,6 +699,7 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                             )}
                             style={{ left: node.x, top: node.y, width: NODE_W, height: NODE_H }}
                             onMouseDown={e => handleNodeMouseDown(e, node.id)}
+                            onContextMenu={e => handleNodeContextMenu(e, node.id)}
                         >
                             <div className="flex items-center gap-1.5">
                                 {style.icon}
@@ -629,6 +728,14 @@ export default function LogicMapCanvas({ activeScenario, onEdgesChange }: LogicM
                         <p className="text-[10px] mt-1">상단 버튼으로 노드를 추가하고 연결하세요</p>
                     </div>
                 )}
+            </div>
+
+            {/* Shortcut hints */}
+            <div className="flex items-center gap-3 mt-1.5 text-[8px] text-slate-600">
+                <span>우클릭: 선택 토글</span>
+                <span>Ctrl+클릭: 다중 선택</span>
+                <span>드래그: 노드 이동</span>
+                {hasPreset && <span>프리셋 버튼: 초기 상태 복원</span>}
             </div>
         </div>
     );

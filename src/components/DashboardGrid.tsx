@@ -269,6 +269,7 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
                             ontologyObjects={objects}
                             ontologyLinks={links}
                             onSelectVessel={handleMapVesselClick}
+                            onSelectRoute={handleObjectSelect}
                             onRefresh={refreshAISPositions}
                             isRefreshing={isAisRefreshing}
                         />

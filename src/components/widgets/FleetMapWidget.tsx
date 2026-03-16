@@ -301,6 +301,7 @@ interface FleetMapWidgetProps {
     ontologyObjects?: OntologyObject[];
     ontologyLinks?: OntologyLink[];
     onSelectVessel?: (vessel: FleetVessel) => void;
+    onSelectRoute?: (routeId: string) => void;
     onRefresh?: () => void;
     isRefreshing?: boolean;
 }
@@ -311,6 +312,7 @@ export default function FleetMapWidget({
     ontologyObjects = [],
     ontologyLinks = [],
     onSelectVessel,
+    onSelectRoute,
     onRefresh,
     isRefreshing,
 }: FleetMapWidgetProps) {
@@ -589,6 +591,7 @@ export default function FleetMapWidget({
                         <span style="color:#64748b;">RISK: ${riskScore}</span>
                         ${route.properties.distanceNm ? `<span style="color:#64748b;">${route.properties.distanceNm} NM</span>` : ''}
                     </div>
+                    <div style="margin-top:4px;color:#64748b;font-size:7px;">클릭하여 상세보기</div>
                 </div>
             `, {
                 sticky: true,
@@ -596,9 +599,35 @@ export default function FleetMapWidget({
                 direction: 'top',
             });
 
+            // Click handler → open Object360Panel for this route
+            mainLine.on('click', () => onSelectRoute?.(route.id));
+            // Also make the glow line clickable (wider hit area)
+            glowLine.on('click', () => onSelectRoute?.(route.id));
+            // Pointer cursor on hover
+            mainLine.on('mouseover', () => {
+                mainLine.setStyle({ weight: 4, opacity: 0.9 });
+                glowLine.setStyle({ weight: 10, opacity: 0.25 });
+                map.getContainer().style.cursor = 'pointer';
+            });
+            mainLine.on('mouseout', () => {
+                mainLine.setStyle({ weight: 2, opacity: 0.6 });
+                glowLine.setStyle({ weight: 6, opacity: 0.12 });
+                map.getContainer().style.cursor = '';
+            });
+            glowLine.on('mouseover', () => {
+                mainLine.setStyle({ weight: 4, opacity: 0.9 });
+                glowLine.setStyle({ weight: 10, opacity: 0.25 });
+                map.getContainer().style.cursor = 'pointer';
+            });
+            glowLine.on('mouseout', () => {
+                mainLine.setStyle({ weight: 2, opacity: 0.6 });
+                glowLine.setStyle({ weight: 6, opacity: 0.12 });
+                map.getContainer().style.cursor = '';
+            });
+
             routePolylinesRef.current.push(glowLine, mainLine);
         });
-    }, [routes, portCoordsMap, layers.routes]);
+    }, [routes, portCoordsMap, layers.routes, onSelectRoute]);
 
     // ---- LAYER: RiskEvent markers ----
     useEffect(() => {

@@ -209,8 +209,13 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             // Reset countdown
             nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
         } catch (err) {
-            console.error('[GlobalNewsWidget] Fetch error:', err);
-            setError(true);
+            console.warn('[GlobalNewsWidget] Fetch error (non-fatal):', err);
+            // Only show error state if we have NO articles at all
+            // Don't block existing feed with transient RSS errors
+            setArticles(prev => {
+                if (prev.length === 0) setError(true);
+                return prev;
+            });
         }
     }, [onStatsUpdate, addIntelArticles]);
 
@@ -272,30 +277,49 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 }
 
                 setArticles(items);
-                addIntelArticles(items);
+                if (items.length > 0) addIntelArticles(items);
                 prevCountRef.current = items.length;
-                setLoading(false);
-                setBackfilling(false);
 
-                // If this is the first snapshot and it's empty → trigger backfill
-                if (!hasReceivedData && items.length === 0) {
+                // HAS DATA → show it immediately, done loading
+                if (items.length > 0) {
+                    setLoading(false);
+                    setBackfilling(false);
+                    setError(false);
                     hasReceivedData = true;
+                    return;
+                }
+
+                // FIRST SNAPSHOT EMPTY → trigger backfill + first RSS fetch
+                // Keep loading/backfilling active until populated
+                if (!hasReceivedData) {
+                    hasReceivedData = true;
+                    setBackfilling(true);
+                    setLoading(true);
+
                     (async () => {
-                        setBackfilling(true);
                         try {
+                            // Step A: Backfill historical data via Gemini
                             const historical = await bootstrapHistoricalData();
                             if (historical.length > 0) {
                                 await appendIntelArticles('osint', historical);
                                 addIntelArticles(historical);
+                                // onSnapshot will fire again with the new data
                             }
                         } catch (err) {
                             console.warn('[GlobalNewsWidget] Backfill error:', err);
                         }
-                        // Also do first RSS fetch
-                        await fetchAndMerge();
+
+                        // Step B: First RSS fetch
+                        try {
+                            await fetchAndMerge();
+                        } catch (err) {
+                            console.warn('[GlobalNewsWidget] First fetch error:', err);
+                        }
+
+                        // Step C: If still no articles after all attempts, stop loading
+                        setBackfilling(false);
+                        setLoading(false);
                     })();
-                } else {
-                    hasReceivedData = true;
                 }
             },
             (err) => {
@@ -342,15 +366,22 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             'official',
             (items) => {
                 setOfficialArticles(items);
-                setOfficialLoading(false);
 
-                // If cache is empty on first snapshot → fetch from API to populate
-                if (!hasReceivedOfficial && items.length === 0) {
+                // HAS DATA → done loading
+                if (items.length > 0) {
+                    setOfficialLoading(false);
+                    hasReceivedOfficial = true;
+                    return;
+                }
+
+                // FIRST SNAPSHOT EMPTY → fetch from API to populate Firestore
+                if (!hasReceivedOfficial) {
                     hasReceivedOfficial = true;
                     console.info('[GlobalNewsWidget] 📡 Official cache empty → fetching from API...');
+                    // Keep officialLoading=true while fetching
                     refreshOfficial();
                 } else {
-                    hasReceivedOfficial = true;
+                    setOfficialLoading(false);
                 }
             },
             (err) => {

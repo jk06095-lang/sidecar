@@ -363,15 +363,15 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             riskScore: 42,
             status: 'open',
             impactValue: 42,
-            originPortId: 'chokepoint-hormuz',
-            destinationPortId: 'port-singapore',
+            originPortId: 'port-sharjah',
+            destinationPortId: 'port-shinas',
             distanceNm: 180,
             estimatedDays: 2,
             riskZones: 'Gulf of Oman coastal',
             fuelCostEstimateUsd: 45000,
             currentStatus: 'open',
-            lat: 25.3,
-            lng: 56.5,
+            lat: 25.0,
+            lng: 56.0,
         },
         metadata: meta('Voyage Planning'),
     },
@@ -662,6 +662,43 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
         },
         metadata: meta('KOGAS'),
     },
+    // ================================================================
+    // ⚓ Sharjah + Shinas Ports (Short-Sea Gulf route endpoints)
+    // ================================================================
+    {
+        id: 'port-sharjah',
+        type: 'Port',
+        title: 'Sharjah Anchorage',
+        description: 'UAE east-coast anchorage. Bulk and general cargo operations.',
+        properties: {
+            riskScore: 35,
+            region: 'ME',
+            status: 'Normal operations',
+            baseWaitDays: 1.0,
+            lat: 25.36,
+            lng: 55.39,
+            congestionPct: 30,
+            impactValue: 35,
+        },
+        metadata: meta('UAE Maritime Authority'),
+    },
+    {
+        id: 'port-shinas',
+        type: 'Port',
+        title: 'Shinas Port',
+        description: 'Oman north-coast port in Gulf of Oman. Bulk cargo and coastal trade.',
+        properties: {
+            riskScore: 28,
+            region: 'ME',
+            status: 'Normal operations',
+            baseWaitDays: 0.5,
+            lat: 24.74,
+            lng: 56.46,
+            congestionPct: 20,
+            impactValue: 28,
+        },
+        metadata: meta('Oman Maritime Authority'),
+    },
 ];
 
 // ============================================================
@@ -692,6 +729,12 @@ export const ONTOLOGY_LINKS: OntologyLink[] = [
     { id: 'link-hormuz-vlbreeze', sourceId: 'chokepoint-hormuz', targetId: 'vessel-vl-breeze', relationType: 'AFFECTED_BY', weight: 0.90, metadata: { label: 'forces delay of transit' } },
     { id: 'link-hormuz-starmaria', sourceId: 'chokepoint-hormuz', targetId: 'vessel-star-maria', relationType: 'AFFECTED_BY', weight: 0.70, metadata: { label: 'wait for safe passage' } },
     { id: 'link-hormuz-hana', sourceId: 'chokepoint-hormuz', targetId: 'vessel-hana-pioneer', relationType: 'AFFECTED_BY', weight: 0.88, metadata: { label: 'LNG transit delay risk' } },
+
+    // ── Sharjah / Shinas port links ──
+    { id: 'link-starmaria-sharjah', sourceId: 'vessel-star-maria', targetId: 'port-sharjah', relationType: 'ROUTES_THROUGH', weight: 0.85, metadata: { label: 'departure from Sharjah' } },
+    { id: 'link-starmaria-shinas', sourceId: 'vessel-star-maria', targetId: 'port-shinas', relationType: 'ROUTES_THROUGH', weight: 0.85, metadata: { label: 'arrival at Shinas' } },
+    { id: 'link-route2-sharjah', sourceId: 'route-sharjah-shinas', targetId: 'port-sharjah', relationType: 'LOCATED_AT', weight: 0.90, metadata: { label: 'origin port' } },
+    { id: 'link-route2-shinas', sourceId: 'route-sharjah-shinas', targetId: 'port-shinas', relationType: 'LOCATED_AT', weight: 0.90, metadata: { label: 'destination port' } },
 
     // ── Cost factors → Vessel impact ──
     { id: 'link-brent-vlbreeze', sourceId: 'commodity-brent', targetId: 'vessel-vl-breeze', relationType: 'TRIGGERS', weight: 0.75, metadata: { label: 'increases voyage cost' } },

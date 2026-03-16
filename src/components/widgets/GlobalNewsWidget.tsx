@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock, RefreshCw, ShieldAlert, FileWarning } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
 import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, type FinOpsStats } from '../../services/newsService';
 import { evaluateNewsSignals, triageWithFlash, escalateWithPro } from '../../services/geminiService';
-import { loadIntelArticles, persistIntelArticles } from '../../services/firestoreService';
+import { subscribeIntelFeed, appendIntelArticles, persistIntelArticles } from '../../services/firestoreService';
 import { useOntologyStore } from '../../store/ontologyStore';
 
 // ============================================================
@@ -46,8 +46,12 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     const initialized = useRef(false);
-    const officialInitialized = useRef(false);
     const nextFetchTimeRef = useRef<number>(Date.now() + POLL_INTERVAL_MS);
+
+    // Cloud-first feed: track new articles for "NEW" badge
+    const [newArticleIds, setNewArticleIds] = useState<Set<string>>(new Set());
+    const prevCountRef = useRef<number>(0);
+    const feedScrollRef = useRef<HTMLDivElement>(null);
 
     // Ontology store for write-back
     const updateObjectProperty = useOntologyStore(s => s.updateObjectProperty);
@@ -181,22 +185,18 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         };
     }, [onCountdownUpdate]);
 
-    // Fetch OSINT articles
+    // ============================================================
+    // CLOUD-FIRST: Background fetch → write to Firestore only
+    // onSnapshot will push changes to UI automatically.
+    // ============================================================
     const fetchAndMerge = useCallback(async () => {
         try {
             const settings = getSettings();
             const { passed } = await fetchAndProcess(settings.osintSources, settings.osintKeywords);
 
             if (passed.length > 0) {
-                setArticles(prev => {
-                    const existing = new Set(prev.map(a => a.id));
-                    const truly_new = passed.filter(a => !existing.has(a.id));
-                    if (truly_new.length === 0) return prev;
-                    const merged = [...truly_new, ...prev].slice(0, 100);
-                    // Persist merged articles to Firebase
-                    persistIntelArticles('osint', merged);
-                    return merged;
-                });
+                // Write to Firestore — onSnapshot will update UI
+                await appendIntelArticles('osint', passed);
                 // Push to global store for BEVI
                 addIntelArticles(passed);
             }
@@ -204,7 +204,6 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             const newStats = getFinOpsStats();
             setStats(newStats);
             onStatsUpdate?.(newStats);
-            setLoading(false);
             setError(false);
 
             // Reset countdown
@@ -212,60 +211,17 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         } catch (err) {
             console.error('[GlobalNewsWidget] Fetch error:', err);
             setError(true);
-            setLoading(false);
         }
     }, [onStatsUpdate, addIntelArticles]);
 
-    // Load cached official articles from Firebase (cache-first)
-    // If cache is empty → auto-fetch from API to populate it
-    const loadOfficialCache = useCallback(async () => {
-        if (officialInitialized.current) return;
-        officialInitialized.current = true;
-        setOfficialLoading(true);
-
-        try {
-            const scrappedUrls = getScrappedUrls();
-            const cached = await loadIntelArticles('official', scrappedUrls);
-            if (cached.length > 0) {
-                setOfficialArticles(cached);
-                setOfficialLoading(false);
-                console.info(`[GlobalNewsWidget] ✅ Loaded ${cached.length} cached official articles from Firebase`);
-                return; // Cache hit → done, no API call needed
-            }
-        } catch (err) {
-            console.warn('[GlobalNewsWidget] Official cache load error:', err);
-        }
-
-        // Cache empty → fetch from API to populate Firebase for next time
-        console.info('[GlobalNewsWidget] 📡 Cache empty → fetching official sources from API...');
-        try {
-            const results = await fetchOfficialSources();
-            if (results.length > 0) {
-                setOfficialArticles(results);
-                persistIntelArticles('official', results);
-                console.info(`[GlobalNewsWidget] ✅ Fetched & cached ${results.length} official articles`);
-            }
-        } catch (err) {
-            console.warn('[GlobalNewsWidget] Official API fetch error:', err);
-        } finally {
-            setOfficialLoading(false);
-        }
-    }, []);
-
-    // Refresh official articles from API (user-triggered or auto)
+    // Refresh official articles from API → write to Firestore
     const refreshOfficial = useCallback(async () => {
         setOfficialLoading(true);
         try {
             const results = await fetchOfficialSources();
             if (results.length > 0) {
-                setOfficialArticles(prev => {
-                    const existing = new Set(prev.map(a => a.id));
-                    const newItems = results.filter(a => !existing.has(a.id));
-                    if (newItems.length === 0) return prev;
-                    const merged = [...newItems, ...prev];
-                    persistIntelArticles('official', merged);
-                    return merged;
-                });
+                // Write to Firestore — onSnapshot will update UI
+                await appendIntelArticles('official', results);
             }
         } catch (err) {
             console.warn('[GlobalNewsWidget] Official refresh error:', err);
@@ -275,71 +231,91 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     }, []);
 
     // ============================================================
-    // INIT: Load Firebase cache → (background) Backfill → 10-min polling
-    // Cache-first: show cached articles IMMEDIATELY, fetch only in background
+    // CLOUD-FIRST INIT: onSnapshot subscription + background workers
+    // 1. Subscribe to Firestore onSnapshot (instant cache display)
+    // 2. If empty → backfill + fetch in background (writes to Firestore)
+    // 3. Start 10-min polling (writes to Firestore)
+    // onSnapshot handles ALL state updates — no direct setArticles from fetch.
     // ============================================================
     useEffect(() => {
         if (initialized.current) return;
         initialized.current = true;
 
-        (async () => {
-            // Step 0: Load cached OSINT articles from Firebase (instant display)
-            let hasCachedData = false;
-            try {
-                const scrappedUrls = getScrappedUrls();
-                const cached = await loadIntelArticles('osint', scrappedUrls);
-                if (cached.length > 0) {
-                    setArticles(cached);
-                    addIntelArticles(cached);
-                    setLoading(false);
-                    setBackfilling(false);
-                    hasCachedData = true;
-                    console.info(`[GlobalNewsWidget] ✅ Loaded ${cached.length} cached OSINT articles from Firebase`);
-                }
-            } catch (err) {
-                console.warn('[GlobalNewsWidget] Firebase cache load error:', err);
-            }
+        const scrappedUrls = getScrappedUrls();
+        let hasReceivedData = false;
 
-            // Step 1: Bootstrap historical data (SKIP if cache already has articles)
-            if (!hasCachedData) {
-                setBackfilling(true);
-                try {
-                    const historical = await bootstrapHistoricalData();
-                    if (historical.length > 0) {
-                        setArticles(prev => {
-                            const existing = new Set(prev.map(a => a.id));
-                            const newItems = historical.filter(a => !existing.has(a.id));
-                            if (newItems.length === 0) return prev;
-                            const merged = [...newItems, ...prev];
-                            persistIntelArticles('osint', merged);
-                            return merged;
+        // Step 0: Subscribe to OSINT feed via onSnapshot (instant Firestore cache)
+        const unsubOsint = subscribeIntelFeed(
+            'osint',
+            (items) => {
+                // Track new articles for "NEW" badge
+                if (hasReceivedData && items.length > prevCountRef.current) {
+                    const currentIds = new Set(articles.map(a => a.id));
+                    const freshIds = items.filter(a => !currentIds.has(a.id)).map(a => a.id);
+                    if (freshIds.length > 0) {
+                        setNewArticleIds(prev => {
+                            const next = new Set(prev);
+                            freshIds.forEach(id => next.add(id));
+                            return next;
                         });
-                        addIntelArticles(historical);
+                        // Auto-clear "NEW" badge after 30 seconds
+                        setTimeout(() => {
+                            setNewArticleIds(prev => {
+                                const next = new Set(prev);
+                                freshIds.forEach(id => next.delete(id));
+                                return next;
+                            });
+                        }, 30_000);
+                        // Scroll to top to show new articles
+                        feedScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                     }
-                } catch (err) {
-                    console.warn('[GlobalNewsWidget] Backfill error:', err);
-                } finally {
-                    setBackfilling(false);
                 }
-            }
 
-            // Step 2: Skip initial API fetch if cache loaded articles. Otherwise, fetch immediately.
-            if (!hasCachedData) {
-                await fetchAndMerge();
-            }
+                setArticles(items);
+                addIntelArticles(items);
+                prevCountRef.current = items.length;
+                setLoading(false);
+                setBackfilling(false);
 
-            // Step 3: Start 10-minute polling
-            nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
-            pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
-        })();
+                // If this is the first snapshot and it's empty → trigger backfill
+                if (!hasReceivedData && items.length === 0) {
+                    hasReceivedData = true;
+                    (async () => {
+                        setBackfilling(true);
+                        try {
+                            const historical = await bootstrapHistoricalData();
+                            if (historical.length > 0) {
+                                await appendIntelArticles('osint', historical);
+                                addIntelArticles(historical);
+                            }
+                        } catch (err) {
+                            console.warn('[GlobalNewsWidget] Backfill error:', err);
+                        }
+                        // Also do first RSS fetch
+                        await fetchAndMerge();
+                    })();
+                } else {
+                    hasReceivedData = true;
+                }
+            },
+            (err) => {
+                console.error('[GlobalNewsWidget] OSINT onSnapshot error:', err);
+                setError(true);
+                setLoading(false);
+            },
+            scrappedUrls,
+        );
 
-        // Visibility-based pause: stop polling when tab is hidden, resume on visible
+        // Step 1: Start 10-minute background polling (writes to Firestore only)
+        nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
+        pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
+
+        // Visibility-based pause: stop polling when tab is hidden (onSnapshot stays active)
         const handleVisibilityChange = () => {
             if (document.hidden) {
-                // Pause polling
                 if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
             } else {
-                // Resume: fetch now and restart timer
+                // Resume polling (onSnapshot already handled real-time updates)
                 fetchAndMerge();
                 nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
                 pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
@@ -348,17 +324,44 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
+            unsubOsint();
             if (pollTimer.current) clearInterval(pollTimer.current);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [fetchAndMerge, addIntelArticles]);
 
-    // Load official sources from cache when tab switches to 'official'
+    // Subscribe to official feed via onSnapshot when tab switches
     useEffect(() => {
-        if (activeTab === 'official' && !officialInitialized.current) {
-            loadOfficialCache();
-        }
-    }, [activeTab, loadOfficialCache]);
+        if (activeTab !== 'official') return;
+
+        const scrappedUrls = getScrappedUrls();
+        let hasReceivedOfficial = false;
+        setOfficialLoading(true);
+
+        const unsub = subscribeIntelFeed(
+            'official',
+            (items) => {
+                setOfficialArticles(items);
+                setOfficialLoading(false);
+
+                // If cache is empty on first snapshot → fetch from API to populate
+                if (!hasReceivedOfficial && items.length === 0) {
+                    hasReceivedOfficial = true;
+                    console.info('[GlobalNewsWidget] 📡 Official cache empty → fetching from API...');
+                    refreshOfficial();
+                } else {
+                    hasReceivedOfficial = true;
+                }
+            },
+            (err) => {
+                console.warn('[GlobalNewsWidget] Official onSnapshot error:', err);
+                setOfficialLoading(false);
+            },
+            scrappedUrls,
+        );
+
+        return () => unsub();
+    }, [activeTab, refreshOfficial]);
 
     // ============================================================
     // WRITE-BACK: Apply suggested action to ontology
@@ -392,6 +395,9 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         : officialArticles;
 
     const isLoading = activeTab === 'osint' ? (loading && !backfilling) : officialLoading;
+
+    // Check if an article is "new" (arrived via onSnapshot in last 30s)
+    const isNewArticle = useCallback((id: string) => newArticleIds.has(id), [newArticleIds]);
 
     if (backfilling && articles.length === 0) {
         return (
@@ -503,7 +509,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 </div>
             )}
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-0 relative">
+            <div ref={feedScrollRef} className="flex-1 overflow-y-auto custom-scrollbar p-0 relative">
                 <div className="sticky top-0 h-4 bg-gradient-to-b from-slate-900/80 to-transparent z-10 w-full pointer-events-none" />
 
                 <div className="flex flex-col flex-1 pb-4">
@@ -517,6 +523,14 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
                     {visibleArticles.map((article, i) => (
                         <React.Fragment key={article.id || i}>
+                            {/* NEW badge for freshly arrived articles */}
+                            {isNewArticle(article.id) && (
+                                <div className="flex items-center gap-2 px-4 py-1 animate-pulse">
+                                    <div className="h-px flex-1 bg-gradient-to-r from-cyan-500/50 to-transparent" />
+                                    <span className="text-[9px] font-bold text-cyan-400 uppercase tracking-widest px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30">🆕 NEW</span>
+                                    <div className="h-px flex-1 bg-gradient-to-l from-cyan-500/50 to-transparent" />
+                                </div>
+                            )}
                             {activeTab === 'official'
                                 ? <OfficialCard
                                     article={article}

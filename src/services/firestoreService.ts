@@ -907,3 +907,98 @@ async function persistIntelArticlesImmediate(category: IntelCategory, articles: 
         console.warn(`[Firestore] persistIntelArticles(${category}) failed:`, err);
     }
 }
+
+// ============================================================
+// INTEL FEED — Real-time onSnapshot listener (Financial Juice style)
+// Follows the same pattern as subscribeOntologyGraph / subscribeFleetTelemetry.
+// The UI subscribes once; background workers write new articles to Firestore,
+// and onSnapshot pushes them to the UI instantly.
+// ============================================================
+
+/**
+ * Subscribe to real-time intel feed updates via onSnapshot.
+ * Fires `onChange` with the full article list (newest first) on every update.
+ * Returns an unsubscribe function for cleanup.
+ *
+ * First fire = current Firestore cache (instant display).
+ * Subsequent fires = new articles written by background polling.
+ */
+export function subscribeIntelFeed(
+    category: IntelCategory,
+    onChange: (articles: IntelArticle[]) => void,
+    onError?: (error: Error) => void,
+    scrappedArticleUrls?: Set<string>,
+): Unsubscribe {
+    const unsub = onSnapshot(
+        doc(db, 'app', INTEL_DOC_KEY[category]),
+        (snap) => {
+            if (!snap.exists()) {
+                onChange([]);
+                return;
+            }
+            const data = snap.data();
+            let items: IntelArticle[] = data.items || [];
+
+            // TTL cleanup: remove articles older than 14 days, but keep scrapped ones
+            const cutoff = Date.now() - INTEL_TTL_MS;
+            items = items.filter(article => {
+                const fetchedAt = new Date(article.fetchedAt || article.publishedAt).getTime();
+                const isExpired = fetchedAt < cutoff;
+                const isScrapped = scrappedArticleUrls?.has(article.url) ?? false;
+                return !isExpired || isScrapped;
+            });
+
+            // Sort newest first
+            items.sort((a, b) =>
+                new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+            );
+
+            onChange(items);
+        },
+        (err) => {
+            console.error(`[Firestore] onSnapshot intel_${category} error:`, err);
+            onError?.(err);
+        },
+    );
+
+    console.info(`[Firestore] 🔴 LIVE: Subscribed to intel feed (${category})`);
+    return unsub;
+}
+
+/**
+ * Append new articles to existing Firestore intel doc (atomic read-merge-write).
+ * Deduplicates by article.id, sorts newest first, caps at 200 items.
+ * Used by background polling workers — the onSnapshot listener will
+ * automatically push the result to all subscribed UIs.
+ */
+export async function appendIntelArticles(
+    category: IntelCategory,
+    newArticles: IntelArticle[],
+): Promise<void> {
+    if (newArticles.length === 0) return;
+
+    try {
+        const docRef = doc(db, 'app', INTEL_DOC_KEY[category]);
+        const snap = await getDoc(docRef);
+        const existing: IntelArticle[] = snap.exists() ? (snap.data().items || []) : [];
+
+        // Deduplicate by id
+        const existingIds = new Set(existing.map(a => a.id));
+        const trulyNew = newArticles.filter(a => !existingIds.has(a.id));
+        if (trulyNew.length === 0) return;
+
+        // Merge: new items first, then existing, cap at 200
+        const merged = [...trulyNew, ...existing]
+            .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+            .slice(0, 200);
+
+        await setDoc(docRef, {
+            items: merged,
+            updatedAt: serverTimestamp(),
+        });
+
+        console.info(`[Firestore] Appended ${trulyNew.length} new ${category} articles (total: ${merged.length})`);
+    } catch (err) {
+        console.warn(`[Firestore] appendIntelArticles(${category}) failed:`, err);
+    }
+}

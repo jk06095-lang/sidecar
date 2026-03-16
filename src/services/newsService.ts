@@ -642,53 +642,17 @@ async function fetchDirectAPI(url: string): Promise<IntelArticle[]> {
 
 // ============================================================
 // HISTORICAL BACKFILL — Gemini Search Grounding
-// Runs ONCE on first load to populate the feed with real
-// maritime intelligence events from 2026-03-01 to present.
-// Cached in localStorage with 24h TTL.
+// Runs ONCE on first load when Firestore has no cached articles.
+// Results written to Firestore by the caller (GlobalNewsWidget).
 // ============================================================
-
-const BACKFILL_CACHE_KEY = 'sidecar_backfill_cache';
-const BACKFILL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-interface BackfillCache {
-    articles: IntelArticle[];
-    timestamp: number;
-}
-
-function getBackfillCache(): IntelArticle[] | null {
-    try {
-        const raw = localStorage.getItem(BACKFILL_CACHE_KEY);
-        if (!raw) return null;
-        const cache: BackfillCache = JSON.parse(raw);
-        if (Date.now() - cache.timestamp > BACKFILL_TTL_MS) {
-            localStorage.removeItem(BACKFILL_CACHE_KEY);
-            return null;
-        }
-        return cache.articles;
-    } catch {
-        return null;
-    }
-}
-
-function setBackfillCache(articles: IntelArticle[]) {
-    try {
-        const cache: BackfillCache = { articles, timestamp: Date.now() };
-        localStorage.setItem(BACKFILL_CACHE_KEY, JSON.stringify(cache));
-    } catch { /* storage full, ignore */ }
-}
-
 /**
  * Bootstrap the intelligence feed with real historical data.
  * Uses Gemini Search Grounding to find actual maritime/geopolitical events
- * from 2026-03-01 to present date. Returns cached results if available.
+ * from 2026-03-01 to present date.
+ * Called only when Firestore has no cached articles.
  */
 export async function bootstrapHistoricalData(): Promise<IntelArticle[]> {
-    // Check cache first
-    const cached = getBackfillCache();
-    if (cached && cached.length > 0) {
-        console.log('[NewsService] Using cached backfill data:', cached.length, 'articles');
-        return cached;
-    }
+    console.log('[NewsService] Starting historical backfill via Gemini Search...');
 
     const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-11'
 
@@ -764,8 +728,6 @@ Return ONLY a JSON array. No other text.`;
         // Sort newest first for display
         articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
-        // Cache results
-        setBackfillCache(articles);
         console.log('[NewsService] Backfill complete:', articles.length, 'historical articles');
 
         return articles;

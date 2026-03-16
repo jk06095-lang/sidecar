@@ -98,6 +98,159 @@ function resolveCoords(location: string): [number, number] {
 }
 
 // ============================================================
+// MARITIME WAYPOINT GENERATOR
+// Generates realistic sea-route waypoints to avoid crossing land.
+// Key corridors:
+//   Persian Gulf → East Asia (around India via Arabian Sea)
+//   Red Sea / Suez → East Asia
+//   East Africa → East Asia
+// ============================================================
+
+/** Well-known maritime corridor waypoints */
+const MARITIME_CORRIDORS: Record<string, [number, number][]> = {
+    // Persian Gulf exit → Arabian Sea → south India → Malacca
+    pgToEasia: [
+        [25.5, 56.5],   // Strait of Hormuz exit
+        [22.0, 60.0],   // Oman coast
+        [15.0, 61.0],   // Arabian Sea (mid)
+        [8.0, 76.0],    // South India / Lakshadweep Sea
+        [5.5, 80.0],    // South of Sri Lanka
+        [4.0, 88.0],    // Bay of Bengal (south)
+        [2.5, 95.0],    // Approaching Malacca
+        [1.5, 104.0],   // Singapore Strait
+    ],
+    // Singapore → Northeast Asia (Korea / Japan / China)
+    sgToNea: [
+        [1.5, 104.0],   // Singapore
+        [5.0, 109.0],   // South China Sea (south)
+        [12.0, 114.0],  // South China Sea (central)
+        [18.0, 117.0],  // South China Sea (north)
+        [22.0, 120.0],  // Taiwan Strait area
+        [28.0, 125.0],  // East China Sea
+    ],
+    // Red Sea → Arabian Sea (Bab-el-Mandeb → Gulf of Aden)
+    redSeaToArabian: [
+        [12.5, 43.5],   // Bab-el-Mandeb
+        [12.0, 47.0],   // Gulf of Aden
+        [11.5, 52.0],   // Approaching Arabian Sea
+    ],
+};
+
+/**
+ * Generate realistic maritime waypoints between two coordinates.
+ * Detects when a straight line would cross major landmasses and
+ * injects corridor waypoints along real shipping lanes.
+ */
+function generateMaritimeWaypoints(
+    origin: [number, number],
+    destination: [number, number],
+): [number, number][] {
+    const [oLat, oLng] = origin;
+    const [dLat, dLng] = destination;
+
+    // Helper: check if a point is roughly in a geographic region
+    const isInPersianGulf = (lat: number, lng: number) =>
+        lat > 20 && lat < 32 && lng > 44 && lng < 60;
+    const isInRedSea = (lat: number, lng: number) =>
+        lat > 12 && lat < 32 && lng > 32 && lng < 44;
+    const isInEastAsia = (_lat: number, lng: number) =>
+        lng > 104;
+
+    // Detect if straight line would cross India
+    // (origin west of India, destination east of India, or vice versa)
+    const wouldCrossIndia = (
+        (oLng < 77 && dLng > 80 && oLat > 0 && oLat < 30 && dLat > -5 && dLat < 40) ||
+        (dLng < 77 && oLng > 80 && dLat > 0 && dLat < 30 && oLat > -5 && oLat < 40)
+    );
+
+    const result: [number, number][] = [origin];
+
+    if (wouldCrossIndia) {
+        // Determine direction: west→east or east→west
+        const westToEast = oLng < dLng;
+        const westernPoint = westToEast ? origin : destination;
+        const easternPoint = westToEast ? destination : origin;
+
+        // Build corridor segments
+        const corridorPoints: [number, number][] = [];
+
+        // 1. If starting from Persian Gulf, add PG exit waypoints
+        if (isInPersianGulf(westernPoint[0], westernPoint[1])) {
+            corridorPoints.push(
+                MARITIME_CORRIDORS.pgToEasia[0], // Hormuz
+                MARITIME_CORRIDORS.pgToEasia[1], // Oman
+            );
+        }
+
+        // 2. If starting from Red Sea, add Red Sea exit
+        if (isInRedSea(westernPoint[0], westernPoint[1])) {
+            corridorPoints.push(...MARITIME_CORRIDORS.redSeaToArabian);
+        }
+
+        // 3. Arabian Sea → south India → Sri Lanka (core India-avoidance)
+        corridorPoints.push(
+            [15.0, 61.0],   // Arabian Sea mid
+            [8.0, 76.0],    // South India
+            [5.5, 80.0],    // South of Sri Lanka
+        );
+
+        // 4. Bay of Bengal → Malacca Strait
+        corridorPoints.push(
+            [4.0, 88.0],    // Bay of Bengal south
+            [2.5, 95.0],    // Approaching Malacca
+        );
+
+        // 5. Singapore if heading further east
+        if (isInEastAsia(easternPoint[0], easternPoint[1])) {
+            corridorPoints.push([1.5, 104.0]); // Singapore
+        }
+
+        // 6. If destination is NE Asia (Korea/Japan/China), add SCS waypoints
+        if (easternPoint[0] > 20 && easternPoint[1] > 115) {
+            corridorPoints.push(
+                [5.0, 109.0],   // SCS south
+                [12.0, 114.0],  // SCS center
+                [18.0, 117.0],  // SCS north
+            );
+            if (easternPoint[0] > 28) {
+                corridorPoints.push([25.0, 122.0]); // East China Sea approach
+            }
+        }
+
+        // If east→west, reverse the corridor
+        if (!westToEast) {
+            corridorPoints.reverse();
+        }
+
+        // Filter out corridor points that are too close to origin or destination
+        for (const wp of corridorPoints) {
+            const distFromOrigin = Math.abs(wp[0] - oLat) + Math.abs(wp[1] - oLng);
+            const distFromDest = Math.abs(wp[0] - dLat) + Math.abs(wp[1] - dLng);
+            if (distFromOrigin > 3 && distFromDest > 3) {
+                result.push(wp);
+            }
+        }
+    } else {
+        // No India crossing detected — check for other long routes
+        // that might benefit from slight curvature (e.g. avoid Arabian Peninsula)
+        const totalDist = Math.abs(oLat - dLat) + Math.abs(oLng - dLng);
+        if (totalDist > 30) {
+            // For very long routes without India crossing, add a midpoint
+            // with slight offset to create a gentle arc
+            const midLat = (oLat + dLat) / 2;
+            const midLng = (oLng + dLng) / 2;
+            // Offset perpendicular to the route line (southward bias for northern hemisphere)
+            const perpOffsetLat = -(dLng - oLng) * 0.03;
+            const perpOffsetLng = (dLat - oLat) * 0.03;
+            result.push([midLat + perpOffsetLat, midLng + perpOffsetLng]);
+        }
+    }
+
+    result.push(destination);
+    return result;
+}
+
+// ============================================================
 // RISK CONFIG (unchanged)
 // ============================================================
 const RISK_COLORS: Record<string, string> = {
@@ -363,20 +516,51 @@ export default function FleetMapWidget({
             const originCoords = portCoordsMap.get(originId);
             const destCoords = portCoordsMap.get(destId);
 
-            // Build waypoints: origin → route center → destination
-            const waypoints: [number, number][] = [];
-            if (originCoords) waypoints.push(originCoords);
-            if (routeLat !== 0 || routeLng !== 0) waypoints.push([routeLat, routeLng]);
-            if (destCoords) waypoints.push(destCoords);
+            // Build waypoints: prefer ontology waypoints → auto maritime → fallback
+            let routePoints: [number, number][] = [];
 
-            if (waypoints.length < 2) return; // Need at least 2 points
+            // 1. Check if the ontology route has explicit waypoints
+            const ontologyWaypoints = route.properties.waypoints;
+            if (Array.isArray(ontologyWaypoints) && ontologyWaypoints.length >= 2) {
+                // Use ontology waypoints directly
+                routePoints = (ontologyWaypoints as { lat: number; lng: number }[])
+                    .filter(w => w && typeof w.lat === 'number' && typeof w.lng === 'number')
+                    .map(w => [w.lat, w.lng] as [number, number]);
+                // Prepend origin and append destination if not included
+                if (originCoords && routePoints.length > 0) {
+                    const [fLat, fLng] = routePoints[0];
+                    const [oLat, oLng] = originCoords;
+                    if (Math.abs(fLat - oLat) + Math.abs(fLng - oLng) > 1) {
+                        routePoints.unshift(originCoords);
+                    }
+                }
+                if (destCoords && routePoints.length > 0) {
+                    const [lLat, lLng] = routePoints[routePoints.length - 1];
+                    const [dLat, dLng] = destCoords;
+                    if (Math.abs(lLat - dLat) + Math.abs(lLng - dLng) > 1) {
+                        routePoints.push(destCoords);
+                    }
+                }
+            }
+            // 2. Auto-generate realistic maritime waypoints when both ports are known
+            else if (originCoords && destCoords) {
+                routePoints = generateMaritimeWaypoints(originCoords, destCoords);
+            }
+            // 3. Fallback: origin → (route center) → destination
+            else {
+                if (originCoords) routePoints.push(originCoords);
+                if (routeLat !== 0 || routeLng !== 0) routePoints.push([routeLat, routeLng]);
+                if (destCoords) routePoints.push(destCoords);
+            }
+
+            if (routePoints.length < 2) return; // Need at least 2 points
 
             const status = String(route.properties.currentStatus || route.properties.status || 'open');
             const routeColor = ROUTE_STATUS_COLORS[status] || '#06b6d4';
             const riskScore = Number(route.properties.riskScore || 0);
 
             // Background glow
-            const glowLine = L.polyline(waypoints, {
+            const glowLine = L.polyline(routePoints, {
                 color: routeColor,
                 weight: 6,
                 opacity: 0.12,
@@ -384,7 +568,7 @@ export default function FleetMapWidget({
             }).addTo(map);
 
             // Main dashed line
-            const mainLine = L.polyline(waypoints, {
+            const mainLine = L.polyline(routePoints, {
                 color: routeColor,
                 weight: 2,
                 opacity: 0.6,
@@ -647,8 +831,8 @@ export default function FleetMapWidget({
                     <button
                         onClick={() => setLayerPanel(!layerPanel)}
                         className={`p-1.5 rounded border transition-colors flex items-center gap-1 ${layerPanel
-                                ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
-                                : 'bg-slate-800/80 border-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-700/80'
+                            ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
+                            : 'bg-slate-800/80 border-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-700/80'
                             }`}
                         title="레이어 관리"
                     >
@@ -689,8 +873,8 @@ export default function FleetMapWidget({
                                 key={key}
                                 onClick={() => toggleLayer(key)}
                                 className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-all ${layers[key]
-                                        ? 'bg-slate-800/60 hover:bg-slate-800/80'
-                                        : 'opacity-40 hover:opacity-60'
+                                    ? 'bg-slate-800/60 hover:bg-slate-800/80'
+                                    : 'opacity-40 hover:opacity-60'
                                     }`}
                             >
                                 <div

@@ -1002,3 +1002,46 @@ export async function appendIntelArticles(
         console.warn(`[Firestore] appendIntelArticles(${category}) failed:`, err);
     }
 }
+
+// ============================================================
+// NOTIFICATION READ STATE — Per-user persistence
+//   app/notification_reads/{userId} — { readIds: string[] }
+//   Tracks which notification IDs a user has read so
+//   read state persists across page refreshes.
+// ============================================================
+
+/**
+ * Load read notification IDs for a specific user.
+ * Falls back to localStorage if Firestore is unavailable.
+ */
+export async function loadNotificationReadIds(userId: string): Promise<string[]> {
+    try {
+        const snap = await getDoc(doc(db, 'app', 'notification_reads', userId));
+        if (snap.exists()) {
+            return (snap.data().readIds as string[]) || [];
+        }
+    } catch (err) {
+        console.warn('[Firestore] loadNotificationReadIds failed:', err);
+    }
+    // Fallback to localStorage
+    try {
+        const raw = localStorage.getItem(`sidecar_notif_read_${userId}`);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+
+/**
+ * Save read notification IDs for a specific user.
+ * Debounced to avoid rapid writes when marking multiple notifications.
+ */
+export function saveNotificationReadIds(userId: string, readIds: string[]): void {
+    // Instant localStorage cache
+    localStorage.setItem(`sidecar_notif_read_${userId}`, JSON.stringify(readIds));
+
+    debouncedWrite(`notif_reads_${userId}`, async () => {
+        await setDoc(doc(db, 'app', 'notification_reads', userId), {
+            readIds,
+            updatedAt: serverTimestamp(),
+        });
+    });
+}

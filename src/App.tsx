@@ -6,6 +6,7 @@ import Ontology from './components/Ontology';
 import ScenarioBuilder from './components/ScenarioBuilder';
 import TopTabBar, { type Notification } from './components/TopTabBar';
 import ToastContainer from './components/ToastContainer';
+import { useAuthUser } from './components/AuthGate';
 
 // Lazy-load Action Center and News (heavy composite components)
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
@@ -20,9 +21,12 @@ import {
   saveSettings as firestoreSaveSettings,
   saveCustomScenarios,
   cleanupScenarioOrphans,
+  loadNotificationReadIds,
+  saveNotificationReadIds,
 } from './services/firestoreService';
 
 export default function App() {
+  const authUser = useAuthUser();
   const [activeTab, setActiveTab] = useState('workspace');
   const [isSidebarMinimized, setIsSidebarMinimized] = useState(false);
   const realtimeOverrideRef = useRef(false);
@@ -66,12 +70,28 @@ export default function App() {
   }, []);
 
   const handleNotificationRead = useCallback((id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  }, []);
+    setNotifications(prev => {
+      const updated = prev.map(n => n.id === id ? { ...n, read: true } : n);
+      // Persist read IDs to Firestore
+      if (authUser?.uid) {
+        const readIds = updated.filter(n => n.read).map(n => n.id);
+        saveNotificationReadIds(authUser.uid, readIds);
+      }
+      return updated;
+    });
+  }, [authUser?.uid]);
 
   const handleClearNotifications = useCallback(() => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  }, []);
+    setNotifications(prev => {
+      const updated = prev.map(n => ({ ...n, read: true }));
+      // Persist all as read
+      if (authUser?.uid) {
+        const readIds = updated.map(n => n.id);
+        saveNotificationReadIds(authUser.uid, readIds);
+      }
+      return updated;
+    });
+  }, [authUser?.uid]);
 
   // Tab management (open/close/switch)
   const handleSetActiveTab = useCallback((tab: string) => {
@@ -168,6 +188,17 @@ export default function App() {
       if (remote) setSettings(prev => ({ ...prev, ...remote }));
     });
   }, []);
+
+  // Load per-user notification read state from Firestore
+  useEffect(() => {
+    if (!authUser?.uid) return;
+    loadNotificationReadIds(authUser.uid).then(readIds => {
+      if (readIds.length > 0) {
+        const readSet = new Set(readIds);
+        setNotifications(prev => prev.map(n => readSet.has(n.id) ? { ...n, read: true } : n));
+      }
+    });
+  }, [authUser?.uid]);
 
   // ============================================================
   // EFFECT: Listen for legacy ontology_updated events → recalculate

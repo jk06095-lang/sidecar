@@ -563,6 +563,12 @@ export async function loadOntologyGraph(): Promise<{
             ? (linkSnap.data().items as OntologyLink[]) || []
             : [];
 
+        // If objects doc exists but is empty, treat as needing re-seed
+        if (objects.length === 0) {
+            console.warn('[Firestore] Ontology objects doc exists but is EMPTY — triggering re-seed');
+            return null;
+        }
+
         console.info(`[Firestore] Ontology loaded: ${objects.length} objects, ${links.length} links`);
         return { objects, links };
     } catch (err) {
@@ -1016,7 +1022,7 @@ export async function appendIntelArticles(
  */
 export async function loadNotificationReadIds(userId: string): Promise<string[]> {
     try {
-        const snap = await getDoc(doc(db, 'app', 'notification_reads', userId));
+        const snap = await getDoc(doc(db, 'notification_reads', userId));
         if (snap.exists()) {
             return (snap.data().readIds as string[]) || [];
         }
@@ -1039,7 +1045,7 @@ export function saveNotificationReadIds(userId: string, readIds: string[]): void
     localStorage.setItem(`sidecar_notif_read_${userId}`, JSON.stringify(readIds));
 
     debouncedWrite(`notif_reads_${userId}`, async () => {
-        await setDoc(doc(db, 'app', 'notification_reads', userId), {
+        await setDoc(doc(db, 'notification_reads', userId), {
             readIds,
             updatedAt: serverTimestamp(),
         });

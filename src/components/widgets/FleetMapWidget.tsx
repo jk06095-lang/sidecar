@@ -599,30 +599,33 @@ export default function FleetMapWidget({
                 direction: 'top',
             });
 
-            // Invisible wide hit-area line for stable hover & click
-            const hitLine = L.polyline(routePoints, {
-                color: 'transparent',
-                weight: 16,
-                opacity: 0,
-                interactive: true,
-            }).addTo(map);
-
-            // All interaction via hitLine to avoid mouseover flickering
-            hitLine.on('click', () => onSelectRoute?.(route.id));
-            hitLine.on('mouseover', () => {
-                mainLine.setStyle({ weight: 3, opacity: 0.9 });
-                glowLine.setStyle({ weight: 8, opacity: 0.25 });
+            // Click handler → open Object360Panel for this route
+            mainLine.on('click', () => onSelectRoute?.(route.id));
+            // Also make the glow line clickable (wider hit area)
+            glowLine.on('click', () => onSelectRoute?.(route.id));
+            // Pointer cursor on hover
+            mainLine.on('mouseover', () => {
+                mainLine.setStyle({ weight: 4, opacity: 0.9 });
+                glowLine.setStyle({ weight: 10, opacity: 0.25 });
                 map.getContainer().style.cursor = 'pointer';
             });
-            hitLine.on('mouseout', () => {
+            mainLine.on('mouseout', () => {
                 mainLine.setStyle({ weight: 2, opacity: 0.6 });
                 glowLine.setStyle({ weight: 6, opacity: 0.12 });
                 map.getContainer().style.cursor = '';
             });
-            // Bind tooltip to hitLine as well for seamless interaction
-            hitLine.bindTooltip(mainLine.getTooltip()!);
+            glowLine.on('mouseover', () => {
+                mainLine.setStyle({ weight: 4, opacity: 0.9 });
+                glowLine.setStyle({ weight: 10, opacity: 0.25 });
+                map.getContainer().style.cursor = 'pointer';
+            });
+            glowLine.on('mouseout', () => {
+                mainLine.setStyle({ weight: 2, opacity: 0.6 });
+                glowLine.setStyle({ weight: 6, opacity: 0.12 });
+                map.getContainer().style.cursor = '';
+            });
 
-            routePolylinesRef.current.push(glowLine, mainLine, hitLine);
+            routePolylinesRef.current.push(glowLine, mainLine);
         });
     }, [routes, portCoordsMap, layers.routes, onSelectRoute]);
 

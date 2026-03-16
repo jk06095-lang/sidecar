@@ -1,34 +1,30 @@
 /**
  * FleetMapWidget — WorldView-style Geospatial Command Center
- * 
- * Satellite map with multi-layer intelligence fusion:
- *   Layer 1: Fleet vessel positions (AIS + estimated)
- *   Layer 2: UKMTO maritime incident markers
- *   Layer 3: Major shipping route lanes (polylines)
- *   Layer 4: Chokepoint / risk zone overlays (polygons)
- *   Layer 5: Intelligence feed ticker
+ *
+ * ALL map layers are driven by Firebase ontology objects:
+ *   Layer 1: Fleet vessel positions (from OntologyObject type='Vessel')
+ *   Layer 2: RiskEvent markers (from OntologyObject type='RiskEvent')
+ *   Layer 3: Route polylines (from OntologyObject type='Route' + linked Ports)
+ *   Layer 4: Port / Chokepoint markers (from OntologyObject type='Port')
+ *   Layer 5: Intelligence feed ticker (from RiskEvent objects)
+ *
+ * NO hardcoded data — everything comes from the ontology store / Firestore.
  *
  * Uses Leaflet with ESRI World Imagery satellite tiles (free, no API key).
- *
- * [Part 3] derivedRiskLevel from quant engine drives:
- *   - CRITICAL → intense red pulse, double-ring animation, ⚠ badge
- *   - WARNING  → amber pulse, single-ring
- *   - SAFE     → default color
- * Tooltip shows riskFactors with root cause descriptions.
  */
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
     MapPin, ExternalLink, Navigation, Fuel, Shield, Anchor,
     Maximize2, Minimize2, AlertTriangle, RefreshCw, Loader2,
-    Layers, Ship, Crosshair, Radio, Eye, EyeOff, Zap
+    Layers, Ship, Crosshair, Eye, EyeOff, Zap, Radio
 } from 'lucide-react';
-import type { FleetVessel } from '../../types';
+import type { FleetVessel, OntologyObject, OntologyLink } from '../../types';
 import type { AISPosition } from '../../services/aisService';
 
 // ============================================================
-// LOCATION COORDINATES
+// LOCATION COORDINATES (fallback resolver for vessels)
 // ============================================================
 const LOCATION_COORDS: Record<string, [number, number]> = {
     'Persian Gulf': [26.56, 56.25],
@@ -102,182 +98,6 @@ function resolveCoords(location: string): [number, number] {
 }
 
 // ============================================================
-// UKMTO INCIDENT DATA (representative recent incidents)
-// ============================================================
-interface UKMTOIncident {
-    id: string;
-    lat: number;
-    lng: number;
-    title: string;
-    description: string;
-    date: string;
-    type: 'attack' | 'suspicious' | 'warning' | 'boarding';
-    area: string;
-}
-
-const UKMTO_INCIDENTS: UKMTOIncident[] = [
-    { id: 'UK-001', lat: 13.42, lng: 42.58, title: 'Missile Attack on Bulk Carrier', description: 'Vessel struck by unidentified projectile. Crew safe, vessel taking on water.', date: '2026-03-14', type: 'attack', area: 'Red Sea - Southern' },
-    { id: 'UK-002', lat: 12.80, lng: 43.30, title: 'Drone Strike Near Bab el-Mandeb', description: 'Unmanned aerial vehicle detonated near commercial vessel. Minor damage reported.', date: '2026-03-13', type: 'attack', area: 'Bab el-Mandeb Strait' },
-    { id: 'UK-003', lat: 14.10, lng: 42.20, title: 'Suspicious Approach - Skiff', description: 'Two high-speed skiffs approached vessel at 25 knots. Withdrew after armed guards visible.', date: '2026-03-12', type: 'suspicious', area: 'Red Sea' },
-    { id: 'UK-004', lat: 12.00, lng: 45.00, title: 'Warning - Increased Threat Level', description: 'Multiple reports of drone activity in the area. All vessels advised to maintain maximum readiness.', date: '2026-03-11', type: 'warning', area: 'Gulf of Aden - West' },
-    { id: 'UK-005', lat: 15.50, lng: 41.80, title: 'Anti-Ship Ballistic Missile Launch', description: 'ASBM launched toward commercial shipping lanes. Impacted water 500m from tanker.', date: '2026-03-10', type: 'attack', area: 'Red Sea - Central' },
-    { id: 'UK-006', lat: 11.80, lng: 43.90, title: 'Vessel Boarded', description: 'Armed individuals boarded container vessel. Crew retreated to citadel. Navy responding.', date: '2026-03-09', type: 'boarding', area: 'Bab el-Mandeb Strait' },
-    { id: 'UK-007', lat: 22.80, lng: 59.50, title: 'Suspicious UAV Overhead', description: 'Unmanned aerial vehicle observed circling vessel for 45 minutes at low altitude.', date: '2026-03-08', type: 'suspicious', area: 'Arabian Sea - North' },
-    { id: 'UK-008', lat: 26.20, lng: 56.40, title: 'GPS Jamming Detected', description: 'Multiple vessels reporting GPS interference and navigation degradation in the strait.', date: '2026-03-07', type: 'warning', area: 'Strait of Hormuz' },
-    { id: 'UK-009', lat: 13.00, lng: 48.50, title: 'Rocket Attack on Tanker', description: 'RPG fired at crude oil tanker. Hit superstructure, no casualties. Fire extinguished.', date: '2026-03-06', type: 'attack', area: 'Gulf of Aden' },
-    { id: 'UK-010', lat: 16.50, lng: 41.00, title: 'Naval Mine Reported', description: 'Drifting naval mine sighted by commercial vessel. Area marked for mine clearance.', date: '2026-03-05', type: 'attack', area: 'Red Sea - North' },
-    { id: 'UK-011', lat: 2.00, lng: 45.00, title: 'Piracy Attempt - Skiffs', description: 'Three skiffs with armed individuals attempted boarding. Vessel increased speed to evade.', date: '2026-03-04', type: 'boarding', area: 'Somali Basin' },
-    { id: 'UK-012', lat: 10.50, lng: 51.20, title: 'Suspicious Vessel Shadowing', description: 'Dhow observed following commercial vessel for 6 hours, maintaining 2nm distance.', date: '2026-03-03', type: 'suspicious', area: 'Horn of Africa' },
-    { id: 'UK-013', lat: 19.50, lng: 39.00, title: 'Missile Near-Miss on LNG Carrier', description: 'Cruise missile passed within 200m of LNG carrier. No impact. Coalition forces alerted.', date: '2026-03-02', type: 'attack', area: 'Red Sea - East' },
-    { id: 'UK-014', lat: 25.50, lng: 57.00, title: 'IRGCN Fast Boat Harassment', description: 'IRGCN fast boats conducted unsafe maneuvers near commercial tanker in international waters.', date: '2026-03-01', type: 'suspicious', area: 'Strait of Hormuz' },
-    { id: 'UK-015', lat: 7.00, lng: 50.00, title: 'Warning - Monsoon + Piracy', description: 'Combined monsoon weather and increased piracy risk. Vessels advised to route via corridor.', date: '2026-02-28', type: 'warning', area: 'Indian Ocean - West' },
-];
-
-const INCIDENT_COLORS: Record<string, { fill: string; border: string; glow: string }> = {
-    attack: { fill: '#ef4444', border: '#fca5a5', glow: '#ef444480' },
-    boarding: { fill: '#f97316', border: '#fdba74', glow: '#f9731680' },
-    suspicious: { fill: '#eab308', border: '#fde047', glow: '#eab30860' },
-    warning: { fill: '#a855f7', border: '#c084fc', glow: '#a855f760' },
-};
-
-// ============================================================
-// SHIPPING ROUTES (key waypoints for polylines)
-// ============================================================
-interface ShippingRoute {
-    id: string;
-    name: string;
-    color: string;
-    waypoints: [number, number][];
-    cargoType: string;
-}
-
-const SHIPPING_ROUTES: ShippingRoute[] = [
-    {
-        id: 'route-hormuz-suez',
-        name: 'Persian Gulf → Suez Canal',
-        color: '#06b6d4',
-        cargoType: 'Crude Oil / LNG',
-        waypoints: [
-            [26.56, 56.25], [25.80, 56.50], [24.50, 58.00], [22.00, 59.80],
-            [18.00, 57.00], [14.00, 48.00], [12.50, 43.50], [13.50, 42.50],
-            [15.00, 42.00], [20.00, 38.50], [27.00, 34.50], [30.00, 32.50],
-            [30.58, 32.27],
-        ],
-    },
-    {
-        id: 'route-gulf-asia',
-        name: 'Persian Gulf → East Asia (Malacca)',
-        color: '#22c55e',
-        cargoType: 'LNG / Crude Oil',
-        waypoints: [
-            [26.56, 56.25], [24.50, 58.00], [20.00, 62.00], [15.00, 68.00],
-            [10.00, 75.00], [6.50, 80.00], [4.00, 90.00], [2.50, 101.80],
-            [1.29, 103.85], [5.00, 110.00], [15.00, 115.00], [22.29, 114.17],
-            [31.23, 121.47], [35.10, 129.04], [35.50, 129.38],
-        ],
-    },
-    {
-        id: 'route-cape',
-        name: 'Persian Gulf → Cape → Europe',
-        color: '#f59e0b',
-        cargoType: 'Crude Oil (alternate)',
-        waypoints: [
-            [26.56, 56.25], [24.00, 58.00], [18.00, 57.00], [10.00, 52.00],
-            [2.00, 45.00], [-4.04, 39.67], [-15.00, 35.00], [-25.00, 25.00],
-            [-33.92, 18.42], [-30.00, 10.00], [-15.00, 0.00], [0.00, -5.00],
-            [20.00, -10.00], [35.00, -5.00], [42.00, -5.00], [48.00, -3.00],
-            [51.90, 4.48],
-        ],
-    },
-    {
-        id: 'route-med',
-        name: 'Suez → Mediterranean → Europe',
-        color: '#8b5cf6',
-        cargoType: 'Container / Oil Products',
-        waypoints: [
-            [30.58, 32.27], [31.26, 32.30], [33.00, 28.00], [35.00, 24.00],
-            [36.00, 18.00], [37.94, 23.63], [38.00, 12.00], [36.00, 5.00],
-            [36.00, -2.00], [40.00, -5.00], [48.00, -3.00], [51.22, 4.40],
-            [51.90, 4.48], [53.55, 9.99],
-        ],
-    },
-];
-
-// ============================================================
-// CHOKEPOINT / RISK ZONES (polygon coordinates)
-// ============================================================
-interface ChokepointZone {
-    id: string;
-    name: string;
-    risk: 'critical' | 'high' | 'medium';
-    color: string;
-    coords: [number, number][];
-    description: string;
-}
-
-const CHOKEPOINT_ZONES: ChokepointZone[] = [
-    {
-        id: 'zone-hormuz',
-        name: 'Strait of Hormuz',
-        risk: 'critical',
-        color: '#ef4444',
-        description: '21M bbl/day oil transit · GPS jamming reported · IRGCN activity',
-        coords: [
-            [27.10, 56.00], [26.80, 56.80], [26.00, 56.60],
-            [25.50, 56.80], [25.80, 57.20], [26.50, 57.00],
-            [27.00, 56.80], [27.20, 56.40],
-        ],
-    },
-    {
-        id: 'zone-bab',
-        name: 'Bab el-Mandeb',
-        risk: 'critical',
-        color: '#ef4444',
-        description: 'Active missile / drone threat · Houthi attack zone · 6M bbl/day',
-        coords: [
-            [13.20, 42.80], [12.80, 43.80], [12.20, 44.00],
-            [11.50, 43.50], [11.80, 42.80], [12.50, 42.30],
-            [13.00, 42.40],
-        ],
-    },
-    {
-        id: 'zone-malacca',
-        name: 'Malacca Strait',
-        risk: 'medium',
-        color: '#eab308',
-        description: '16M bbl/day oil transit · Piracy risk · Heavy traffic congestion',
-        coords: [
-            [4.00, 100.00], [3.00, 101.00], [1.50, 103.00],
-            [1.00, 104.00], [1.50, 104.50], [2.50, 103.50],
-            [3.50, 102.00], [4.50, 100.50],
-        ],
-    },
-    {
-        id: 'zone-suez',
-        name: 'Suez Canal Approach',
-        risk: 'medium',
-        color: '#eab308',
-        description: '12% global trade transit · Congestion bottleneck · Grounding risk',
-        coords: [
-            [31.50, 31.80], [30.50, 32.00], [29.80, 32.80],
-            [30.00, 33.20], [30.80, 33.00], [31.50, 32.50],
-        ],
-    },
-    {
-        id: 'zone-aden',
-        name: 'Gulf of Aden',
-        risk: 'high',
-        color: '#f97316',
-        description: 'Piracy corridor · Coalition naval patrols · Drone threat extension',
-        coords: [
-            [14.00, 45.00], [12.00, 45.50], [11.00, 48.00],
-            [11.50, 51.00], [13.00, 51.50], [14.50, 49.00],
-            [14.50, 47.00],
-        ],
-    },
-];
-
-// ============================================================
 // RISK CONFIG (unchanged)
 // ============================================================
 const RISK_COLORS: Record<string, string> = {
@@ -294,13 +114,29 @@ const DERIVED_RISK_CONFIG: Record<string, { color: string; pulseClass: string; b
 };
 
 // ============================================================
+// SEVERITY → VISUAL CONFIG
+// ============================================================
+const SEVERITY_COLORS: Record<string, { fill: string; border: string; glow: string }> = {
+    critical: { fill: '#ef4444', border: '#fca5a5', glow: '#ef444480' },
+    high: { fill: '#f97316', border: '#fdba74', glow: '#f9731680' },
+    medium: { fill: '#eab308', border: '#fde047', glow: '#eab30860' },
+    low: { fill: '#22c55e', border: '#86efac', glow: '#22c55e60' },
+};
+
+const ROUTE_STATUS_COLORS: Record<string, string> = {
+    open: '#22c55e',
+    restricted: '#f59e0b',
+    closed: '#ef4444',
+};
+
+// ============================================================
 // LAYER VISIBILITY STATE
 // ============================================================
 interface LayerVisibility {
     vessels: boolean;
-    incidents: boolean;
+    riskEvents: boolean;
     routes: boolean;
-    chokepoints: boolean;
+    ports: boolean;
 }
 
 // ============================================================
@@ -309,30 +145,68 @@ interface LayerVisibility {
 interface FleetMapWidgetProps {
     vessels: FleetVessel[];
     aisPositions?: AISPosition[];
+    ontologyObjects?: OntologyObject[];
+    ontologyLinks?: OntologyLink[];
     onSelectVessel?: (vessel: FleetVessel) => void;
     onRefresh?: () => void;
     isRefreshing?: boolean;
 }
 
-export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVessel, onRefresh, isRefreshing }: FleetMapWidgetProps) {
+export default function FleetMapWidget({
+    vessels,
+    aisPositions = [],
+    ontologyObjects = [],
+    ontologyLinks = [],
+    onSelectVessel,
+    onRefresh,
+    isRefreshing,
+}: FleetMapWidgetProps) {
     const mapRef = useRef<HTMLDivElement>(null);
     const leafletMap = useRef<L.Map | null>(null);
     const markersRef = useRef<L.Marker[]>([]);
-    const incidentMarkersRef = useRef<L.Marker[]>([]);
+    const riskMarkersRef = useRef<L.Marker[]>([]);
+    const portMarkersRef = useRef<L.Marker[]>([]);
     const routePolylinesRef = useRef<L.Polyline[]>([]);
-    const zonePolygonsRef = useRef<L.Polygon[]>([]);
     const [hoveredVessel, setHoveredVessel] = useState<FleetVessel | null>(null);
-    const [hoveredIncident, setHoveredIncident] = useState<UKMTOIncident | null>(null);
+    const [hoveredRiskEvent, setHoveredRiskEvent] = useState<OntologyObject | null>(null);
+    const [hoveredPort, setHoveredPort] = useState<OntologyObject | null>(null);
     const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
     const [isExpanded, setIsExpanded] = useState(false);
     const [layerPanel, setLayerPanel] = useState(false);
     const [layers, setLayers] = useState<LayerVisibility>({
         vessels: true,
-        incidents: true,
+        riskEvents: true,
         routes: true,
-        chokepoints: true,
+        ports: true,
     });
     const [tickerPaused, setTickerPaused] = useState(false);
+
+    // ---- Derive ontology layers from objects ----
+    const riskEvents = useMemo(() =>
+        ontologyObjects.filter(o => o.type === 'RiskEvent' && o.metadata.status === 'active'),
+        [ontologyObjects]
+    );
+    const ports = useMemo(() =>
+        ontologyObjects.filter(o => o.type === 'Port' && o.metadata.status === 'active'),
+        [ontologyObjects]
+    );
+    const routes = useMemo(() =>
+        ontologyObjects.filter(o => o.type === 'Route' && o.metadata.status === 'active'),
+        [ontologyObjects]
+    );
+
+    // Build a quick lookup map for port coords by ID
+    const portCoordsMap = useMemo(() => {
+        const map = new Map<string, [number, number]>();
+        for (const p of ports) {
+            const lat = Number(p.properties.lat || p.properties.latitude || 0);
+            const lng = Number(p.properties.lng || p.properties.longitude || 0);
+            if (lat !== 0 || lng !== 0) {
+                map.set(p.id, [lat, lng]);
+            }
+        }
+        return map;
+    }, [ports]);
 
     // ---- Delayed-hide tooltip mechanism ----
     const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -348,7 +222,8 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
         clearHideTimer();
         hideTimerRef.current = setTimeout(() => {
             setHoveredVessel(null);
-            setHoveredIncident(null);
+            setHoveredRiskEvent(null);
+            setHoveredPort(null);
         }, 300);
     }, [clearHideTimer]);
 
@@ -356,7 +231,6 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
         return () => clearHideTimer();
     }, [clearHideTimer]);
 
-    // ---- Toggle a layer ----
     const toggleLayer = useCallback((key: keyof LayerVisibility) => {
         setLayers(prev => ({ ...prev, [key]: !prev[key] }));
     }, []);
@@ -372,12 +246,11 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
             attributionControl: false,
         });
 
-        // Dark-toned satellite base
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             maxZoom: 18,
         }).addTo(map);
 
-        // Overlay labels (semi-transparent boundaries & names)
+        // Overlay labels
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
             maxZoom: 18,
             opacity: 0.7,
@@ -394,51 +267,85 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
         };
     }, []);
 
-    // ---- LAYER: Chokepoint Zones ----
+    // ---- LAYER: Port markers ----
     useEffect(() => {
         const map = leafletMap.current;
         if (!map) return;
 
-        // Clear existing zones
-        zonePolygonsRef.current.forEach(p => p.remove());
-        zonePolygonsRef.current = [];
+        portMarkersRef.current.forEach(m => m.remove());
+        portMarkersRef.current = [];
 
-        if (!layers.chokepoints) return;
+        if (!layers.ports) return;
 
-        CHOKEPOINT_ZONES.forEach(zone => {
-            const polygon = L.polygon(zone.coords, {
-                color: zone.color,
-                weight: 2,
-                opacity: 0.7,
-                fillColor: zone.color,
-                fillOpacity: 0.12,
-                dashArray: zone.risk === 'critical' ? '8, 4' : '4, 4',
-                className: zone.risk === 'critical' ? 'zone-pulse-critical' : '',
-            }).addTo(map);
+        ports.forEach(port => {
+            const lat = Number(port.properties.lat || port.properties.latitude || 0);
+            const lng = Number(port.properties.lng || port.properties.longitude || 0);
+            if (lat === 0 && lng === 0) return;
 
-            polygon.bindTooltip(`
-                <div style="font-family:ui-monospace,monospace;font-size:10px;max-width:220px;">
-                    <div style="font-weight:800;color:${zone.color};margin-bottom:3px;font-size:11px;">
-                        ⬡ ${zone.name}
+            const riskScore = Number(port.properties.riskScore || 0);
+            const isHighRisk = riskScore >= 70;
+            const portColor = isHighRisk ? '#f59e0b' : riskScore >= 40 ? '#06b6d4' : '#22c55e';
+            const congestion = Number(port.properties.congestionPct || 0);
+            const securityLevel = String(port.properties.securityLevel || '');
+
+            const icon = L.divIcon({
+                className: '',
+                html: `
+                    <div style="position:relative;cursor:pointer;" class="${isHighRisk ? 'port-pulse-risk' : ''}">
+                        <div style="
+                            width:18px;height:18px;
+                            background:${portColor}25;
+                            border:2px solid ${portColor};
+                            transform:rotate(45deg);
+                            box-shadow:0 0 8px ${portColor}60;
+                            display:flex;align-items:center;justify-content:center;
+                        ">
+                            <div style="width:6px;height:6px;background:${portColor};transform:rotate(-45deg);border-radius:1px;"></div>
+                        </div>
+                        <div style="
+                            position:absolute;top:-18px;left:50%;transform:translateX(-50%);
+                            background:#0f172aCC;border:1px solid ${portColor}50;
+                            color:${portColor};font-size:8px;font-weight:700;
+                            padding:1px 4px;border-radius:3px;white-space:nowrap;
+                            pointer-events:none;letter-spacing:0.3px;
+                        ">${port.title}</div>
+                        ${securityLevel ? `<div style="
+                            position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);
+                            background:${portColor}15;border:1px solid ${portColor}40;
+                            color:${portColor};font-size:6px;font-weight:800;
+                            padding:0 2px;border-radius:2px;white-space:nowrap;
+                            pointer-events:none;
+                        ">${securityLevel}</div>` : ''}
                     </div>
-                    <div style="color:#94a3b8;font-size:9px;margin-bottom:4px;">
-                        RISK: <span style="color:${zone.color};font-weight:700;">${zone.risk.toUpperCase()}</span>
-                    </div>
-                    <div style="color:#cbd5e1;font-size:9px;line-height:1.4;">
-                        ${zone.description}
-                    </div>
-                </div>
-            `, {
-                sticky: true,
-                className: 'zone-tooltip',
-                direction: 'top',
+                `,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
             });
 
-            zonePolygonsRef.current.push(polygon);
-        });
-    }, [layers.chokepoints]);
+            const marker = L.marker([lat, lng], { icon }).addTo(map);
 
-    // ---- LAYER: Shipping Routes ----
+            marker.on('mouseover', (e: L.LeafletMouseEvent) => {
+                clearHideTimer();
+                setHoveredPort(port);
+                setHoveredVessel(null);
+                setHoveredRiskEvent(null);
+                const container = mapRef.current;
+                if (container) {
+                    const rect = container.getBoundingClientRect();
+                    setTooltipPos({
+                        x: e.originalEvent.clientX - rect.left,
+                        y: e.originalEvent.clientY - rect.top,
+                    });
+                }
+            });
+
+            marker.on('mouseout', () => scheduleHide());
+
+            portMarkersRef.current.push(marker);
+        });
+    }, [ports, layers.ports, clearHideTimer, scheduleHide]);
+
+    // ---- LAYER: Route polylines ----
     useEffect(() => {
         const map = leafletMap.current;
         if (!map) return;
@@ -448,18 +355,37 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
 
         if (!layers.routes) return;
 
-        SHIPPING_ROUTES.forEach(route => {
-            // Background glow line
-            const glowLine = L.polyline(route.waypoints, {
-                color: route.color,
+        routes.forEach(route => {
+            const originId = String(route.properties.originPortId || '');
+            const destId = String(route.properties.destinationPortId || '');
+            const routeLat = Number(route.properties.lat || 0);
+            const routeLng = Number(route.properties.lng || 0);
+            const originCoords = portCoordsMap.get(originId);
+            const destCoords = portCoordsMap.get(destId);
+
+            // Build waypoints: origin → route center → destination
+            const waypoints: [number, number][] = [];
+            if (originCoords) waypoints.push(originCoords);
+            if (routeLat !== 0 || routeLng !== 0) waypoints.push([routeLat, routeLng]);
+            if (destCoords) waypoints.push(destCoords);
+
+            if (waypoints.length < 2) return; // Need at least 2 points
+
+            const status = String(route.properties.currentStatus || route.properties.status || 'open');
+            const routeColor = ROUTE_STATUS_COLORS[status] || '#06b6d4';
+            const riskScore = Number(route.properties.riskScore || 0);
+
+            // Background glow
+            const glowLine = L.polyline(waypoints, {
+                color: routeColor,
                 weight: 6,
-                opacity: 0.15,
+                opacity: 0.12,
                 smoothFactor: 1.5,
             }).addTo(map);
 
             // Main dashed line
-            const mainLine = L.polyline(route.waypoints, {
-                color: route.color,
+            const mainLine = L.polyline(waypoints, {
+                color: routeColor,
                 weight: 2,
                 opacity: 0.6,
                 dashArray: '8, 6',
@@ -467,12 +393,17 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
             }).addTo(map);
 
             mainLine.bindTooltip(`
-                <div style="font-family:ui-monospace,monospace;font-size:10px;">
-                    <div style="font-weight:800;color:${route.color};margin-bottom:2px;">
-                        ▸ ${route.name}
+                <div style="font-family:ui-monospace,monospace;font-size:10px;max-width:240px;">
+                    <div style="font-weight:800;color:${routeColor};margin-bottom:2px;">
+                        ▸ ${route.title}
                     </div>
                     <div style="color:#94a3b8;font-size:9px;">
-                        ${route.cargoType}
+                        ${route.description || ''}
+                    </div>
+                    <div style="margin-top:3px;display:flex;gap:8px;font-size:8px;">
+                        <span style="color:${routeColor};">STATUS: ${status.toUpperCase()}</span>
+                        <span style="color:#64748b;">RISK: ${riskScore}</span>
+                        ${route.properties.distanceNm ? `<span style="color:#64748b;">${route.properties.distanceNm} NM</span>` : ''}
                     </div>
                 </div>
             `, {
@@ -483,20 +414,26 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
 
             routePolylinesRef.current.push(glowLine, mainLine);
         });
-    }, [layers.routes]);
+    }, [routes, portCoordsMap, layers.routes]);
 
-    // ---- LAYER: UKMTO Incidents ----
+    // ---- LAYER: RiskEvent markers ----
     useEffect(() => {
         const map = leafletMap.current;
         if (!map) return;
 
-        incidentMarkersRef.current.forEach(m => m.remove());
-        incidentMarkersRef.current = [];
+        riskMarkersRef.current.forEach(m => m.remove());
+        riskMarkersRef.current = [];
 
-        if (!layers.incidents) return;
+        if (!layers.riskEvents) return;
 
-        UKMTO_INCIDENTS.forEach(incident => {
-            const cfg = INCIDENT_COLORS[incident.type];
+        riskEvents.forEach(event => {
+            const lat = Number(event.properties.lat || 0);
+            const lng = Number(event.properties.lng || 0);
+            if (lat === 0 && lng === 0) return; // Skip events without coordinates
+
+            const severity = String(event.properties.severity || 'medium');
+            const cfg = SEVERITY_COLORS[severity] || SEVERITY_COLORS.medium;
+
             const icon = L.divIcon({
                 className: '',
                 html: `
@@ -511,24 +448,25 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                             <span style="font-size:10px;">⚠</span>
                         </div>
                         <div style="
-                            position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);
+                            position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);
                             background:${cfg.fill}20;border:1px solid ${cfg.fill}60;
                             color:${cfg.fill};font-size:7px;font-weight:800;
                             padding:0 3px;border-radius:2px;white-space:nowrap;
                             pointer-events:none;letter-spacing:0.3px;
-                        ">UKMTO</div>
+                        ">${String(event.properties.category || 'RISK').toUpperCase()}</div>
                     </div>
                 `,
                 iconSize: [22, 22],
                 iconAnchor: [11, 11],
             });
 
-            const marker = L.marker([incident.lat, incident.lng], { icon }).addTo(map);
+            const marker = L.marker([lat, lng], { icon }).addTo(map);
 
             marker.on('mouseover', (e: L.LeafletMouseEvent) => {
                 clearHideTimer();
-                setHoveredIncident(incident);
+                setHoveredRiskEvent(event);
                 setHoveredVessel(null);
+                setHoveredPort(null);
                 const container = mapRef.current;
                 if (container) {
                     const rect = container.getBoundingClientRect();
@@ -541,9 +479,9 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
 
             marker.on('mouseout', () => scheduleHide());
 
-            incidentMarkersRef.current.push(marker);
+            riskMarkersRef.current.push(marker);
         });
-    }, [layers.incidents, clearHideTimer, scheduleHide]);
+    }, [riskEvents, layers.riskEvents, clearHideTimer, scheduleHide]);
 
     // ---- LAYER: Vessel markers (unchanged logic) ----
     useEffect(() => {
@@ -639,7 +577,8 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
             marker.on('mouseover', (e: L.LeafletMouseEvent) => {
                 clearHideTimer();
                 setHoveredVessel(vessel);
-                setHoveredIncident(null);
+                setHoveredRiskEvent(null);
+                setHoveredPort(null);
                 const container = mapRef.current;
                 if (container) {
                     const rect = container.getBoundingClientRect();
@@ -668,16 +607,16 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
 
     const layerCounts = {
         vessels: vessels.length,
-        incidents: UKMTO_INCIDENTS.length,
-        routes: SHIPPING_ROUTES.length,
-        chokepoints: CHOKEPOINT_ZONES.length,
+        riskEvents: riskEvents.filter(e => (Number(e.properties.lat || 0) !== 0 || Number(e.properties.lng || 0) !== 0)).length,
+        routes: routes.length,
+        ports: ports.filter(p => (Number(p.properties.lat || p.properties.latitude || 0) !== 0 || Number(p.properties.lng || p.properties.longitude || 0) !== 0)).length,
     };
 
     const LAYER_META: { key: keyof LayerVisibility; label: string; icon: React.ReactNode; color: string }[] = [
         { key: 'vessels', label: 'Fleet Vessels', icon: <Ship size={11} />, color: '#06b6d4' },
-        { key: 'incidents', label: 'UKMTO Incidents', icon: <Zap size={11} />, color: '#ef4444' },
-        { key: 'routes', label: 'Shipping Lanes', icon: <Navigation size={11} />, color: '#22c55e' },
-        { key: 'chokepoints', label: 'Chokepoints', icon: <Crosshair size={11} />, color: '#eab308' },
+        { key: 'riskEvents', label: 'Risk Events', icon: <Zap size={11} />, color: '#ef4444' },
+        { key: 'routes', label: 'Shipping Routes', icon: <Navigation size={11} />, color: '#22c55e' },
+        { key: 'ports', label: 'Ports / Chokepoints', icon: <Crosshair size={11} />, color: '#eab308' },
     ];
 
     return (
@@ -705,7 +644,6 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                     )}
                 </div>
                 <div className="flex items-center gap-1 pointer-events-auto">
-                    {/* Layer toggle button */}
                     <button
                         onClick={() => setLayerPanel(!layerPanel)}
                         className={`p-1.5 rounded border transition-colors flex items-center gap-1 ${layerPanel
@@ -738,7 +676,7 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                 </div>
             </div>
 
-            {/* ═══ Layer Control Panel (Glassmorphism) ═══ */}
+            {/* ═══ Layer Control Panel ═══ */}
             {layerPanel && (
                 <div className="absolute top-12 right-3 z-[1001] w-[200px] bg-slate-950/80 backdrop-blur-xl border border-slate-700/60 rounded-xl shadow-2xl overflow-hidden">
                     <div className="px-3 py-2 border-b border-slate-800/60 flex items-center justify-between">
@@ -784,11 +722,7 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
             )}
 
             {/* ═══ Map ═══ */}
-            <div
-                ref={mapRef}
-                className="w-full flex-1"
-                style={{ minHeight: '0' }}
-            />
+            <div ref={mapRef} className="w-full flex-1" style={{ minHeight: '0' }} />
 
             {/* ═══ Vessel Hover Tooltip ═══ */}
             {hoveredVessel && (
@@ -842,7 +776,6 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                             </div>
                         </div>
 
-                        {/* Derived Risk Factors */}
                         {hoveredVessel.riskFactors && hoveredVessel.riskFactors.length > 0 && (
                             <div className="mt-2 pt-2 border-t border-rose-800/30">
                                 <div className="flex items-center gap-1 mb-1">
@@ -875,8 +808,8 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                 </div>
             )}
 
-            {/* ═══ UKMTO Incident Hover Tooltip ═══ */}
-            {hoveredIncident && (
+            {/* ═══ RiskEvent Hover Tooltip ═══ */}
+            {hoveredRiskEvent && (
                 <div
                     className="absolute z-[1001]"
                     style={{
@@ -892,83 +825,140 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                             <div className="w-5 h-5 rounded bg-red-500/20 flex items-center justify-center">
                                 <AlertTriangle size={11} className="text-red-400" />
                             </div>
-                            <span className="text-white font-bold text-[11px] flex-1">{hoveredIncident.title}</span>
+                            <span className="text-white font-bold text-[11px] flex-1">{hoveredRiskEvent.title}</span>
                         </div>
                         <div className="flex items-center gap-2 mb-2">
                             <span
                                 className="text-[8px] font-bold px-1.5 py-0.5 rounded uppercase"
                                 style={{
-                                    background: `${INCIDENT_COLORS[hoveredIncident.type].fill}20`,
-                                    color: INCIDENT_COLORS[hoveredIncident.type].fill,
-                                    border: `1px solid ${INCIDENT_COLORS[hoveredIncident.type].fill}50`,
+                                    background: `${(SEVERITY_COLORS[String(hoveredRiskEvent.properties.severity || 'medium')] || SEVERITY_COLORS.medium).fill}20`,
+                                    color: (SEVERITY_COLORS[String(hoveredRiskEvent.properties.severity || 'medium')] || SEVERITY_COLORS.medium).fill,
+                                    border: `1px solid ${(SEVERITY_COLORS[String(hoveredRiskEvent.properties.severity || 'medium')] || SEVERITY_COLORS.medium).fill}50`,
                                 }}
                             >
-                                {hoveredIncident.type}
+                                {String(hoveredRiskEvent.properties.severity || 'medium')}
                             </span>
-                            <span className="text-[9px] text-slate-500 font-mono">{hoveredIncident.date}</span>
-                            <span className="text-[9px] text-slate-500">·</span>
-                            <span className="text-[9px] text-slate-400">{hoveredIncident.area}</span>
+                            <span className="text-[9px] text-slate-500 font-mono">{hoveredRiskEvent.metadata.updatedAt?.split('T')[0]}</span>
+                            {hoveredRiskEvent.properties.region && (
+                                <>
+                                    <span className="text-[9px] text-slate-500">·</span>
+                                    <span className="text-[9px] text-slate-400">{String(hoveredRiskEvent.properties.region)}</span>
+                                </>
+                            )}
                         </div>
-                        <p className="text-[10px] text-slate-400 leading-relaxed">{hoveredIncident.description}</p>
-                        <div className="mt-2 pt-2 border-t border-red-900/30 flex items-center gap-1">
-                            <Radio size={9} className="text-red-400" />
-                            <span className="text-[8px] text-red-400 font-bold">UKMTO INCIDENT REPORT</span>
+                        <p className="text-[10px] text-slate-400 leading-relaxed">{hoveredRiskEvent.description}</p>
+                        {hoveredRiskEvent.properties.threatLevel && (
+                            <div className="mt-2 pt-2 border-t border-red-900/30 flex items-center gap-1">
+                                <Radio size={9} className="text-red-400" />
+                                <span className="text-[8px] text-red-400 font-bold">{String(hoveredRiskEvent.properties.threatLevel)}</span>
+                            </div>
+                        )}
+                        <div className="mt-1 flex gap-3 text-[8px] text-slate-500">
+                            {hoveredRiskEvent.properties.affectedVessels && <span>Vessels: {String(hoveredRiskEvent.properties.affectedVessels)}</span>}
+                            {hoveredRiskEvent.properties.riskScore && <span>Risk: {String(hoveredRiskEvent.properties.riskScore)}</span>}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* ═══ Bottom HUD — Intelligence Summary Bar ═══ */}
+            {/* ═══ Port Hover Tooltip ═══ */}
+            {hoveredPort && (
+                <div
+                    className="absolute z-[1001]"
+                    style={{
+                        left: Math.min(tooltipPos.x + 12, (mapRef.current?.clientWidth || 600) - 260),
+                        top: Math.max(tooltipPos.y - 120, 40),
+                        pointerEvents: 'auto',
+                    }}
+                    onMouseEnter={clearHideTimer}
+                    onMouseLeave={scheduleHide}
+                >
+                    <div className="bg-slate-950/95 border border-amber-800/40 rounded-xl p-3 shadow-2xl backdrop-blur-sm min-w-[240px]">
+                        <div className="flex items-center gap-2 mb-2">
+                            <Crosshair size={12} className="text-amber-400" />
+                            <span className="text-white font-bold text-[11px]">{hoveredPort.title}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed mb-2">{hoveredPort.description}</p>
+                        <div className="flex gap-3 text-[8px] text-slate-500 border-t border-slate-800/50 pt-1.5">
+                            {hoveredPort.properties.congestionPct != null && (
+                                <span>Congestion: <span className="text-amber-400 font-bold">{String(hoveredPort.properties.congestionPct)}%</span></span>
+                            )}
+                            {hoveredPort.properties.securityLevel && (
+                                <span>Security: <span className="text-red-400 font-bold">{String(hoveredPort.properties.securityLevel)}</span></span>
+                            )}
+                            {hoveredPort.properties.queuedVessels && (
+                                <span>Queue: <span className="text-cyan-400 font-bold">{String(hoveredPort.properties.queuedVessels)}</span></span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ═══ Bottom HUD ═══ */}
             <div className="absolute bottom-0 left-0 right-0 z-[1000] pointer-events-none">
                 <div className="flex items-end justify-between px-3 pb-3 gap-2">
-                    {/* Vessel count badge */}
+                    {/* Count badge */}
                     <div className="bg-slate-950/80 backdrop-blur-sm border border-slate-700/60 rounded-lg px-2.5 py-1.5 flex items-center gap-2 pointer-events-auto">
                         <Anchor size={10} className="text-cyan-400" />
                         <span className="text-[10px] text-white font-mono font-bold">{vessels.length}</span>
                         <span className="text-[9px] text-slate-400">vessels</span>
                         <span className="text-[9px] text-slate-600">·</span>
-                        <span className="text-[10px] text-red-400 font-mono font-bold">{UKMTO_INCIDENTS.length}</span>
-                        <span className="text-[9px] text-slate-400">incidents</span>
+                        <span className="text-[10px] text-red-400 font-mono font-bold">{layerCounts.riskEvents}</span>
+                        <span className="text-[9px] text-slate-400">risks</span>
+                        <span className="text-[9px] text-slate-600">·</span>
+                        <span className="text-[10px] text-amber-400 font-mono font-bold">{layerCounts.ports}</span>
+                        <span className="text-[9px] text-slate-400">ports</span>
                         {criticalCount > 0 && (
                             <span className="text-[9px] text-rose-400 font-bold">· {criticalCount} ⚠</span>
                         )}
                     </div>
 
-                    {/* Intelligence Ticker */}
-                    <div
-                        className="flex-1 max-w-[500px] bg-slate-950/80 backdrop-blur-sm border border-red-900/30 rounded-lg overflow-hidden pointer-events-auto"
-                        onMouseEnter={() => setTickerPaused(true)}
-                        onMouseLeave={() => setTickerPaused(false)}
-                    >
-                        <div className="flex items-center px-2 py-0.5 border-b border-red-900/20 gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                            <span className="text-[8px] font-bold text-red-400 tracking-wider">UKMTO LIVE FEED</span>
-                        </div>
-                        <div className="overflow-hidden h-[22px] relative">
-                            <div
-                                className={`flex gap-8 whitespace-nowrap text-[9px] text-slate-400 font-mono px-2 py-1 ${tickerPaused ? '' : 'animate-ticker'
-                                    }`}
-                            >
-                                {UKMTO_INCIDENTS.slice(0, 8).map((inc, i) => (
-                                    <span key={i} className="flex items-center gap-1.5 shrink-0">
-                                        <span style={{ color: INCIDENT_COLORS[inc.type].fill }}>●</span>
-                                        <span className="text-slate-500">{inc.date}</span>
-                                        <span className="text-slate-300">{inc.title}</span>
-                                        <span className="text-slate-600">— {inc.area}</span>
-                                    </span>
-                                ))}
-                                {/* Duplicate for seamless loop */}
-                                {UKMTO_INCIDENTS.slice(0, 8).map((inc, i) => (
-                                    <span key={`dup-${i}`} className="flex items-center gap-1.5 shrink-0">
-                                        <span style={{ color: INCIDENT_COLORS[inc.type].fill }}>●</span>
-                                        <span className="text-slate-500">{inc.date}</span>
-                                        <span className="text-slate-300">{inc.title}</span>
-                                        <span className="text-slate-600">— {inc.area}</span>
-                                    </span>
-                                ))}
+                    {/* Intelligence Ticker (driven by RiskEvent ontology objects) */}
+                    {riskEvents.length > 0 && (
+                        <div
+                            className="flex-1 max-w-[500px] bg-slate-950/80 backdrop-blur-sm border border-red-900/30 rounded-lg overflow-hidden pointer-events-auto"
+                            onMouseEnter={() => setTickerPaused(true)}
+                            onMouseLeave={() => setTickerPaused(false)}
+                        >
+                            <div className="flex items-center px-2 py-0.5 border-b border-red-900/20 gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                <span className="text-[8px] font-bold text-red-400 tracking-wider">RISK INTEL FEED</span>
+                                <span className="text-[7px] text-slate-600 font-mono ml-auto">ONTOLOGY</span>
+                            </div>
+                            <div className="overflow-hidden h-[22px] relative">
+                                <div
+                                    className={`flex gap-8 whitespace-nowrap text-[9px] text-slate-400 font-mono px-2 py-1 ${tickerPaused ? '' : 'animate-ticker'
+                                        }`}
+                                >
+                                    {riskEvents.map((evt, i) => {
+                                        const sev = String(evt.properties.severity || 'medium');
+                                        const color = (SEVERITY_COLORS[sev] || SEVERITY_COLORS.medium).fill;
+                                        return (
+                                            <span key={i} className="flex items-center gap-1.5 shrink-0">
+                                                <span style={{ color }}>●</span>
+                                                <span className="text-slate-500">{evt.metadata.updatedAt?.split('T')[0]}</span>
+                                                <span className="text-slate-300">{evt.title}</span>
+                                                {evt.properties.region && <span className="text-slate-600">— {String(evt.properties.region)}</span>}
+                                            </span>
+                                        );
+                                    })}
+                                    {/* Duplicate for seamless loop */}
+                                    {riskEvents.map((evt, i) => {
+                                        const sev = String(evt.properties.severity || 'medium');
+                                        const color = (SEVERITY_COLORS[sev] || SEVERITY_COLORS.medium).fill;
+                                        return (
+                                            <span key={`dup-${i}`} className="flex items-center gap-1.5 shrink-0">
+                                                <span style={{ color }}>●</span>
+                                                <span className="text-slate-500">{evt.metadata.updatedAt?.split('T')[0]}</span>
+                                                <span className="text-slate-300">{evt.title}</span>
+                                                {evt.properties.region && <span className="text-slate-600">— {String(evt.properties.region)}</span>}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
 
@@ -1000,6 +990,13 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                 .incident-pulse {
                     animation: incident-glow 2.5s ease-in-out infinite;
                 }
+                @keyframes port-risk-pulse {
+                    0%, 100% { transform: scale(1) rotate(45deg); opacity: 1; }
+                    50% { transform: scale(1.1) rotate(45deg); opacity: 0.8; }
+                }
+                .port-pulse-risk {
+                    animation: port-risk-pulse 3s ease-in-out infinite;
+                }
                 @keyframes ticker-scroll {
                     0% { transform: translateX(0); }
                     100% { transform: translateX(-50%); }
@@ -1007,15 +1004,6 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                 .animate-ticker {
                     animation: ticker-scroll 60s linear infinite;
                 }
-                .zone-tooltip .leaflet-tooltip-content,
-                .route-tooltip .leaflet-tooltip-content {
-                    background: transparent !important;
-                    border: none !important;
-                    box-shadow: none !important;
-                    padding: 0 !important;
-                    margin: 0 !important;
-                }
-                .zone-tooltip,
                 .route-tooltip {
                     background: #0f172aee !important;
                     border: 1px solid #334155 !important;
@@ -1024,16 +1012,8 @@ export default function FleetMapWidget({ vessels, aisPositions = [], onSelectVes
                     box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
                     backdrop-filter: blur(8px) !important;
                 }
-                .zone-tooltip::before,
                 .route-tooltip::before {
                     border-top-color: #334155 !important;
-                }
-                @keyframes zone-border-pulse {
-                    0%, 100% { opacity: 0.7; }
-                    50% { opacity: 0.3; }
-                }
-                .zone-pulse-critical {
-                    animation: zone-border-pulse 3s ease-in-out infinite;
                 }
             `}</style>
         </div>

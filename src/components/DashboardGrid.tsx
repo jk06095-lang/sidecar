@@ -63,6 +63,7 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
 
     // Store
     const objects = useOntologyStore(s => s.objects);
+    const links = useOntologyStore(s => s.links);
     const fetchAndBindMarketData = useOntologyStore(s => s.fetchAndBindMarketData);
 
     // ---- AIS Position Tracking ----
@@ -265,6 +266,8 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
                         <FleetMapWidget
                             vessels={dynamicFleetData}
                             aisPositions={aisPositions}
+                            ontologyObjects={objects}
+                            ontologyLinks={links}
                             onSelectVessel={handleMapVesselClick}
                             onRefresh={refreshAISPositions}
                             isRefreshing={isAisRefreshing}

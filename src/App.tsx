@@ -187,6 +187,11 @@ export default function App() {
     firestoreLoadSettings().then(remote => {
       if (remote) setSettings(prev => ({ ...prev, ...remote }));
     });
+
+    // Cleanup: tear down Firestore listeners on unmount / HMR
+    return () => {
+      useOntologyStore.getState().teardownListeners();
+    };
   }, []);
 
   // Load per-user notification read state from Firestore

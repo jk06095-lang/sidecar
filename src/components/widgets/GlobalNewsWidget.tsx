@@ -58,6 +58,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     const triggerRippleEffect = useOntologyStore(s => s.triggerRippleEffect);
     const addIntelArticles = useOntologyStore(s => s.addIntelArticles);
 
+    // Stable refs for callbacks — prevents useEffect re-fires on reference changes
+    const addIntelArticlesRef = useRef(addIntelArticles);
+    addIntelArticlesRef.current = addIntelArticles;
+
     // Read settings
     const getSettings = (): AppSettings => {
         try {
@@ -242,6 +246,10 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     // 3. Start 10-min polling (writes to Firestore)
     // onSnapshot handles ALL state updates — no direct setArticles from fetch.
     // ============================================================
+    // Stable ref for fetchAndMerge — prevents useEffect dep instability
+    const fetchAndMergeRef = useRef(fetchAndMerge);
+    fetchAndMergeRef.current = fetchAndMerge;
+
     useEffect(() => {
         if (initialized.current) return;
         initialized.current = true;
@@ -255,7 +263,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             (items) => {
                 // Track new articles for "NEW" badge
                 if (hasReceivedData && items.length > prevCountRef.current) {
-                    const currentIds = new Set(articles.map(a => a.id));
+                    const currentIds = new Set(items.map(a => a.id));
                     const freshIds = items.filter(a => !currentIds.has(a.id)).map(a => a.id);
                     if (freshIds.length > 0) {
                         setNewArticleIds(prev => {
@@ -277,7 +285,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 }
 
                 setArticles(items);
-                if (items.length > 0) addIntelArticles(items);
+                if (items.length > 0) addIntelArticlesRef.current(items);
                 prevCountRef.current = items.length;
 
                 // HAS DATA → show it immediately, done loading
@@ -302,7 +310,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                             const historical = await bootstrapHistoricalData();
                             if (historical.length > 0) {
                                 await appendIntelArticles('osint', historical);
-                                addIntelArticles(historical);
+                                addIntelArticlesRef.current(historical);
                                 // onSnapshot will fire again with the new data
                             }
                         } catch (err) {
@@ -311,7 +319,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
                         // Step B: First RSS fetch
                         try {
-                            await fetchAndMerge();
+                            await fetchAndMergeRef.current();
                         } catch (err) {
                             console.warn('[GlobalNewsWidget] First fetch error:', err);
                         }
@@ -332,7 +340,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
         // Step 1: Start 10-minute background polling (writes to Firestore only)
         nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
-        pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
+        pollTimer.current = setInterval(() => fetchAndMergeRef.current(), POLL_INTERVAL_MS);
 
         // Visibility-based pause: stop polling when tab is hidden (onSnapshot stays active)
         const handleVisibilityChange = () => {
@@ -340,9 +348,9 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
             } else {
                 // Resume polling (onSnapshot already handled real-time updates)
-                fetchAndMerge();
+                fetchAndMergeRef.current();
                 nextFetchTimeRef.current = Date.now() + POLL_INTERVAL_MS;
-                pollTimer.current = setInterval(fetchAndMerge, POLL_INTERVAL_MS);
+                pollTimer.current = setInterval(() => fetchAndMergeRef.current(), POLL_INTERVAL_MS);
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -352,7 +360,12 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             if (pollTimer.current) clearInterval(pollTimer.current);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [fetchAndMerge, addIntelArticles]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Stable ref for refreshOfficial — prevents useEffect dep instability
+    const refreshOfficialRef = useRef(refreshOfficial);
+    refreshOfficialRef.current = refreshOfficial;
 
     // Subscribe to official feed via onSnapshot when tab switches
     useEffect(() => {
@@ -379,7 +392,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     hasReceivedOfficial = true;
                     console.info('[GlobalNewsWidget] 📡 Official cache empty → fetching from API...');
                     // Keep officialLoading=true while fetching
-                    refreshOfficial();
+                    refreshOfficialRef.current();
                 } else {
                     setOfficialLoading(false);
                 }
@@ -392,7 +405,8 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         );
 
         return () => unsub();
-    }, [activeTab, refreshOfficial]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab]);
 
     // ============================================================
     // WRITE-BACK: Apply suggested action to ontology

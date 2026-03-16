@@ -86,9 +86,6 @@ const LOCATION_COORDS: Record<string, [number, number]> = {
     'Antwerp': [51.22, 4.40],
     'Hamburg': [53.55, 9.99],
     'Piraeus': [37.94, 23.63],
-    'Sharjah': [25.36, 55.40],
-    'Shinas': [24.74, 56.46],
-    'Fujairah': [25.12, 56.33],
     'Sohar': [24.36, 56.73],
 };
 

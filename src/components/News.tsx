@@ -11,7 +11,7 @@ import { getFinOpsStats, type FinOpsStats } from '../services/newsService';
 import { researchWithGrounding, type ResearchResult } from '../services/geminiService';
 import type { IntelArticle } from '../types';
 
-type FeedTab = 'osint' | 'official';
+type FeedTab = 'news' | 'circular' | 'alert';
 
 interface ScrapItem {
     id: string;
@@ -28,7 +28,7 @@ interface ScrapItem {
 // MAIN COMPONENT
 // ============================================================
 export default function News() {
-    const [activeTab, setActiveTab] = useState<FeedTab>('osint');
+    const [activeTab, setActiveTab] = useState<FeedTab>('news');
     const [countdownSeconds, setCountdownSeconds] = useState(600);
     const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
     const [scraps, setScraps] = useState<ScrapItem[]>([]);
@@ -210,28 +210,58 @@ export default function News() {
                     {/* Tab navigation */}
                     <div className="flex gap-2">
                         <button
-                            onClick={() => setActiveTab('osint')}
+                            onClick={() => setActiveTab('news')}
                             className={cn(
-                                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all",
-                                activeTab === 'osint'
+                                "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
+                                activeTab === 'news'
                                     ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-lg shadow-cyan-900/10"
                                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
                             )}
+                            title="해사 뉴스 피드"
                         >
                             <Globe size={14} />
-                            매크로 뉴스
+                            뉴스 피드
+                            <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
+                                activeTab === 'news' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-800 text-slate-500'
+                            )}>
+                                {intelArticles.filter(a => !a.category || a.category === 'OSINT').length}
+                            </span>
                         </button>
                         <button
-                            onClick={() => setActiveTab('official')}
+                            onClick={() => setActiveTab('circular')}
                             className={cn(
-                                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all",
-                                activeTab === 'official'
+                                "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
+                                activeTab === 'circular'
+                                    ? "bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-lg shadow-amber-900/10"
+                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
+                            )}
+                            title="P&I 및 보험 공문"
+                        >
+                            <Landmark size={14} />
+                            P&I · 보험 공문
+                            <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
+                                activeTab === 'circular' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-500'
+                            )}>
+                                {intelArticles.filter(a => a.category === 'OFFICIAL_CIRCULAR').length}
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('alert')}
+                            className={cn(
+                                "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
+                                activeTab === 'alert'
                                     ? "bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-lg shadow-rose-900/10"
                                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
                             )}
+                            title="해사 사고 및 보안 경보"
                         >
-                            <Landmark size={14} />
-                            공식 지침 & 경보
+                            <AlertTriangle size={14} />
+                            해사 사고 경보
+                            <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
+                                activeTab === 'alert' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-800 text-slate-500'
+                            )}>
+                                {intelArticles.filter(a => a.category === 'SECURITY_ALERT').length}
+                            </span>
                         </button>
                     </div>
 

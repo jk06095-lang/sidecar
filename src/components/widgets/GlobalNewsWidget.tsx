@@ -30,12 +30,12 @@ const RISK_COLORS: Record<string, string> = {
 interface GlobalNewsWidgetProps {
     onTagClick?: (tag: string) => void;
     onStatsUpdate?: (stats: FinOpsStats) => void;
-    activeTab?: 'osint' | 'official';
+    activeTab?: 'news' | 'circular' | 'alert';
     onCountdownUpdate?: (secondsRemaining: number) => void;
     onScrap?: (article: IntelArticle) => void;
 }
 
-export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab = 'osint', onCountdownUpdate, onScrap }: GlobalNewsWidgetProps) {
+export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab = 'news', onCountdownUpdate, onScrap }: GlobalNewsWidgetProps) {
     const [articles, setArticles] = useState<IntelArticle[]>([]);
     const [officialArticles, setOfficialArticles] = useState<IntelArticle[]>([]);
     const [loading, setLoading] = useState(true);
@@ -369,7 +369,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
     // Subscribe to official feed via onSnapshot when tab switches
     useEffect(() => {
-        if (activeTab !== 'official') return;
+        if (activeTab !== 'circular' && activeTab !== 'alert') return;
 
         const scrappedUrls = getScrappedUrls();
         let hasReceivedOfficial = false;
@@ -434,12 +434,15 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         ));
     }, []);
 
-    // Filter based on active tab
-    const visibleArticles = activeTab === 'osint'
-        ? articles.filter(a => !a.dropped)
-        : officialArticles;
+    // Filter based on active tab (3-way)
+    const visibleArticles = useMemo(() => {
+        if (activeTab === 'news') return articles.filter(a => !a.dropped);
+        if (activeTab === 'circular') return officialArticles.filter(a => a.category === 'OFFICIAL_CIRCULAR' || !a.category);
+        if (activeTab === 'alert') return officialArticles.filter(a => a.category === 'SECURITY_ALERT');
+        return articles.filter(a => !a.dropped);
+    }, [activeTab, articles, officialArticles]);
 
-    const isLoading = activeTab === 'osint' ? (loading && !backfilling) : officialLoading;
+    const isLoading = activeTab === 'news' ? (loading && !backfilling) : officialLoading;
 
     // Check if an article is "new" (arrived via onSnapshot in last 30s)
     const isNewArticle = useCallback((id: string) => newArticleIds.has(id), [newArticleIds]);
@@ -461,13 +464,13 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             <div className="flex flex-col items-center justify-center h-full text-cyan-500 gap-3 py-10 min-h-[200px]">
                 <Loader2 className="animate-spin" size={24} />
                 <span className="text-xs font-mono">
-                    {activeTab === 'osint' ? 'Syncing OSINT Intelligence Feed...' : '공식 기관 데이터 수집 중 (Gemini Search)...'}
+                    {activeTab === 'news' ? 'Syncing OSINT Intelligence Feed...' : activeTab === 'circular' ? 'P&I · 보험 공문 수집 중...' : '해사 사고 경보 수집 중...'}
                 </span>
             </div>
         );
     }
 
-    if (error && visibleArticles.length === 0 && activeTab === 'osint') {
+    if (error && visibleArticles.length === 0 && activeTab === 'news') {
         return (
             <div className="flex flex-col items-center justify-center h-full text-rose-500 gap-2 py-10 min-h-[200px]">
                 <AlertCircle size={24} />
@@ -507,12 +510,12 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50 bg-slate-800/20">
                 <Radio size={14} className="text-amber-400 animate-pulse" />
                 <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-widest">
-                    {activeTab === 'osint' ? 'OSINT Intelligence Feed' : '공식 지침 & 안보 경보'}
+                    {activeTab === 'news' ? 'OSINT Intelligence Feed' : activeTab === 'circular' ? 'P&I · 보험 공문' : '해사 사고 경보'}
                 </h4>
                 <span className="ml-auto flex items-center gap-1.5">
                     <button
                         onClick={() => {
-                            if (activeTab === 'osint') {
+                            if (activeTab === 'news') {
                                 fetchAndMerge();
                             } else {
                                 refreshOfficial();
@@ -534,8 +537,8 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 </span>
             </div>
 
-            {/* FinOps Shield Banner (only for OSINT tab) */}
-            {activeTab === 'osint' && (
+            {/* FinOps Shield Banner (only for News tab) */}
+            {activeTab === 'news' && (
                 <div className="px-3 py-1.5 border-b border-slate-800/30 bg-emerald-950/10 flex items-center gap-1.5 shrink-0">
                     <Shield size={10} className="text-emerald-500 shrink-0" />
                     <span className="text-[9px] text-emerald-400/80 font-mono leading-tight truncate">
@@ -544,12 +547,22 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 </div>
             )}
 
-            {/* Official tab banner */}
-            {activeTab === 'official' && (
+            {/* Circular tab banner */}
+            {activeTab === 'circular' && (
+                <div className="px-3 py-1.5 border-b border-amber-800/30 bg-amber-950/10 flex items-center gap-1.5 shrink-0">
+                    <FileWarning size={10} className="text-amber-400 shrink-0" />
+                    <span className="text-[9px] text-amber-400/80 font-mono leading-tight truncate">
+                        🔒 P&I Club 회람 · 보험사 공문 · 선급 지침 — Gemini Search Grounding
+                    </span>
+                </div>
+            )}
+
+            {/* Alert tab banner */}
+            {activeTab === 'alert' && (
                 <div className="px-3 py-1.5 border-b border-rose-800/30 bg-rose-950/10 flex items-center gap-1.5 shrink-0">
-                    <Sparkles size={10} className="text-rose-400 shrink-0" />
+                    <ShieldAlert size={10} className="text-rose-400 shrink-0" />
                     <span className="text-[9px] text-rose-400/80 font-mono leading-tight truncate">
-                        🔒 Official Sources: KP&I 회람 + UKMTO/IMB 해양안보 경보 — Gemini Search Grounding
+                        🚨 UKMTO · IMB PRC · MDAT-GoG · 해양 사고 속보 — 실시간 경보
                     </span>
                 </div>
             )}
@@ -560,9 +573,11 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 <div className="flex flex-col flex-1 pb-4">
                     {visibleArticles.length === 0 && !isLoading && !backfilling && (
                         <div className="text-center text-xs text-slate-500 py-10 font-mono">
-                            {activeTab === 'osint'
+                            {activeTab === 'news'
                                 ? '수집 중... 잠시 후 피드가 표시됩니다.'
-                                : '공식 기관 데이터를 불러오는 중입니다... API Key가 설정되어 있는지 확인해주세요.'}
+                                : activeTab === 'circular'
+                                    ? 'P&I · 보험 공문을 불러오는 중입니다... API Key가 설정되어 있는지 확인해주세요.'
+                                    : '해사 사고 경보를 불러오는 중입니다... API Key가 설정되어 있는지 확인해주세요.'}
                         </div>
                     )}
 
@@ -576,7 +591,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                                     <div className="h-px flex-1 bg-gradient-to-l from-cyan-500/50 to-transparent" />
                                 </div>
                             )}
-                            {activeTab === 'official'
+                            {(activeTab === 'circular' || activeTab === 'alert')
                                 ? <OfficialCard
                                     article={article}
                                     onApply={handleApplyAction}

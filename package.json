@@ -28,6 +28,7 @@
     "react-dom": "^19.0.0",
     "react-grid-layout": "^2.2.2",
     "recharts": "^3.8.0",
+    "rsshub": "^1.0.0-master.ed6b192",
     "tailwind-merge": "^3.5.0",
     "vite": "^6.2.0",
     "zustand": "^5.0.11"

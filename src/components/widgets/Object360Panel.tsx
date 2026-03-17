@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, TrendingDown, AlertTriangle, Zap, DollarSign, Link2, Newspaper, BarChart3, Route as RouteIcon } from 'lucide-react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, TrendingDown, AlertTriangle, Zap, DollarSign, Link2, Newspaper, BarChart3, Route as RouteIcon, Pencil } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
 import ActionWizard, { getActionsForType } from './ActionWizard';
 import { getCachedSanctionsCheck } from '../../services/maritimeIntegrationService';
 import type { SanctionsResult } from '../../services/maritimeIntegrationService';
 import type { OntologyObject, OntologyLink, OntologyActionType } from '../../types';
+
+const OntologyObjectEditorLazy = lazy(() => import('./OntologyObjectEditor'));
 
 interface Object360PanelProps {
     objectId: string | null;
@@ -82,6 +84,7 @@ function Object360PanelInner({ obj, objectId, objects, links, onClose, onNavigat
     obj: OntologyObject; objectId: string; objects: OntologyObject[]; links: any[]; onClose: () => void; onNavigate: (id: string) => void;
 }) {
     const [activeActionType, setActiveActionType] = useState<OntologyActionType | null>(null);
+    const [showEditor, setShowEditor] = useState(false);
     const availableActions = getActionsForType(obj.type);
 
     const riskScore = (obj.properties.riskScore as number) || 0;
@@ -108,9 +111,14 @@ function Object360PanelInner({ obj, objectId, objects, links, onClose, onNavigat
                             {obj.type}
                         </span>
                     </div>
-                    <button onClick={onClose} className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors">
-                        <X size={16} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                        <button onClick={() => setShowEditor(true)} className="p-1.5 text-slate-500 hover:text-cyan-400 hover:bg-slate-700/50 rounded-lg transition-colors" title="편집">
+                            <Pencil size={14} />
+                        </button>
+                        <button onClick={onClose} className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors" title="닫기">
+                            <X size={16} />
+                        </button>
+                    </div>
                 </div>
                 <h2 className="text-lg font-bold text-slate-100 mb-1">{obj.title}</h2>
                 {obj.description && (
@@ -273,6 +281,16 @@ function Object360PanelInner({ obj, objectId, objects, links, onClose, onNavigat
                     </div>
                 </div>
             </div>
+
+            {/* Editor Modal */}
+            {showEditor && (
+                <Suspense fallback={null}>
+                    <OntologyObjectEditorLazy
+                        editObject={obj}
+                        onClose={() => setShowEditor(false)}
+                    />
+                </Suspense>
+            )}
         </div>
     );
 }

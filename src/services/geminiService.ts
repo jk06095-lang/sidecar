@@ -354,6 +354,163 @@ export async function* streamMarpBriefing(
 }
 
 // ============================================================
+// DEEP RESEARCH — Gemini Google Search Grounding
+// Real-time web search + AI synthesis for follow-up research
+// ============================================================
+
+export interface ResearchResult {
+    summary: string;           // AI-synthesized answer (Korean)
+    keyFacts: string[];        // Bullet-point key facts
+    sources: { title: string; url: string }[];  // Source URLs
+    relatedQueries: string[];  // Suggested follow-up queries
+}
+
+export async function researchWithGrounding(
+    query: string,
+    context?: { scrapTitle?: string; scrapDescription?: string; ontologyContext?: string },
+): Promise<ResearchResult> {
+    const contextBlock = context
+        ? `\n\n## 사용자 보유 정보:\n- 스크랩 제목: ${context.scrapTitle || 'N/A'}\n- 스크랩 내용: ${context.scrapDescription || 'N/A'}\n- 온톨로지 컨텍스트: ${context.ontologyContext || 'N/A'}`
+        : '';
+
+    const prompt = `너는 해양/에너지/지정학 전문 리서치 에이전트다. 사용자가 입력한 쿼리에 대해 Google Search를 활용하여 최신 정보를 조사하고 심층 분석을 제공하라.
+${contextBlock}
+
+## 사용자 리서치 쿼리:
+"${query}"
+
+## 응답 규칙:
+1. 반드시 JSON으로만 응답 (마크다운 코드블럭 사용 금지)
+2. summary: 조사 결과를 3-5문장으로 종합한 한국어 분석 (수치와 출처 포함)
+3. keyFacts: 핵심 팩트 3-6개 (각각 1줄, 한국어, 수치 포함 권장)
+4. sources: 참고한 소스 URL (title + url, 최대 5개)
+5. relatedQueries: 후속 조사를 위한 추천 검색어 3개
+
+JSON 스키마:
+{
+  "summary": "종합 분석...",
+  "keyFacts": ["팩트1", "팩트2", ...],
+  "sources": [{"title": "소스 제목", "url": "https://..."}],
+  "relatedQueries": ["후속 쿼리1", "후속 쿼리2", "후속 쿼리3"]
+}`;
+
+    try {
+        const text = await bffGenerate(
+            prompt,
+            'gemini-2.5-flash',
+            0.3,
+            [{ googleSearch: {} }],
+        );
+
+        const jsonStr = cleanMarkdownFences(text);
+
+        try {
+            const parsed = JSON.parse(jsonStr);
+            return {
+                summary: parsed.summary || '검색 결과를 분석하지 못했습니다.',
+                keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts.map(String) : [],
+                sources: Array.isArray(parsed.sources)
+                    ? parsed.sources.map((s: any) => ({ title: String(s.title || ''), url: String(s.url || '') }))
+                    : [],
+                relatedQueries: Array.isArray(parsed.relatedQueries) ? parsed.relatedQueries.map(String) : [],
+            };
+        } catch {
+            // If JSON parse fails, return raw text as summary
+            return {
+                summary: text.slice(0, 500),
+                keyFacts: [],
+                sources: [],
+                relatedQueries: [],
+            };
+        }
+    } catch (err) {
+        console.error('[GeminiService] Research with grounding failed:', err);
+        throw new Error(`리서치 실패: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+}
+
+// ============================================================
+// AI OBJECT DRAFT — Generate OntologyObject from description
+// ============================================================
+
+const TYPE_PROPERTY_HINTS: Record<string, string> = {
+    Vessel: 'vesselType, imo, mmsi, callSign, flag, yearBuilt, dwt, loa, beam, location, lat, lng, speed, heading, destination, eta, fuel, ciiRating, charterRate, cargoValueUsd',
+    Port: 'region, lat, lng, congestionPct, baseWaitDays, dailyTraffic, securityLevel, queuedVessels, annualTEU, oilTransitMbpd',
+    Route: 'originPortId, destinationPortId, distanceNm, estimatedDays, waypoints, riskZones, fuelCostEstimateUsd, currentStatus',
+    MarketIndicator: 'basePrice, unit, previousPrice, priceChange, volatility, benchmarkType, source, assetClass, code, baseRate, issuer, rateFrom, rateTo',
+    RiskEvent: 'category (geopolitical|supply|operational|environmental|cyber|pandemic), severity (low|medium|high|critical), region, lat, lng, threatLevel, lastIncident, affectedVessels, supplyChainImpact, extraCostPerVoyageUsd',
+};
+
+export interface ObjectDraftResult {
+    object: import('../types').OntologyObject;
+    confidence: number;
+    suggestions: string[];
+}
+
+export async function generateObjectDraft(
+    description: string,
+    type: import('../types').OntologyObjectType,
+    existingTitles: string[] = [],
+): Promise<ObjectDraftResult> {
+    const propertyHint = TYPE_PROPERTY_HINTS[type] || '';
+    const now = new Date().toISOString();
+
+    const prompt = `You are a maritime domain data engineer. The user wants to register a new "${type}" object in the ontology graph.
+
+User description: "${description}"
+
+Based on this description, create a complete ${type} object with realistic property values. Use your knowledge to fill in reasonable defaults.
+
+Available property fields for ${type}: ${propertyHint}
+Also include: riskScore (0-100), impactValue (0-100)
+
+Existing titles to AVOID: ${existingTitles.slice(0, 20).join(', ')}
+
+Return JSON:
+{
+  "title": "concise title",
+  "description": "1-2 sentence description",
+  "properties": { ... all relevant properties ... },
+  "confidence": 0.0-1.0,
+  "suggestions": ["suggestion for user to review", ...]
+}
+
+Return ONLY JSON.`;
+
+    const text = await bffGenerate(prompt, 'gemini-2.5-flash', 0.4);
+    const jsonStr = cleanMarkdownFences(text);
+
+    try {
+        const parsed = JSON.parse(jsonStr);
+        return {
+            object: {
+                id: `${type.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type,
+                title: parsed.title || description.slice(0, 50),
+                description: parsed.description || description,
+                properties: parsed.properties || {},
+                metadata: { createdAt: now, updatedAt: now, source: 'AI Draft', status: 'active' },
+            },
+            confidence: parsed.confidence ?? 0.5,
+            suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+        };
+    } catch {
+        return {
+            object: {
+                id: `${type.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type,
+                title: description.slice(0, 50),
+                description,
+                properties: {},
+                metadata: { createdAt: now, updatedAt: now, source: 'User', status: 'active' },
+            },
+            confidence: 0,
+            suggestions: ['AI가 초안을 생성하지 못했습니다. 수동으로 입력해주세요.'],
+        };
+    }
+}
+
+// ============================================================
 // NEW: OSINT Signal Evaluation — LLM-based noise filtering
 // ============================================================
 

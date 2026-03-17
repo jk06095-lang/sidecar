@@ -651,15 +651,27 @@ async function fetchDirectAPI(url: string): Promise<IntelArticle[]> {
  * from 2026-03-01 to present date.
  * Called only when Firestore has no cached articles.
  */
+let _bootstrapDone = false;
+let _bootstrapInFlight: Promise<IntelArticle[]> | null = null;
+
 export async function bootstrapHistoricalData(): Promise<IntelArticle[]> {
-    console.log('[NewsService] Starting historical backfill via Gemini Search...');
+    // Session guard: only run once per session
+    if (_bootstrapDone) {
+        console.info('[NewsService] Backfill already completed this session, skipping');
+        return [];
+    }
+    // In-flight dedup: if already running, return existing promise
+    if (_bootstrapInFlight) return _bootstrapInFlight;
 
-    const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-11'
+    _bootstrapInFlight = (async (): Promise<IntelArticle[]> => {
+        console.log('[NewsService] Starting historical backfill via Gemini Search...');
 
-    try {
-        const { bffGenerate } = await import('./geminiService');
+        const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-11'
 
-        const prompt = `You are a maritime intelligence analyst. Search for REAL news events from 2026-03-01 to ${today} related to:
+        try {
+            const { bffGenerate } = await import('./geminiService');
+
+            const prompt = `You are a maritime intelligence analyst. Search for REAL news events from 2026-03-01 to ${today} related to:
 - Strait of Hormuz tensions, Middle East geopolitical risks
 - Oil price movements (Brent crude)  
 - Maritime security incidents (UKMTO warnings, piracy, drone attacks on vessels)
@@ -688,52 +700,60 @@ If you cannot find events from 2026, use the most recent real maritime security 
 
 Return ONLY a JSON array. No other text.`;
 
-        const text = await bffGenerate(prompt, 'gemini-2.5-flash', undefined, [{ googleSearch: {} }]);
-        let jsonStr = text.trim();
-        if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
-        else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
-        if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
-        jsonStr = jsonStr.trim();
+            const text = await bffGenerate(prompt, 'gemini-2.5-flash', undefined, [{ googleSearch: {} }]);
+            let jsonStr = text.trim();
+            if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+            else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+            if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+            jsonStr = jsonStr.trim();
 
-        if (!jsonStr || jsonStr === '[]') return [];
+            if (!jsonStr || jsonStr === '[]') return [];
 
-        const parsed = JSON.parse(jsonStr);
-        if (!Array.isArray(parsed)) return [];
+            const parsed = JSON.parse(jsonStr);
+            if (!Array.isArray(parsed)) return [];
 
-        const articles: IntelArticle[] = parsed.map((item: any, i: number) => {
-            const category = (['OSINT', 'OFFICIAL_CIRCULAR', 'SECURITY_ALERT'].includes(item.category))
-                ? item.category as IntelArticle['category']
-                : 'OSINT' as const;
+            const articles: IntelArticle[] = parsed.map((item: any, i: number) => {
+                const category = (['OSINT', 'OFFICIAL_CIRCULAR', 'SECURITY_ALERT'].includes(item.category))
+                    ? item.category as IntelArticle['category']
+                    : 'OSINT' as const;
 
-            return {
-                id: generateArticleId(item.title || `backfill-${i}`, item.source || 'Backfill'),
-                title: item.titleKo || item.title || 'Maritime Intelligence',
-                description: item.description || '',
-                url: item.url || '#',
-                source: item.source || 'Intelligence',
-                sourceBadge: getSourceBadge(item.source || ''),
-                publishedAt: item.publishedAt || new Date(2026, 2, 1 + i).toISOString(),
-                fetchedAt: new Date().toISOString(),
-                evaluated: true,
-                dropped: false,
-                impactScore: item.impactScore ?? 70,
-                riskLevel: (item.riskLevel || 'Medium') as IntelArticle['riskLevel'],
-                aiInsight: item.insight || undefined,
-                ontologyTags: item.ontologyTags || [],
-                category,
-                refNumber: item.refNumber || undefined,
-            };
-        });
+                return {
+                    id: generateArticleId(item.title || `backfill-${i}`, item.source || 'Backfill'),
+                    title: item.titleKo || item.title || 'Maritime Intelligence',
+                    description: item.description || '',
+                    url: item.url || '#',
+                    source: item.source || 'Intelligence',
+                    sourceBadge: getSourceBadge(item.source || ''),
+                    publishedAt: item.publishedAt || new Date(2026, 2, 1 + i).toISOString(),
+                    fetchedAt: new Date().toISOString(),
+                    evaluated: true,
+                    dropped: false,
+                    impactScore: item.impactScore ?? 70,
+                    riskLevel: (item.riskLevel || 'Medium') as IntelArticle['riskLevel'],
+                    aiInsight: item.insight || undefined,
+                    ontologyTags: item.ontologyTags || [],
+                    category,
+                    refNumber: item.refNumber || undefined,
+                };
+            });
 
-        // Sort newest first for display
-        articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+            // Sort newest first for display
+            articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
-        console.log('[NewsService] Backfill complete:', articles.length, 'historical articles');
+            console.log('[NewsService] Backfill complete:', articles.length, 'historical articles');
 
-        return articles;
-    } catch (err) {
-        console.warn('[NewsService] Backfill failed:', err);
-        return [];
+            _bootstrapDone = true;
+            return articles;
+        } catch (err) {
+            console.warn('[NewsService] Backfill failed:', err);
+            return [];
+        }
+    })();
+
+    try {
+        return await _bootstrapInFlight;
+    } finally {
+        _bootstrapInFlight = null;
     }
 }
 
@@ -743,10 +763,20 @@ Return ONLY a JSON array. No other text.`;
 // ============================================================
 
 let lastOfficialFetchTime = 0;
-const OFFICIAL_FETCH_INTERVAL_MS = 5 * 60 * 1000; // 5 min between official fetches
+const OFFICIAL_FETCH_INTERVAL_MS = 15 * 60 * 1000; // 15 min between official fetches (was 5 min)
 const officialArticleCache: IntelArticle[] = [];
 
+// In-flight dedup for KPI and Security fetchers
+let _kpiInFlight: Promise<IntelArticle[]> | null = null;
+let _securityInFlight: Promise<IntelArticle[]> | null = null;
+
 export async function fetchKPICirculars(): Promise<IntelArticle[]> {
+    if (_kpiInFlight) return _kpiInFlight;
+    _kpiInFlight = _fetchKPICircularsInner();
+    try { return await _kpiInFlight; } finally { _kpiInFlight = null; }
+}
+
+async function _fetchKPICircularsInner(): Promise<IntelArticle[]> {
     try {
         const { bffGenerate } = await import('./geminiService');
 
@@ -805,6 +835,12 @@ export async function fetchKPICirculars(): Promise<IntelArticle[]> {
 }
 
 export async function fetchSecurityAlerts(): Promise<IntelArticle[]> {
+    if (_securityInFlight) return _securityInFlight;
+    _securityInFlight = _fetchSecurityAlertsInner();
+    try { return await _securityInFlight; } finally { _securityInFlight = null; }
+}
+
+async function _fetchSecurityAlertsInner(): Promise<IntelArticle[]> {
     try {
         const { bffGenerate } = await import('./geminiService');
 

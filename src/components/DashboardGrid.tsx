@@ -12,16 +12,18 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Search, Ship, Anchor, Navigation, Fuel, Zap, Shield, DollarSign,
     AlertTriangle, FileText, ChevronRight, TrendingUp,
-    Filter, X, Loader2, Route as RouteIcon,
+    Filter, X, Loader2, Route as RouteIcon, Plus,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { SimulationParams, FleetVessel, OntologyObject, OntologyObjectType } from '../types';
+import type { SimulationParams, ChartDataPoint, FleetVessel, OntologyObject, OntologyObjectType } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
 
 // Widgets
 import FleetMapWidget from './widgets/FleetMapWidget';
 import Object360Panel from './widgets/Object360Panel';
 import MacroIntelligenceBoard from './widgets/MacroIntelligenceBoard';
+
+const OntologyObjectEditorLazy = React.lazy(() => import('./widgets/OntologyObjectEditor'));
 
 
 
@@ -47,6 +49,7 @@ const TYPE_FILTERS: OntologyObjectType[] = ['Vessel', 'Port', 'Route', 'MarketIn
 
 interface DashboardGridProps {
     simulationParams: SimulationParams;
+    dynamicChartData: ChartDataPoint[];
     dynamicFleetData: FleetVessel[];
     onNavigateTab?: (tab: string) => void;
 }
@@ -55,11 +58,12 @@ interface DashboardGridProps {
 // COMPONENT
 // ============================================================
 
-export default function DashboardGrid({ simulationParams, dynamicFleetData, onNavigateTab }: DashboardGridProps) {
+export default function DashboardGrid({ simulationParams, dynamicChartData, dynamicFleetData, onNavigateTab }: DashboardGridProps) {
     const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
     const [macroExpanded, setMacroExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [typeFilter, setTypeFilter] = useState<OntologyObjectType | 'all'>('all');
+    const [showCreateEditor, setShowCreateEditor] = useState(false);
 
     // Store
     const objects = useOntologyStore(s => s.objects);
@@ -99,7 +103,25 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
         fetchAndBindMarketData();
         refreshAISPositions();
         const interval = setInterval(() => fetchAndBindMarketData(), LSEG_POLL_INTERVAL_MS);
-        return () => clearInterval(interval);
+
+        // Visibility-gating: pause polling when tab is hidden
+        let pausedInterval: ReturnType<typeof setInterval> | null = null;
+        const handleVisibility = () => {
+            if (document.hidden) {
+                clearInterval(interval);
+            } else {
+                // Avoid duplicate intervals
+                if (pausedInterval) clearInterval(pausedInterval);
+                pausedInterval = setInterval(() => fetchAndBindMarketData(), LSEG_POLL_INTERVAL_MS);
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            clearInterval(interval);
+            if (pausedInterval) clearInterval(pausedInterval);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
     }, [fetchAndBindMarketData, refreshAISPositions]);
 
     // ---- Filtered & sorted object list ----
@@ -154,6 +176,18 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
                     LEFT PANEL — Object Explorer
                    ════════════════════════════════════════════ */}
                 <div className="w-[280px] shrink-0 flex flex-col border-r border-slate-800/50 bg-slate-950/50">
+                    {/* Header with Register Button */}
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/40">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Objects</span>
+                        <button
+                            onClick={() => setShowCreateEditor(true)}
+                            className="flex items-center gap-1 px-2 py-1 rounded-md bg-cyan-600/20 border border-cyan-500/30 text-cyan-400 text-[10px] font-medium hover:bg-cyan-600/30 transition"
+                            title="새 오브젝트 등록"
+                        >
+                            <Plus size={12} />
+                            등록
+                        </button>
+                    </div>
                     {/* Search */}
                     <div className="p-2 border-b border-slate-800/40">
                         <div className="relative">
@@ -294,7 +328,18 @@ export default function DashboardGrid({ simulationParams, dynamicFleetData, onNa
             <MacroIntelligenceBoard
                 expanded={macroExpanded}
                 onToggle={() => setMacroExpanded(!macroExpanded)}
+                simulationParams={simulationParams}
+                dynamicChartData={dynamicChartData}
+                dynamicFleetData={dynamicFleetData}
             />
+            {/* Object Editor for Create */}
+            {showCreateEditor && (
+                <React.Suspense fallback={null}>
+                    <OntologyObjectEditorLazy
+                        onClose={() => setShowCreateEditor(false)}
+                    />
+                </React.Suspense>
+            )}
         </div>
     );
 }

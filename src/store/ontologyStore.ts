@@ -1634,17 +1634,52 @@ export const useOntologyStore = create<OntologyState>((set, get) => {
             if (_unsubscribeGraph) {
                 _unsubscribeGraph();
                 _unsubscribeGraph = null;
-                console.info('[OntologyStore] Tore down all Firestore listeners');
             }
+            if (_beviIntervalId) {
+                clearInterval(_beviIntervalId);
+                _beviIntervalId = null;
+            }
+            console.info('[OntologyStore] Tore down all listeners (Firestore + BEVI timer)');
         },
     };
 });
 
 // ============================================================
-// 30-MINUTE BEVI INTERVAL TIMER
+// 30-MINUTE BEVI INTERVAL TIMER (visibility-gated)
+// Pauses when browser tab is hidden to save resources.
 // ============================================================
-setInterval(() => {
-    if (_beviDirty) {
-        useOntologyStore.getState().recalculateBEVI();
+let _beviIntervalId: ReturnType<typeof setInterval> | null = null;
+
+function startBeviTimer() {
+    if (_beviIntervalId) return; // already running
+    _beviIntervalId = setInterval(() => {
+        if (_beviDirty) {
+            useOntologyStore.getState().recalculateBEVI();
+        }
+    }, BEVI_UPDATE_INTERVAL_MS);
+}
+
+function stopBeviTimer() {
+    if (_beviIntervalId) {
+        clearInterval(_beviIntervalId);
+        _beviIntervalId = null;
     }
-}, BEVI_UPDATE_INTERVAL_MS);
+}
+
+// Start immediately
+startBeviTimer();
+
+// Pause/resume on tab visibility
+if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopBeviTimer();
+        } else {
+            startBeviTimer();
+            // Recalculate on return if dirty
+            if (_beviDirty) {
+                useOntologyStore.getState().recalculateBEVI();
+            }
+        }
+    });
+}

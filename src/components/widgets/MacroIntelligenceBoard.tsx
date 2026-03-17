@@ -1,14 +1,16 @@
 /**
  * MacroIntelligenceBoard — Collapsible bottom panel with tabbed macro data views.
  * Consolidates: BEVI, Market Quotes, FX Rates, News Intel, Geopolitical Risk.
+ * Also displays pinned indicator chips (Spread, VLSFO, Risk, Sentiment) in the collapsed bar.
  */
 import React, { useState } from 'react';
 import {
     ChevronDown, ChevronUp, Activity, TrendingUp, DollarSign,
-    Newspaper, Shield, BarChart3,
+    Newspaper, Shield, BarChart3, Fuel, Ship, AlertTriangle, Settings,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
+import type { SimulationParams, ChartDataPoint, FleetVessel } from '../../types';
 
 type MacroTab = 'bevi' | 'market' | 'fx' | 'intel' | 'geo';
 
@@ -20,13 +22,51 @@ const TABS: { id: MacroTab; label: string; icon: React.ReactNode }[] = [
     { id: 'geo', label: 'Geo Risk', icon: <Shield size={13} /> },
 ];
 
+type IndicatorId = 'spread' | 'vlsfo' | 'risk' | 'sentiment';
+
+const INDICATOR_DEFS: { id: IndicatorId; label: string; icon: React.ReactNode }[] = [
+    { id: 'spread', label: 'Spread', icon: <Activity size={11} /> },
+    { id: 'vlsfo', label: 'VLSFO', icon: <Fuel size={11} /> },
+    { id: 'risk', label: 'High Risk', icon: <Ship size={11} /> },
+    { id: 'sentiment', label: 'Sentiment', icon: <AlertTriangle size={11} /> },
+];
+
 interface MacroIntelligenceBoardProps {
     expanded: boolean;
     onToggle: () => void;
+    simulationParams?: SimulationParams;
+    dynamicChartData?: ChartDataPoint[];
+    dynamicFleetData?: FleetVessel[];
 }
 
-export default function MacroIntelligenceBoard({ expanded, onToggle }: MacroIntelligenceBoardProps) {
+export default function MacroIntelligenceBoard({ expanded, onToggle, simulationParams, dynamicChartData, dynamicFleetData }: MacroIntelligenceBoardProps) {
     const [activeTab, setActiveTab] = useState<MacroTab>('bevi');
+    const [pinnedIndicators, setPinnedIndicators] = useState<Set<IndicatorId>>(new Set(['spread', 'vlsfo', 'risk', 'sentiment']));
+    const [showSettings, setShowSettings] = useState(false);
+
+    // Compute indicator values from props
+    const criticalCount = dynamicFleetData?.filter(v => v.riskLevel === 'Critical').length || 0;
+    const highCount = dynamicFleetData?.filter(v => v.riskLevel === 'High').length || 0;
+    const currentSpread = dynamicChartData && dynamicChartData.length > 0
+        ? dynamicChartData[dynamicChartData.length - 1].Spread
+        : 0;
+
+    const indicatorValues: Record<IndicatorId, { value: string; unit: string; alert: boolean; pulse?: boolean }> = {
+        spread: { value: currentSpread.toFixed(1), unit: 'WS', alert: currentSpread > 40 },
+        vlsfo: { value: `$${simulationParams?.vlsfoPrice || 0}`, unit: '/mt', alert: (simulationParams?.vlsfoPrice || 0) > 900 },
+        risk: { value: `${criticalCount + highCount}`, unit: `/${dynamicFleetData?.length || 0}`, alert: criticalCount > 0, pulse: criticalCount > 0 },
+        sentiment: { value: `${simulationParams?.newsSentimentScore || 0}`, unit: '/100', alert: (simulationParams?.newsSentimentScore || 0) > 80, pulse: (simulationParams?.newsSentimentScore || 0) > 80 },
+    };
+
+    const toggleIndicator = (id: IndicatorId) => {
+        setPinnedIndicators(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    const isCrisis = (simulationParams?.newsSentimentScore || 0) > 70;
 
     return (
         <div className={cn(
@@ -40,11 +80,78 @@ export default function MacroIntelligenceBoard({ expanded, onToggle }: MacroInte
                     className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold text-slate-400 hover:text-slate-200 transition-colors uppercase tracking-widest mr-2"
                 >
                     <BarChart3 size={12} />
-                    Macro Intelligence
+                    Macro
                     {expanded ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
                 </button>
+
+                {/* Pinned Indicator Chips (visible in BOTH collapsed and expanded) */}
+                {simulationParams && (
+                    <div className="flex items-center gap-1 mr-2">
+                        {INDICATOR_DEFS.filter(d => pinnedIndicators.has(d.id)).map(def => {
+                            const v = indicatorValues[def.id];
+                            return (
+                                <div
+                                    key={def.id}
+                                    className={cn(
+                                        "flex items-center gap-1 px-2 py-0.5 rounded-md border transition-all text-[9px]",
+                                        v.alert
+                                            ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                            : "bg-slate-800/40 border-slate-700/30 text-slate-400",
+                                        v.pulse && "animate-pulse-slow"
+                                    )}
+                                >
+                                    <span className={v.alert ? 'text-rose-400' : 'text-slate-500'}>{def.icon}</span>
+                                    <span className="uppercase tracking-wider font-medium">{def.label}</span>
+                                    <span className={cn("font-mono font-bold text-[10px]", v.alert ? 'text-rose-300' : 'text-slate-200')}>
+                                        {v.value}
+                                    </span>
+                                    <span className="text-slate-600">{v.unit}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {/* Crisis inline badge */}
+                {isCrisis && (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 bg-rose-950/40 border border-rose-700/30 rounded-md animate-pulse-slow mr-2">
+                        <AlertTriangle size={10} className="text-rose-400" />
+                        <span className="text-[9px] font-semibold text-rose-300">CRISIS</span>
+                    </div>
+                )}
+
+                {/* Indicator Settings toggle */}
+                <div className="relative ml-auto flex items-center gap-1">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}
+                        className="p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all"
+                        title="인디케이터 설정"
+                    >
+                        <Settings size={12} />
+                    </button>
+                    {showSettings && (
+                        <div className="absolute bottom-full right-0 mb-1 p-2 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px]"
+                            onClick={e => e.stopPropagation()}>
+                            <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold mb-1.5 block">표시할 인디케이터</span>
+                            {INDICATOR_DEFS.map(def => (
+                                <label key={def.id} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-slate-800/50 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={pinnedIndicators.has(def.id)}
+                                        onChange={() => toggleIndicator(def.id)}
+                                        className="w-3 h-3 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0"
+                                    />
+                                    <span className="flex items-center gap-1 text-[10px] text-slate-300">
+                                        {def.icon} {def.label}
+                                    </span>
+                                </label>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 {expanded && (
-                    <div className="flex items-center gap-0.5">
+                    <div className="flex items-center gap-0.5 ml-2">
                         {TABS.map(tab => (
                             <button
                                 key={tab.id}

@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Newspaper, Search, Bookmark, BookmarkCheck, Trash2, Globe, Landmark,
     Timer, Shield, AlertTriangle, Loader2, Sparkles, ArrowRight,
-    ExternalLink, X, Send, MessageSquare, FileText
+    ExternalLink, X, Send, MessageSquare, FileText, Link2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GlobalNewsWidget from './widgets/GlobalNewsWidget';
 import { useOntologyStore } from '../store/ontologyStore';
 import { getFinOpsStats, type FinOpsStats } from '../services/newsService';
+import { researchWithGrounding, type ResearchResult } from '../services/geminiService';
 import type { IntelArticle } from '../types';
 
 type FeedTab = 'osint' | 'official';
@@ -32,9 +33,11 @@ export default function News() {
     const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
     const [scraps, setScraps] = useState<ScrapItem[]>([]);
     const [researchQuery, setResearchQuery] = useState('');
-    const [researchResults, setResearchResults] = useState<string[]>([]);
+    const [researchResult, setResearchResult] = useState<ResearchResult | null>(null);
+    const [researchError, setResearchError] = useState<string | null>(null);
     const [isResearching, setIsResearching] = useState(false);
     const [selectedScrap, setSelectedScrap] = useState<ScrapItem | null>(null);
+    const pendingResearchRef = useRef<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
 
     // Ontology store for tag navigation & article storage
@@ -102,56 +105,57 @@ export default function News() {
         if (selectedScrap?.id === id) setSelectedScrap(null);
     };
 
-    // Perplexity-style follow-up research
-    const handleResearch = async () => {
-        if (!researchQuery.trim()) return;
+    // Deep Research — Gemini Google Search Grounding
+    const handleResearch = useCallback(async (queryOverride?: string) => {
+        const q = (queryOverride || researchQuery).trim();
+        if (!q) return;
+        if (queryOverride) setResearchQuery(q);
         setIsResearching(true);
-        setResearchResults([]);
+        setResearchResult(null);
+        setResearchError(null);
 
-        // Search through existing articles for related content
-        const query = researchQuery.toLowerCase();
-        const matchedArticles = intelArticles
-            .filter(a =>
-                a.title.toLowerCase().includes(query) ||
-                a.description.toLowerCase().includes(query) ||
-                (a.ontologyTags || []).some(t => t.toLowerCase().includes(query))
+        // Build context from selected scrap + ontology
+        const scrapContext = selectedScrap ? {
+            scrapTitle: selectedScrap.title,
+            scrapDescription: selectedScrap.description,
+        } : undefined;
+
+        // Find related ontology objects for context
+        const qLower = q.toLowerCase();
+        const relatedObjects = objects
+            .filter(o =>
+                o.title.toLowerCase().includes(qLower) ||
+                o.description?.toLowerCase().includes(qLower) ||
+                o.type.toLowerCase().includes(qLower)
             )
             .slice(0, 5);
 
-        // Also search ontology objects
-        const matchedObjects = objects
-            .filter(o =>
-                o.title.toLowerCase().includes(query) ||
-                o.description.toLowerCase().includes(query) ||
-                o.type.toLowerCase().includes(query)
-            )
-            .slice(0, 3);
+        const ontologyContext = relatedObjects.length > 0
+            ? relatedObjects.map(o => `[${o.type}] ${o.title}: ${o.description || ''}`).join(' | ')
+            : undefined;
 
-        const results: string[] = [];
-
-        if (matchedArticles.length > 0) {
-            results.push(`📰 **관련 뉴스 ${matchedArticles.length}건 발견:**`);
-            matchedArticles.forEach(a => {
-                results.push(`• ${a.title} — ${a.source} ${a.riskLevel ? `[${a.riskLevel}]` : ''}`);
+        try {
+            const result = await researchWithGrounding(q, {
+                ...scrapContext,
+                ontologyContext,
             });
+            setResearchResult(result);
+        } catch (err) {
+            console.error('[News] Research failed:', err);
+            setResearchError(err instanceof Error ? err.message : '리서치 중 오류가 발생했습니다.');
+        } finally {
+            setIsResearching(false);
         }
+    }, [researchQuery, selectedScrap, objects]);
 
-        if (matchedObjects.length > 0) {
-            results.push(`\n🔗 **연관 온톨로지 ${matchedObjects.length}건:**`);
-            matchedObjects.forEach(o => {
-                results.push(`• [${o.type}] ${o.title}`);
-            });
+    // Auto-trigger research when query is set from scrap button
+    useEffect(() => {
+        if (pendingResearchRef.current) {
+            const q = pendingResearchRef.current;
+            pendingResearchRef.current = null;
+            handleResearch(q);
         }
-
-        if (results.length === 0) {
-            results.push(`🔍 "${researchQuery}"에 대한 결과가 없습니다. 다른 키워드로 검색해보세요.`);
-        }
-
-        // Simulate slight delay for UX
-        await new Promise(r => setTimeout(r, 600));
-        setResearchResults(results);
-        setIsResearching(false);
-    };
+    }, [researchQuery, handleResearch]);
 
     return (
         <div className="flex h-full bg-slate-950 overflow-hidden font-mono">
@@ -343,7 +347,9 @@ export default function News() {
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    setResearchQuery(scrap.title.slice(0, 40));
+                                                    const query = scrap.title.slice(0, 60);
+                                                    pendingResearchRef.current = query;
+                                                    setResearchQuery(query);
                                                 }}
                                                 className="flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300 transition-colors"
                                             >
@@ -361,9 +367,12 @@ export default function News() {
                 <div className="shrink-0 border-t border-slate-800/50 bg-slate-900/60">
                     <div className="p-3">
                         <div className="flex items-center gap-2 mb-2">
-                            <MessageSquare size={13} className="text-violet-400" />
-                            <span className="text-xs font-bold text-slate-200">이어서 조사</span>
-                            <span className="text-[9px] text-slate-600 ml-auto">Perplexity-style Research</span>
+                            <Search size={13} className="text-violet-400" />
+                            <span className="text-xs font-bold text-slate-200">심층 조사</span>
+                            <span className="text-[9px] text-emerald-400/60 ml-auto flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+                                Google Search Grounding
+                            </span>
                         </div>
                         <div className="flex gap-2">
                             <input
@@ -371,11 +380,11 @@ export default function News() {
                                 value={researchQuery}
                                 onChange={e => setResearchQuery(e.target.value)}
                                 onKeyDown={e => e.key === 'Enter' && handleResearch()}
-                                placeholder="관련 키워드 입력... (예: 호르무즈 해협)"
+                                placeholder="조사할 키워드 입력... (예: 호르무즈 해협 최신 동향)"
                                 className="flex-1 bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/20 transition-all"
                             />
                             <button
-                                onClick={handleResearch}
+                                onClick={() => handleResearch()}
                                 disabled={isResearching || !researchQuery.trim()}
                                 className="px-3 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-500 text-white text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                             >
@@ -383,39 +392,98 @@ export default function News() {
                             </button>
                         </div>
 
-                        {/* Research results */}
-                        {researchResults.length > 0 && (
-                            <div className="mt-3 p-3 rounded-lg bg-violet-950/20 border border-violet-800/20 max-h-48 overflow-y-auto custom-scrollbar">
-                                {researchResults.map((line, i) => (
-                                    <p key={i} className="text-[11px] text-slate-300 leading-relaxed mb-1 last:mb-0">
-                                        {line}
-                                    </p>
-                                ))}
+                        {/* Research results — Structured AI response */}
+                        {isResearching && (
+                            <div className="mt-3 p-4 rounded-lg bg-violet-950/20 border border-violet-800/20 flex items-center gap-3">
+                                <Loader2 size={16} className="animate-spin text-violet-400" />
+                                <div>
+                                    <span className="text-xs text-violet-300 font-medium">Google Search로 조사 중...</span>
+                                    <p className="text-[9px] text-slate-500 mt-0.5">Gemini AI가 최신 웹 정보를 분석하고 있습니다</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {researchError && (
+                            <div className="mt-3 p-3 rounded-lg bg-rose-950/20 border border-rose-800/20">
+                                <p className="text-[11px] text-rose-300">⚠ {researchError}</p>
+                            </div>
+                        )}
+
+                        {researchResult && !isResearching && (
+                            <div className="mt-3 space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                                {/* Summary */}
+                                <div className="p-3 rounded-lg bg-violet-950/20 border border-violet-800/20">
+                                    <p className="text-[11px] text-slate-200 leading-relaxed">{researchResult.summary}</p>
+                                </div>
+
+                                {/* Key Facts */}
+                                {researchResult.keyFacts.length > 0 && (
+                                    <div className="p-3 rounded-lg bg-slate-800/30 border border-slate-700/30">
+                                        <span className="text-[9px] text-violet-400 uppercase tracking-wider font-bold">핵심 팩트</span>
+                                        <ul className="mt-1.5 space-y-1">
+                                            {researchResult.keyFacts.map((fact, i) => (
+                                                <li key={i} className="text-[10px] text-slate-300 flex items-start gap-1.5">
+                                                    <span className="text-violet-400 mt-0.5">▸</span>
+                                                    {fact}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Sources */}
+                                {researchResult.sources.length > 0 && (
+                                    <div className="p-2 rounded-lg bg-slate-800/20 border border-slate-700/20">
+                                        <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold flex items-center gap-1"><Link2 size={9} /> 출처</span>
+                                        <div className="mt-1 space-y-0.5">
+                                            {researchResult.sources.map((src, i) => (
+                                                <a key={i} href={src.url} target="_blank" rel="noopener noreferrer"
+                                                    className="flex items-center gap-1.5 text-[10px] text-cyan-400 hover:text-cyan-300 transition-colors truncate">
+                                                    <ExternalLink size={9} className="shrink-0" />
+                                                    {src.title || src.url}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Suggested follow-up queries */}
+                                {researchResult.relatedQueries.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                        {researchResult.relatedQueries.map((rq, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => {
+                                                    pendingResearchRef.current = rq;
+                                                    setResearchQuery(rq);
+                                                }}
+                                                className="text-[9px] px-2 py-1 rounded-full bg-violet-500/10 text-violet-300 border border-violet-500/20 hover:bg-violet-500/20 hover:text-violet-200 transition-all"
+                                            >
+                                                🔍 {rq}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
 
                         {/* Quick research suggestions */}
-                        {researchResults.length === 0 && !isResearching && (
+                        {!researchResult && !isResearching && !researchError && (
                             <div className="mt-2 flex flex-wrap gap-1">
-                                {['호르무즈 해협', 'VLCC', '유가 변동', '해적', 'P&I 보험'].map(keyword => (
+                                {['호르무즈 해협 최신 동향', 'VLCC 운임 전망', '중동 유가 전망', 'P&I 보험료 추이', '글로벌 해운 시장'].map(keyword => (
                                     <button
                                         key={keyword}
-                                        onClick={() => { setResearchQuery(keyword); }}
+                                        onClick={() => {
+                                            pendingResearchRef.current = keyword;
+                                            setResearchQuery(keyword);
+                                        }}
                                         className="text-[9px] px-2 py-1 rounded-full bg-slate-800/60 text-slate-400 border border-slate-700/40 hover:bg-violet-500/10 hover:text-violet-300 hover:border-violet-500/30 transition-all"
                                     >
-                                        {keyword}
+                                        🔍 {keyword}
                                     </button>
                                 ))}
                             </div>
                         )}
-                    </div>
-
-                    {/* Batch cycle footer */}
-                    <div className="px-3 pb-3">
-                        <div className="p-2.5 rounded-lg border border-amber-900/20 bg-amber-950/10 text-[9px] text-amber-200/70 leading-relaxed">
-                            <AlertTriangle size={10} className="text-amber-500 inline-block mr-1" />
-                            10분 배치 사이클: Tier 1 키워드 필터 → Tier 2 중복 제거 → Tier 3 AI 분석 → 시그널 표시
-                        </div>
                     </div>
                 </div>
             </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     X, Sparkles, Save, Ship, Anchor, AlertTriangle,
     TrendingUp, Navigation, Loader2, Trash2, Info,
@@ -115,7 +115,8 @@ export default function OntologyObjectEditor({ editObject, onClose, onSaved }: O
     const addObject = useOntologyStore((s) => s.addObject);
     const updateObjectProperty = useOntologyStore((s) => s.updateObjectProperty);
     const removeObject = useOntologyStore((s) => s.removeObject);
-    const existingTitles = useOntologyStore((s) => s.objects.map(o => o.title));
+    const storeObjects = useOntologyStore((s) => s.objects);
+    const existingTitles = useMemo(() => storeObjects.map(o => o.title), [storeObjects]);
 
     // Form state
     const [objectType, setObjectType] = useState<OntologyObjectType>(editObject?.type || 'Vessel');
@@ -259,8 +260,8 @@ export default function OntologyObjectEditor({ editObject, onClose, onSaved }: O
                                         onClick={() => setObjectType(t)}
                                         title={t}
                                         className={`flex flex-col items-center gap-1 px-3 py-2.5 rounded-lg border text-xs font-medium transition-all ${objectType === t
-                                                ? `bg-gradient-to-br ${TYPE_COLORS[t]} border text-white`
-                                                : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/80'
+                                            ? `bg-gradient-to-br ${TYPE_COLORS[t]} border text-white`
+                                            : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/80'
                                             }`}
                                     >
                                         {TYPE_ICONS[t]}

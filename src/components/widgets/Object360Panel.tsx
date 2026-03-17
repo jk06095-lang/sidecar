@@ -1,4 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Ship, Anchor, Navigation, Fuel, Shield, FileText, TrendingUp, TrendingDown, AlertTriangle, Zap, DollarSign, Link2, Newspaper, BarChart3, Route as RouteIcon, Pencil } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useOntologyStore } from '../../store/ontologyStore';
@@ -282,14 +283,15 @@ function Object360PanelInner({ obj, objectId, objects, links, onClose, onNavigat
                 </div>
             </div>
 
-            {/* Editor Modal */}
-            {showEditor && (
+            {/* Editor Modal — rendered via portal to avoid overflow-hidden clipping */}
+            {showEditor && createPortal(
                 <Suspense fallback={null}>
                     <OntologyObjectEditorLazy
                         editObject={obj}
                         onClose={() => setShowEditor(false)}
                     />
-                </Suspense>
+                </Suspense>,
+                document.body
             )}
         </div>
     );

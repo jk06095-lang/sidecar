@@ -12,7 +12,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     Search, Ship, Anchor, Navigation, Fuel, Zap, Shield, DollarSign,
     AlertTriangle, FileText, ChevronRight, TrendingUp,
-    Filter, X, Loader2, Route as RouteIcon, Plus,
+    Filter, X, Loader2, Route as RouteIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { SimulationParams, ChartDataPoint, FleetVessel, OntologyObject, OntologyObjectType } from '../types';
@@ -22,8 +22,6 @@ import { useOntologyStore } from '../store/ontologyStore';
 import FleetMapWidget from './widgets/FleetMapWidget';
 import Object360Panel from './widgets/Object360Panel';
 import MacroIntelligenceBoard from './widgets/MacroIntelligenceBoard';
-
-const OntologyObjectEditorLazy = React.lazy(() => import('./widgets/OntologyObjectEditor'));
 
 
 
@@ -63,7 +61,6 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
     const [macroExpanded, setMacroExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [typeFilter, setTypeFilter] = useState<OntologyObjectType | 'all'>('all');
-    const [showCreateEditor, setShowCreateEditor] = useState(false);
 
     // Store
     const objects = useOntologyStore(s => s.objects);
@@ -176,18 +173,6 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
                     LEFT PANEL — Object Explorer
                    ════════════════════════════════════════════ */}
                 <div className="w-[280px] shrink-0 flex flex-col border-r border-slate-800/50 bg-slate-950/50">
-                    {/* Header with Register Button */}
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/40">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Objects</span>
-                        <button
-                            onClick={() => setShowCreateEditor(true)}
-                            className="flex items-center gap-1 px-2 py-1 rounded-md bg-cyan-600/20 border border-cyan-500/30 text-cyan-400 text-[10px] font-medium hover:bg-cyan-600/30 transition"
-                            title="새 오브젝트 등록"
-                        >
-                            <Plus size={12} />
-                            등록
-                        </button>
-                    </div>
                     {/* Search */}
                     <div className="p-2 border-b border-slate-800/40">
                         <div className="relative">
@@ -332,14 +317,6 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
                 dynamicChartData={dynamicChartData}
                 dynamicFleetData={dynamicFleetData}
             />
-            {/* Object Editor for Create */}
-            {showCreateEditor && (
-                <React.Suspense fallback={null}>
-                    <OntologyObjectEditorLazy
-                        onClose={() => setShowCreateEditor(false)}
-                    />
-                </React.Suspense>
-            )}
         </div>
     );
 }

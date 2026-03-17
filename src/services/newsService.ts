@@ -22,19 +22,39 @@ interface RSSSource {
     category: 'macro' | 'maritime' | 'geopolitics';
 }
 
+// ============================================================
+// GOOGLE NEWS RSS FEEDS — Free, unlimited, topic-specific
+// Format: https://news.google.com/rss/search?q={query}&hl={lang}&gl={country}&ceid={ceid}
+// Returns ~20 articles per query, auto-deduplicated by Google
+// ============================================================
+interface GoogleNewsFeed {
+    name: string;
+    badge: string;
+    query: string;
+    lang: 'en' | 'ko';
+    category: 'macro' | 'maritime' | 'geopolitics';
+}
+
+const GOOGLE_NEWS_FEEDS: GoogleNewsFeed[] = [
+    // Maritime / Shipping (English)
+    { name: 'Maritime Shipping', badge: '⚓', query: 'maritime shipping vessel tanker freight', lang: 'en', category: 'maritime' },
+    { name: 'Oil & Energy', badge: '🛢️', query: 'crude oil price OPEC brent energy market', lang: 'en', category: 'macro' },
+    { name: 'Geopolitics Trade', badge: '🌍', query: 'trade sanctions embargo geopolitics war', lang: 'en', category: 'geopolitics' },
+    { name: 'Supply Chain', badge: '📦', query: 'supply chain logistics disruption port congestion', lang: 'en', category: 'macro' },
+    { name: 'Suez Hormuz Red Sea', badge: '🚢', query: 'Suez Canal Hormuz Strait Red Sea Houthi shipping', lang: 'en', category: 'maritime' },
+    // Korean maritime news
+    { name: '해운뉴스', badge: '🇰🇷', query: '해운 해사 선박 항만 물류 컨테이너', lang: 'ko', category: 'maritime' },
+    { name: '유가·에너지', badge: '⛽', query: '유가 원유 에너지 OPEC 운임', lang: 'ko', category: 'macro' },
+    { name: '지정학 리스크', badge: '🏛️', query: '제재 무역전쟁 호르무즈 수에즈 지정학', lang: 'ko', category: 'geopolitics' },
+];
+
+// Supplementary domain RSS feeds (proven working for maritime)
 const RSS_SOURCES: RSSSource[] = [
-    // Maritime / Shipping
     { name: 'gCaptain', badge: '⚓', feedUrl: 'https://gcaptain.com/feed/', category: 'maritime' },
     { name: 'Hellenic Shipping News', badge: '🚢', feedUrl: 'https://www.hellenicshippingnews.com/feed/', category: 'maritime' },
     { name: 'Ship & Bunker', badge: '⛽', feedUrl: 'https://shipandbunker.com/rss', category: 'maritime' },
     { name: 'Splash247', badge: '🌊', feedUrl: 'https://splash247.com/feed/', category: 'maritime' },
     { name: 'The Maritime Executive', badge: '📋', feedUrl: 'https://maritime-executive.com/rss', category: 'maritime' },
-    // Macro / Geopolitics
-    { name: 'Reuters World', badge: '🔴', feedUrl: 'https://www.reutersagency.com/feed/', category: 'macro' },
-    { name: 'UN News', badge: '🌐', feedUrl: 'https://news.un.org/feed/subscribe/en/news/all/rss.xml', category: 'geopolitics' },
-    { name: 'WEF Agenda', badge: '🏛️', feedUrl: 'https://www.weforum.org/feed/agenda.xml', category: 'macro' },
-    { name: 'UNCTAD', badge: '📊', feedUrl: 'https://unctad.org/rss.xml', category: 'macro' },
-    { name: 'Chatham House', badge: '🔬', feedUrl: 'https://www.chathamhouse.org/publications/rss', category: 'geopolitics' },
 ];
 
 // ============================================================
@@ -507,18 +527,18 @@ async function fetchAllFeedsRaw(
     enabledSources?: string[],
     keywords?: string[],
 ): Promise<IntelArticle[]> {
+    // Build Google News queries (primary source — free & unlimited)
+    const googlePromises = GOOGLE_NEWS_FEEDS.map(gf => fetchGoogleNewsFeed(gf));
+
+    // Supplementary domain RSS (proven reliable maritime sources)
     const activeSources = enabledSources && enabledSources.length > 0
         ? RSS_SOURCES.filter(s =>
             enabledSources.some(es => s.name.toLowerCase().includes(es.toLowerCase()) || es.toLowerCase().includes(s.name.toLowerCase()))
         )
         : RSS_SOURCES;
+    const rssPromises = activeSources.slice(0, 5).map(s => fetchRSSFeed(s));
 
-    const sourcesToFetch = activeSources.length > 0 ? activeSources : RSS_SOURCES;
-
-    const rssPromises = sourcesToFetch.slice(0, 6).map(s => fetchRSSFeed(s));
-    const directPromises = DIRECT_API_URLS.map(u => fetchDirectAPI(u));
-
-    const results = await Promise.allSettled([...rssPromises, ...directPromises]);
+    const results = await Promise.allSettled([...googlePromises, ...rssPromises]);
 
     let allArticles: IntelArticle[] = [];
     for (const result of results) {
@@ -658,34 +678,68 @@ async function fetchRSSFeed(source: RSSSource): Promise<IntelArticle[]> {
     }
 }
 
-async function fetchDirectAPI(url: string): Promise<IntelArticle[]> {
-    try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (!res.ok) return [];
-        const json = await res.json();
-        const articles = json.articles || [];
+async function fetchDirectAPI(_url: string): Promise<IntelArticle[]> {
+    // DEPRECATED: Direct API fetching removed in favor of Google News RSS.
+    // Kept as stub for backward compatibility.
+    return [];
+}
 
-        return articles
-            .filter((a: any) => a.title && a.description && a.url)
-            .slice(0, 6)
-            .map((a: any) => {
-                const sourceName = a.source?.name || 'News Wire';
-                const id = generateArticleId(a.title, sourceName);
+// ============================================================
+// GOOGLE NEWS RSS FETCHER — Free, unlimited, topic-specific
+// ============================================================
+
+function buildGoogleNewsUrl(query: string, lang: 'en' | 'ko'): string {
+    const params = new URLSearchParams({
+        q: query,
+        hl: lang,
+        gl: lang === 'ko' ? 'KR' : 'US',
+        ceid: lang === 'ko' ? 'KR:ko' : 'US:en',
+    });
+    return `https://news.google.com/rss/search?${params.toString()}`;
+}
+
+async function fetchGoogleNewsFeed(feed: GoogleNewsFeed): Promise<IntelArticle[]> {
+    const rssUrl = buildGoogleNewsUrl(feed.query, feed.lang);
+    const proxyUrl = `${RSS2JSON_PROXY}${encodeURIComponent(rssUrl)}`;
+
+    try {
+        const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) {
+            console.warn(`[NewsService] Google News fetch failed for "${feed.name}" (HTTP ${res.status})`);
+            return [];
+        }
+        const json = await res.json();
+        if (json.status !== 'ok' || !json.items) return [];
+
+        return json.items
+            .filter((item: any) => item.title && item.title.trim())
+            .slice(0, 12) // Top 12 per query
+            .map((item: any) => {
+                // Google News titles often have " - SourceName" appended
+                let title = item.title || '';
+                let sourceName = feed.name;
+                const dashIdx = title.lastIndexOf(' - ');
+                if (dashIdx > 0 && dashIdx > title.length - 60) {
+                    sourceName = title.slice(dashIdx + 3).trim() || feed.name;
+                    title = title.slice(0, dashIdx).trim();
+                }
+
+                const id = generateArticleId(title, sourceName);
                 return {
                     id,
-                    title: a.title,
-                    description: (a.description || '').slice(0, 300),
-                    url: a.url,
+                    title: cleanHtml(title),
+                    description: cleanHtml(item.description || item.content || '').slice(0, 300),
+                    url: item.link || item.guid || '',
                     source: sourceName,
-                    sourceBadge: getSourceBadge(sourceName),
-                    publishedAt: a.publishedAt || new Date().toISOString(),
+                    sourceBadge: feed.badge,
+                    publishedAt: item.pubDate || new Date().toISOString(),
                     fetchedAt: new Date().toISOString(),
                     evaluated: false,
                     dropped: false,
                 } as IntelArticle;
             });
     } catch (err) {
-        console.warn(`[NewsService] Direct API fetch failed:`, err);
+        console.warn(`[NewsService] Google News RSS failed for "${feed.name}":`, err);
         return [];
     }
 }

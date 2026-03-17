@@ -40,38 +40,51 @@ const RSS_SOURCES: RSSSource[] = [
 // ============================================================
 // P&I / MARITIME INSURANCE RSS FEED SOURCES
 // Used to populate the 'P&I · 보험 공문' tab (official circulars)
+// Feeds marked skipKeywordFilter=true bypass relevance check
+// (all content from dedicated P&I sources is relevant by default)
 // ============================================================
 interface PIRSSSource {
     name: string;
     badge: string;
     feedUrl: string;
+    skipKeywordFilter?: boolean;  // true = all items pass relevance
 }
 
 const PI_RSS_SOURCES: PIRSSSource[] = [
-    // P&I Clubs & Marine Insurance
-    { name: 'GARD P&I', badge: '🛡️', feedUrl: 'https://www.gard.no/web/updates/rss' },
-    { name: 'Standard Club', badge: '🛡️', feedUrl: 'https://www.standard-club.com/knowledge-news/rss/' },
-    { name: 'Skuld P&I', badge: '🛡️', feedUrl: 'https://www.skuld.com/topics/rss/' },
-    { name: 'West P&I', badge: '🛡️', feedUrl: 'https://www.westpandi.com/feed/' },
-    { name: 'Steamship Mutual', badge: '🛡️', feedUrl: 'https://www.steamshipmutual.com/rss/' },
-    // Regulatory / Classification
-    { name: 'IMO News', badge: '🏛️', feedUrl: 'https://www.imo.org/en/MediaCentre/Pages/RSS.aspx' },
-    { name: 'Lloyd\'s List', badge: '⚓', feedUrl: 'https://lloydslist.com/LL/rss' },
-    // Maritime Insurance News
-    { name: 'TradeWinds', badge: '🌊', feedUrl: 'https://www.tradewindsnews.com/rss' },
-    { name: 'Maritime Global News', badge: '📰', feedUrl: 'https://www.maritimenews.com/feed/' },
-    { name: 'Safety4Sea', badge: '🔒', feedUrl: 'https://safety4sea.com/feed/' },
+    // Maritime Safety & P&I (verified working with rss2json)
+    { name: 'Safety4Sea', badge: '🔒', feedUrl: 'https://safety4sea.com/feed/', skipKeywordFilter: false },
+    { name: 'gCaptain', badge: '⚓', feedUrl: 'https://gcaptain.com/tag/insurance/feed/', skipKeywordFilter: true },
+    { name: 'Splash247', badge: '🌊', feedUrl: 'https://splash247.com/tag/pi-clubs/feed/', skipKeywordFilter: true },
+    { name: 'Hellenic Shipping', badge: '🚢', feedUrl: 'https://www.hellenicshippingnews.com/category/shipping-finance/marine-insurance/feed/', skipKeywordFilter: true },
+    // P&I Club direct feeds (some may fail — handled gracefully)
+    { name: 'GARD P&I', badge: '🛡️', feedUrl: 'https://www.gard.no/web/updates/rss', skipKeywordFilter: true },
+    { name: 'Standard Club', badge: '🛡️', feedUrl: 'https://www.standard-club.com/knowledge-news/rss/', skipKeywordFilter: true },
+    { name: 'West P&I', badge: '🛡️', feedUrl: 'https://www.westpandi.com/feed/', skipKeywordFilter: true },
+    { name: 'Skuld P&I', badge: '🛡️', feedUrl: 'https://www.skuld.com/topics/rss/', skipKeywordFilter: true },
+    // Regulatory feeds
+    { name: 'IMO News', badge: '🏛️', feedUrl: 'https://www.imo.org/en/MediaCentre/Pages/RSS.aspx', skipKeywordFilter: true },
+    // General maritime (keyword-filtered for insurance/P&I relevance)
+    { name: 'Ship & Bunker', badge: '⛽', feedUrl: 'https://shipandbunker.com/rss', skipKeywordFilter: false },
+    { name: 'Maritime Executive', badge: '📋', feedUrl: 'https://maritime-executive.com/rss', skipKeywordFilter: false },
 ];
 
-// Keywords for filtering P&I / insurance relevance
+// Fallback CORS proxies (tried in order when rss2json fails)
+const CORS_PROXIES = [
+    'https://api.rss2json.com/v1/api.json?rss_url=',
+    'https://api.allorigins.win/raw?url=',
+];
+
+// Keywords for filtering P&I / insurance relevance from general sources
 const PI_RELEVANCE_KEYWORDS = [
     'p&i', 'p & i', 'protection and indemnity', 'war risk', 'hull', 'marine insurance',
-    'circular', 'club', 'premium', 'underwriter', 'claims', 'coverage', 'indemnity',
-    'average', 'salvage', 'surveyor', 'classification', 'class society', 'flag state',
-    'imo', 'marpol', 'solas', 'iacs', 'loss prevention', 'safety', 'crew welfare',
+    'insurance', 'circular', 'club', 'premium', 'underwriter', 'claims', 'coverage',
+    'indemnity', 'average', 'salvage', 'surveyor', 'classification', 'class society',
+    'flag state', 'imo', 'marpol', 'solas', 'iacs', 'loss prevention', 'crew welfare',
     'cargo claims', 'collision', 'grounding', 'pollution', 'oil spill', 'wreck removal',
-    'sanctions', 'compliance', 'regulation', 'convention', 'amendment',
+    'sanctions', 'compliance', 'regulation', 'convention', 'amendment', 'safety',
+    'piracy', 'war zone', 'high risk area', 'crew', 'pilot', 'survey',
     '보험', '회람', '공문', 'P&I', '선급', '보험료', '해상보험', '전쟁위험',
+    'bunker', 'fuel', 'emission', 'ets', 'decarbonisation', 'cyber',
 ];
 
 // Direct JSON APIs (no RSS proxy needed)
@@ -947,40 +960,71 @@ function passesPIRelevanceFilter(title: string, description: string): boolean {
 export async function fetchPIRSSFeeds(): Promise<IntelArticle[]> {
     const promises = PI_RSS_SOURCES.map(async (source) => {
         try {
+            // Try primary rss2json proxy first
+            let json: any = null;
             const proxyUrl = `${RSS2JSON_PROXY}${encodeURIComponent(source.feedUrl)}`;
-            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-            if (!res.ok) return [];
-            const json = await res.json();
-            if (json.status !== 'ok' || !json.items) return [];
+            try {
+                const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+                if (res.ok) {
+                    json = await res.json();
+                    if (json.status !== 'ok' || !json.items) json = null;
+                }
+            } catch { /* primary proxy failed, try fallback */ }
 
-            return json.items
+            // Fallback: allorigins proxy (returns raw XML, but rss2json should work for most)
+            if (!json) {
+                try {
+                    const fallbackUrl = `${CORS_PROXIES[1]}${encodeURIComponent(source.feedUrl)}`;
+                    const res2 = await fetch(fallbackUrl, { signal: AbortSignal.timeout(8000) });
+                    if (res2.ok) {
+                        // allorigins returns raw content; try to parse if it's JSON
+                        const text = await res2.text();
+                        try {
+                            json = JSON.parse(text);
+                            if (!json.items) json = null;
+                        } catch {
+                            // Not JSON — can't use this fallback for RSS parsing
+                            json = null;
+                        }
+                    }
+                } catch { /* fallback also failed */ }
+            }
+
+            if (!json?.items) return [];
+
+            const items = json.items
                 .filter((item: any) => item.title && item.title.trim())
-                .slice(0, 8)
-                .filter((item: any) => passesPIRelevanceFilter(
+                .slice(0, 10);
+
+            // Apply relevance filter only for non-P&I-dedicated sources
+            const filtered = source.skipKeywordFilter
+                ? items
+                : items.filter((item: any) => passesPIRelevanceFilter(
                     item.title || '',
                     item.description || item.content || '',
-                ))
-                .map((item: any) => {
-                    const id = generateArticleId(item.title, source.name);
-                    return {
-                        id,
-                        title: cleanHtml(item.title),
-                        description: cleanHtml(item.description || item.content || '').slice(0, 400),
-                        url: item.link || item.guid || source.feedUrl,
-                        source: source.name,
-                        sourceBadge: source.badge,
-                        publishedAt: item.pubDate || new Date().toISOString(),
-                        fetchedAt: new Date().toISOString(),
-                        evaluated: true,
-                        dropped: false,
-                        impactScore: 75,
-                        riskLevel: 'Medium' as const,
-                        category: 'OFFICIAL_CIRCULAR' as const,
-                        refNumber: undefined,
-                        aiInsight: undefined,
-                        ontologyTags: ['P&I', 'Marine Insurance', '해상보험'],
-                    } as IntelArticle;
-                });
+                ));
+
+            return filtered.map((item: any) => {
+                const id = generateArticleId(item.title, source.name);
+                return {
+                    id,
+                    title: cleanHtml(item.title),
+                    description: cleanHtml(item.description || item.content || '').slice(0, 400),
+                    url: item.link || item.guid || source.feedUrl,
+                    source: source.name,
+                    sourceBadge: source.badge,
+                    publishedAt: item.pubDate || new Date().toISOString(),
+                    fetchedAt: new Date().toISOString(),
+                    evaluated: true,
+                    dropped: false,
+                    impactScore: 75,
+                    riskLevel: 'Medium' as const,
+                    category: 'OFFICIAL_CIRCULAR' as const,
+                    refNumber: undefined,
+                    aiInsight: undefined,
+                    ontologyTags: ['P&I', 'Marine Insurance', '해상보험'],
+                } as IntelArticle;
+            });
         } catch (err) {
             console.warn(`[NewsService] P&I RSS fetch failed for ${source.name}:`, err);
             return [];

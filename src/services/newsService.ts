@@ -528,20 +528,33 @@ async function fetchAllFeedsRaw(
     keywords?: string[],
 ): Promise<IntelArticle[]> {
     // Build Google News queries (primary source — free & unlimited)
-    const googlePromises = GOOGLE_NEWS_FEEDS.map(gf => fetchGoogleNewsFeed(gf));
+    // Stagger requests slightly to avoid rss2json rate-limiting
+    const googleResults: IntelArticle[][] = [];
+    for (let i = 0; i < GOOGLE_NEWS_FEEDS.length; i++) {
+        const result = fetchGoogleNewsFeed(GOOGLE_NEWS_FEEDS[i]);
+        googleResults.push(await result.catch(() => []));
+        // Small delay between requests (100ms) to avoid 429s
+        if (i < GOOGLE_NEWS_FEEDS.length - 1) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
 
-    // Supplementary domain RSS (proven reliable maritime sources)
+    // Supplementary domain RSS (proven reliable maritime sources, parallel is fine)
     const activeSources = enabledSources && enabledSources.length > 0
         ? RSS_SOURCES.filter(s =>
             enabledSources.some(es => s.name.toLowerCase().includes(es.toLowerCase()) || es.toLowerCase().includes(s.name.toLowerCase()))
         )
         : RSS_SOURCES;
-    const rssPromises = activeSources.slice(0, 5).map(s => fetchRSSFeed(s));
+    const rssResults = await Promise.allSettled(activeSources.slice(0, 5).map(s => fetchRSSFeed(s)));
 
-    const results = await Promise.allSettled([...googlePromises, ...rssPromises]);
-
+    // Merge all results
     let allArticles: IntelArticle[] = [];
-    for (const result of results) {
+    // Google News results (already resolved)
+    for (const batch of googleResults) {
+        allArticles = allArticles.concat(batch);
+    }
+    // RSS results
+    for (const result of rssResults) {
         if (result.status === 'fulfilled') {
             allArticles = allArticles.concat(result.value);
         }

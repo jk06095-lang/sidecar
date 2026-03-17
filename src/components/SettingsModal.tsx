@@ -107,7 +107,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
     const removeCrisisKeyword = (k: string) => setTempSettings(prev => ({ ...prev, crisisKeywords: prev.crisisKeywords.filter(x => x !== k) }));
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
             <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl animate-slide-up overflow-hidden max-h-[85vh] flex flex-col">
                 {/* Header */}

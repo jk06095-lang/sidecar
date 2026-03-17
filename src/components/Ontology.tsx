@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Database, Plus, Search, Trash2, Edit2, Save, X, FileText,
     CheckCircle2, RotateCcw, Box, Sparkles, ChevronDown, ChevronRight,
@@ -13,6 +14,8 @@ import { VESSEL_PRESETS, FLAG_OPTIONS } from '../services/maritimeIntegrationSer
 import { useOntologyStore } from '../store/ontologyStore';
 import { extractOntologyFromText } from '../services/geminiService';
 import type { ObjectTypeDefinition, OntologyObject, OntologyObjectType, OntologyLink, OntologyLinkRelation } from '../types';
+
+const OntologyObjectEditorLazy = lazy(() => import('./widgets/OntologyObjectEditor'));
 
 // ============================================================
 // TREE CATEGORY CONFIG — Maps OntologyObjectType → UI folder
@@ -97,6 +100,8 @@ export default function Ontology() {
     const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
     const [isGraphFullScreen, setIsGraphFullScreen] = useState(false);
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+    const [showEditorModal, setShowEditorModal] = useState(false);
+    const [editorEditObject, setEditorEditObject] = useState<OntologyObject | null>(null);
     const treeListRef = useRef<HTMLDivElement>(null);
 
     const handleSelectObject = useCallback((id: string | null) => {
@@ -270,8 +275,8 @@ export default function Ontology() {
                 <div className="px-2 py-1.5 border-b border-zinc-800/60 flex items-center gap-1 shrink-0 bg-zinc-900/40">
                     <button
                         onClick={() => {
-                            setFormData({ type: 'Vessel', title: '', description: '', properties: { riskScore: 50 } });
-                            setShowAddForm(true);
+                            setEditorEditObject(null);
+                            setShowEditorModal(true);
                         }}
                         className="flex items-center gap-1 px-2 py-1 bg-cyan-900/30 hover:bg-cyan-800/40 text-cyan-400 hover:text-cyan-300 text-[10px] font-bold rounded transition-colors border border-cyan-800/40"
                         title="오브제 추가"
@@ -717,6 +722,16 @@ export default function Ontology() {
                     </div>
                 )}
             </div>
+            {/* AI-Powered Object Editor Modal */}
+            {showEditorModal && createPortal(
+                <Suspense fallback={null}>
+                    <OntologyObjectEditorLazy
+                        editObject={editorEditObject}
+                        onClose={() => { setShowEditorModal(false); setEditorEditObject(null); }}
+                    />
+                </Suspense>,
+                document.body
+            )}
         </div>
     );
 }

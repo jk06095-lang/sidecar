@@ -70,7 +70,7 @@ export default function MacroIntelligenceBoard({ expanded, onToggle, simulationP
 
     return (
         <div className={cn(
-            "border-t border-slate-800/60 bg-slate-950/80 backdrop-blur-sm transition-all duration-300",
+            "relative z-[1001] border-t border-slate-800/60 bg-slate-950/80 backdrop-blur-sm transition-all duration-300",
             expanded ? "h-[260px]" : "h-[36px]"
         )}>
             {/* Tab Bar / Header */}

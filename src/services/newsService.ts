@@ -1369,3 +1369,116 @@ function getSourceBadge(sourceName: string): string {
     if (lower.includes('bbc')) return '📡';
     return '📰';
 }
+
+// ============================================================
+// RSS FEED PROXY CLIENT — calls /api/rss serverless function
+// ============================================================
+
+import type { FeedItem } from '../types';
+import { scanHeadlinesForRisk, RISK_KEYWORDS } from '../lib/sentimentScanner';
+
+/** Feed URL configurations per category */
+const RSS_FEED_URLS: Record<'news' | 'circular' | 'alert', string[]> = {
+    news: [
+        // Google News RSS — maritime/shipping/energy
+        'https://news.google.com/rss/search?q=maritime+shipping+vessel+tanker+freight&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=crude+oil+price+OPEC+brent+energy+market&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=supply+chain+logistics+disruption+port&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=Suez+Canal+Hormuz+Red+Sea+shipping&hl=en&gl=US&ceid=US:en',
+        // Korean news
+        'https://news.google.com/rss/search?q=해운+해사+선박+항만+물류&hl=ko&gl=KR&ceid=KR:ko',
+        'https://news.google.com/rss/search?q=유가+원유+에너지+OPEC+운임&hl=ko&gl=KR&ceid=KR:ko',
+        // Domain RSS
+        'https://gcaptain.com/feed/',
+        'https://shipandbunker.com/rss',
+        'https://splash247.com/feed/',
+    ],
+    circular: [
+        // P&I Club and insurance feeds
+        'https://news.google.com/rss/search?q=P%26I+club+marine+insurance+circular&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=해상보험+P%26I+보험료+선급&hl=ko&gl=KR&ceid=KR:ko',
+        'https://www.gard.no/web/updates/rss',
+        'https://safety4sea.com/feed/',
+        'https://www.hellenicshippingnews.com/category/shipping-finance/marine-insurance/feed/',
+        'https://gcaptain.com/tag/insurance/feed/',
+    ],
+    alert: [
+        // Maritime security and accident alerts
+        'https://news.google.com/rss/search?q=maritime+accident+collision+grounding+fire+ship&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=piracy+attack+Houthi+hijack+maritime+security&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=해사사고+선박충돌+좌초+해적&hl=ko&gl=KR&ceid=KR:ko',
+        'https://safety4sea.com/feed/',
+    ],
+};
+
+/**
+ * Fetch RSS feeds for a given category via the /api/rss serverless proxy.
+ * Applies sentiment/risk scanning on each item before returning.
+ */
+export async function fetchRssFeeds(category: 'news' | 'circular' | 'alert'): Promise<FeedItem[]> {
+    const urls = RSS_FEED_URLS[category];
+    const feedsParam = urls.map(u => encodeURIComponent(u)).join(',');
+    const apiUrl = `/api/rss?category=${category}&feeds=${feedsParam}`;
+
+    try {
+        const res = await fetch(apiUrl, { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) {
+            console.warn(`[NewsService] RSS proxy failed (${res.status})`);
+            return [];
+        }
+
+        const json = await res.json();
+        const rawItems: Array<{
+            title: string;
+            link: string;
+            description: string;
+            pubDate: string;
+            source: string;
+            thumbnailUrl?: string;
+        }> = json.items || [];
+
+        // Run sentiment scanner on all titles at once
+        const headlines = rawItems.map(i => i.title);
+        const scanResult = scanHeadlinesForRisk(headlines);
+
+        return rawItems.map((item, idx) => {
+            const id = generateArticleId(item.title, item.source);
+
+            // Per-item risk assessment
+            const lower = item.title.toLowerCase() + ' ' + (item.description || '').toLowerCase();
+            let riskScore = 0;
+            for (const kw of RISK_KEYWORDS) {
+                if (lower.includes(kw.term)) riskScore += kw.weight;
+            }
+
+            let riskLevel: FeedItem['riskLevel'] = undefined;
+            if (riskScore >= 15) riskLevel = 'Critical';
+            else if (riskScore >= 10) riskLevel = 'High';
+            else if (riskScore >= 5) riskLevel = 'Medium';
+            else if (riskScore >= 2) riskLevel = 'Low';
+
+            // Sentiment based on risk
+            let sentiment: FeedItem['sentiment'] = 'neutral';
+            if (riskScore >= 8) sentiment = 'negative';
+            else if (riskScore <= 0) sentiment = 'positive';
+
+            return {
+                id,
+                title: item.title,
+                description: item.description || '',
+                url: item.link || '',
+                source: item.source || 'Unknown',
+                publishedAt: item.pubDate || new Date().toISOString(),
+                fetchedAt: json.fetchedAt || new Date().toISOString(),
+                thumbnailUrl: item.thumbnailUrl,
+                category,
+                riskLevel,
+                sentiment,
+                riskScore,
+            } as FeedItem;
+        });
+    } catch (err) {
+        console.warn(`[NewsService] fetchRssFeeds(${category}) error:`, err);
+        return [];
+    }
+}

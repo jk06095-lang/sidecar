@@ -485,6 +485,25 @@ export interface IntelArticle {
 }
 
 // ============================================================
+// 10b. FEED ITEM (RSS-based Intelligence Feed)
+// ============================================================
+export interface FeedItem {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  source: string;
+  publishedAt: string;
+  fetchedAt: string;
+  thumbnailUrl?: string;
+  category: 'news' | 'circular' | 'alert';
+  riskLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
+  sentiment?: 'positive' | 'neutral' | 'negative';
+  riskScore?: number;
+  ontologyTags?: string[];
+}
+
+// ============================================================
 // 11. BEVI (Business Environment Volatility Index)
 // ============================================================
 

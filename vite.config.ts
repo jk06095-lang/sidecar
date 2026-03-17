@@ -168,7 +168,7 @@ function geminiDevProxy(): Plugin {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     return {
-        plugins: [react(), tailwindcss(), geminiDevProxy()],
+        plugins: [react(), tailwindcss(), geminiDevProxy(), rssDevProxy()],
         resolve: {
             alias: {
                 '@': path.resolve(__dirname, '.'),
@@ -179,3 +179,100 @@ export default defineConfig(({ mode }) => {
         },
     };
 });
+
+// ============================================================
+// LOCAL DEV PROXY — Mimics api/rss.ts serverless fn
+// ============================================================
+function rssDevProxy(): Plugin {
+    return {
+        name: 'rss-dev-proxy',
+        configureServer(server) {
+            server.middlewares.use('/api/rss', (async (
+                req: Connect.IncomingMessage,
+                res: any,
+            ) => {
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+                res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+                if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+
+                // Parse query string
+                const url = new URL(req.url || '/', `http://${req.headers.host}`);
+                const feedsParam = url.searchParams.get('feeds') || '';
+                const category = url.searchParams.get('category') || 'news';
+
+                if (!feedsParam) {
+                    res.statusCode = 400;
+                    res.setHeader('Content-Type', 'application/json');
+                    return res.end(JSON.stringify({ error: 'Missing ?feeds= parameter' }));
+                }
+
+                const feedUrls = feedsParam.split(',').map(u => decodeURIComponent(u.trim())).filter(Boolean);
+
+                const allItems: any[] = [];
+                for (const feedUrl of feedUrls) {
+                    try {
+                        const resp = await fetch(feedUrl, {
+                            signal: AbortSignal.timeout(8000),
+                            headers: { 'User-Agent': 'SIDECAR-RSS/1.0' },
+                        });
+                        if (!resp.ok) continue;
+                        const xml = await resp.text();
+                        // Basic XML item extraction
+                        const itemRegex = /<item[\s>]([\s\S]*?)<\/item>|<entry[\s>]([\s\S]*?)<\/entry>/gi;
+                        let match;
+                        while ((match = itemRegex.exec(xml)) !== null && allItems.length < 50) {
+                            const block = match[1] || match[2];
+                            const titleMatch = block.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+                            const linkMatch = block.match(/<link[^>]*(?:href=["'](.*?)["'])?[^>]*>(.*?)<\/link>/i)
+                                || block.match(/<link[^>]*href=["'](.*?)["'][^>]*\/?>/i);
+                            const descMatch = block.match(/<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i)
+                                || block.match(/<content[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
+                            const dateMatch = block.match(/<pubDate[^>]*>(.*?)<\/pubDate>/i)
+                                || block.match(/<published[^>]*>(.*?)<\/published>/i);
+
+                            const rawTitle = titleMatch?.[1]?.trim() || '';
+                            if (!rawTitle) continue;
+                            const title = rawTitle.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                            const link = linkMatch ? (linkMatch[1] || linkMatch[2] || '').trim() : '';
+                            const rawDesc = descMatch?.[1] || '';
+                            const imgMatch = rawDesc.match(/<img[^>]+src=["']([^"']+)["']/i);
+                            const description = rawDesc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+
+                            // Google News title format: "Title - Source"
+                            let source = new URL(feedUrl).hostname;
+                            let cleanTitle = title;
+                            const dashIdx = title.lastIndexOf(' - ');
+                            if (dashIdx > 0 && dashIdx > title.length - 60) {
+                                source = title.slice(dashIdx + 3).trim() || source;
+                                cleanTitle = title.slice(0, dashIdx).trim();
+                            }
+
+                            allItems.push({
+                                title: cleanTitle,
+                                link,
+                                description,
+                                pubDate: dateMatch?.[1]?.trim() || new Date().toISOString(),
+                                source,
+                                thumbnailUrl: imgMatch?.[1]?.includes('1x1') ? undefined : imgMatch?.[1],
+                            });
+                        }
+                    } catch { /* skip failed feeds */ }
+                }
+
+                allItems.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
+                return res.end(JSON.stringify({
+                    items: allItems.slice(0, 50),
+                    category,
+                    fetchedAt: new Date().toISOString(),
+                    feedCount: feedUrls.length,
+                    totalItems: allItems.length,
+                }));
+            }) as Connect.NextHandleFunction);
+        },
+    };
+}

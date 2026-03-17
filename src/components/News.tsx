@@ -2,14 +2,17 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Newspaper, Search, Bookmark, BookmarkCheck, Trash2, Globe, Landmark,
     Timer, Shield, AlertTriangle, Loader2, Sparkles, ArrowRight,
-    ExternalLink, X, Send, MessageSquare, FileText, Link2
+    ExternalLink, X, Send, MessageSquare, FileText, Link2,
+    RefreshCw, Bell, ChevronUp, Flame, Zap, TrendingDown
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import GlobalNewsWidget from './widgets/GlobalNewsWidget';
 import { useOntologyStore } from '../store/ontologyStore';
-import { getFinOpsStats, type FinOpsStats } from '../services/newsService';
+import { useFeedStore } from '../store/feedStore';
+import { useToastStore } from '../hooks/useToast';
+import { fetchRssFeeds, getFinOpsStats, type FinOpsStats } from '../services/newsService';
 import { researchWithGrounding, type ResearchResult } from '../services/geminiService';
-import type { IntelArticle } from '../types';
+import SkeletonLoader from './widgets/SkeletonLoader';
+import type { IntelArticle, FeedItem } from '../types';
 
 type FeedTab = 'news' | 'circular' | 'alert';
 
@@ -21,30 +24,83 @@ interface ScrapItem {
     description: string;
     tags: string[];
     scrapDate: string;
-    articleData: IntelArticle;
+    articleData?: IntelArticle;
+    feedData?: FeedItem;
 }
+
+// Stale threshold: 10 minutes
+const STALE_THRESHOLD_MS = 10 * 60 * 1000;
+
+// Risk level badge config
+const RISK_BADGE: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+    Critical: { label: 'CRITICAL', color: 'bg-red-500/20 text-red-300 border-red-500/40', icon: <Flame size={10} /> },
+    High: { label: 'HIGH', color: 'bg-orange-500/20 text-orange-300 border-orange-500/40', icon: <Zap size={10} /> },
+    Medium: { label: 'MED', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40', icon: <AlertTriangle size={10} /> },
+    Low: { label: 'LOW', color: 'bg-blue-500/15 text-blue-300 border-blue-500/30', icon: <TrendingDown size={10} /> },
+};
+
+// Tab theme configuration
+const TAB_THEMES: Record<FeedTab, { accent: string; bg: string; border: string; icon: React.ReactNode; label: string; desc: string }> = {
+    news: {
+        accent: 'cyan',
+        bg: 'bg-cyan-500/15',
+        border: 'border-cyan-500/30',
+        icon: <Globe size={14} />,
+        label: '뉴스 피드',
+        desc: 'Maritime OSINT · Google News RSS',
+    },
+    circular: {
+        accent: 'amber',
+        bg: 'bg-amber-500/15',
+        border: 'border-amber-500/30',
+        icon: <Landmark size={14} />,
+        label: 'P&I · 보험 공문',
+        desc: 'P&I Club · Marine Insurance · RSS',
+    },
+    alert: {
+        accent: 'rose',
+        bg: 'bg-rose-500/15',
+        border: 'border-rose-500/30',
+        icon: <AlertTriangle size={14} />,
+        label: '해사 사고 경보',
+        desc: 'Maritime Accidents · Security Alerts',
+    },
+};
 
 // ============================================================
 // MAIN COMPONENT
 // ============================================================
 export default function News() {
     const [activeTab, setActiveTab] = useState<FeedTab>('news');
-    const [countdownSeconds, setCountdownSeconds] = useState(600);
-    const [finOpsStats, setFinOpsStats] = useState<FinOpsStats>(getFinOpsStats());
+    const [searchQuery, setSearchQuery] = useState('');
     const [scraps, setScraps] = useState<ScrapItem[]>([]);
+    const [selectedScrap, setSelectedScrap] = useState<ScrapItem | null>(null);
     const [researchQuery, setResearchQuery] = useState('');
     const [researchResult, setResearchResult] = useState<ResearchResult | null>(null);
     const [researchError, setResearchError] = useState<string | null>(null);
     const [isResearching, setIsResearching] = useState(false);
-    const [selectedScrap, setSelectedScrap] = useState<ScrapItem | null>(null);
     const pendingResearchRef = useRef<string | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
+    const feedListRef = useRef<HTMLDivElement>(null);
 
-    // Ontology store for tag navigation & article storage
+    // Stores
     const objects = useOntologyStore(s => s.objects);
-    const intelArticles = useOntologyStore(s => s.intelArticles);
+    const addToast = useToastStore(s => s.addToast);
 
-    // Load scraps from localStorage on mount
+    // Feed store
+    const feedItems = useFeedStore(s => s[activeTab]);
+    const pendingKey = `pending${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}` as 'pendingNews' | 'pendingCircular' | 'pendingAlert';
+    const pendingItems = useFeedStore(s => s[pendingKey] as FeedItem[]);
+    const isLoading = useFeedStore(s => s.isLoading[activeTab]);
+    const isBgFetching = useFeedStore(s => s.isBackgroundFetching[activeTab]);
+    const setItems = useFeedStore(s => s.setItems);
+    const setPending = useFeedStore(s => s.setPending);
+    const mergePending = useFeedStore(s => s.mergePending);
+    const setLoading = useFeedStore(s => s.setLoading);
+    const setBgFetch = useFeedStore(s => s.setBackgroundFetching);
+    const updateLastFetched = useFeedStore(s => s.updateLastFetched);
+    const getStaleMs = useFeedStore(s => s.getStaleMs);
+
+    // Load scraps from localStorage
     useEffect(() => {
         try {
             const saved = JSON.parse(localStorage.getItem('sidecar_scraps') || '[]');
@@ -52,58 +108,116 @@ export default function News() {
         } catch { }
     }, []);
 
-    // Persist scraps to localStorage
     const persistScraps = (items: ScrapItem[]) => {
         setScraps(items);
         localStorage.setItem('sidecar_scraps', JSON.stringify(items));
     };
 
-    // Countdown callback
-    const handleCountdownUpdate = useCallback((seconds: number) => {
-        setCountdownSeconds(seconds);
-    }, []);
+    // ── Smart fetch: cache-first with background SWR ──
+    const fetchForTab = useCallback(async (tab: FeedTab, force = false) => {
+        const staleMs = getStaleMs(tab);
+        const currentItems = useFeedStore.getState()[tab];
+        const hasCacheData = currentItems.length > 0;
 
-    const formatCountdown = (totalSeconds: number): string => {
-        const m = Math.floor(totalSeconds / 60);
-        const s = totalSeconds % 60;
-        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    };
+        // If cache exists and not stale, skip (unless forced)
+        if (hasCacheData && staleMs < STALE_THRESHOLD_MS && !force) return;
 
-    // Handle ontology tag clicks
-    const handleTagClick = useCallback((tag: string) => {
-        setSearchQuery(tag);
-    }, []);
+        // First load with no cache → show skeleton
+        if (!hasCacheData) {
+            setLoading(tab, true);
+        } else {
+            // Background fetch
+            setBgFetch(tab, true);
+        }
 
-    // Handle scrap from GlobalNewsWidget
-    const handleScrap = useCallback((article: IntelArticle) => {
+        try {
+            const items = await fetchRssFeeds(tab);
+            if (items.length === 0) {
+                setLoading(tab, false);
+                setBgFetch(tab, false);
+                return;
+            }
+
+            if (!hasCacheData) {
+                // First load → set items directly
+                setItems(tab, items);
+            } else {
+                // Background update → compare with existing
+                const existingIds = new Set(currentItems.map(i => i.id));
+                const newItems = items.filter(i => !existingIds.has(i.id));
+
+                if (newItems.length > 0) {
+                    // Queue new items as pending → show toast
+                    setPending(tab, newItems);
+                    addToast(`${TAB_THEMES[tab].label}: ${newItems.length}건 업데이트됨`, 'info');
+                }
+            }
+
+            updateLastFetched(tab);
+        } catch (err) {
+            console.warn(`[News] Feed fetch error (${tab}):`, err);
+        } finally {
+            setLoading(tab, false);
+            setBgFetch(tab, false);
+        }
+    }, [getStaleMs, setItems, setPending, setLoading, setBgFetch, updateLastFetched, addToast]);
+
+    // Fetch on tab change
+    useEffect(() => {
+        fetchForTab(activeTab);
+    }, [activeTab, fetchForTab]);
+
+    // Handle merge pending
+    const handleMergePending = useCallback(() => {
+        mergePending(activeTab);
+        feedListRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [activeTab, mergePending]);
+
+    // Handle scrap (bookmark) from feed
+    const handleScrap = useCallback((item: FeedItem) => {
         setScraps(prev => {
-            if (prev.find(s => s.url === article.url)) return prev; // no dupes
+            if (prev.find(s => s.url === item.url)) return prev;
             const newScrap: ScrapItem = {
                 id: `scrap-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-                title: article.title,
-                source: article.source,
-                url: article.url,
-                description: article.description,
-                tags: article.ontologyTags || [],
+                title: item.title,
+                source: item.source,
+                url: item.url,
+                description: item.description,
+                tags: item.ontologyTags || [],
                 scrapDate: new Date().toISOString(),
-                articleData: article,
+                feedData: item,
             };
             const updated = [newScrap, ...prev];
             localStorage.setItem('sidecar_scraps', JSON.stringify(updated));
-
-            // Trigger scenario update on user scrap action
             window.dispatchEvent(new CustomEvent('scenario_update_trigger'));
-
+            addToast('스크랩에 추가됨', 'success');
             return updated;
         });
-    }, []);
+    }, [addToast]);
 
-    // Delete a scrap
     const handleDeleteScrap = (id: string) => {
         const updated = scraps.filter(s => s.id !== id);
         persistScraps(updated);
         if (selectedScrap?.id === id) setSelectedScrap(null);
     };
+
+    // Filter feed items by search
+    const filteredItems = searchQuery
+        ? feedItems.filter(item => {
+            const q = searchQuery.toLowerCase();
+            return item.title.toLowerCase().includes(q)
+                || item.source.toLowerCase().includes(q)
+                || item.description.toLowerCase().includes(q);
+        })
+        : feedItems;
+
+    // Check if item is scrapped
+    const isScraped = (url: string) => scraps.some(s => s.url === url);
+
+    // Handle ontology tag clicks
+    const handleTagClick = useCallback((tag: string) => {
+        setSearchQuery(tag);
+    }, []);
 
     // Deep Research — Gemini Google Search Grounding
     const handleResearch = useCallback(async (queryOverride?: string) => {
@@ -114,13 +228,11 @@ export default function News() {
         setResearchResult(null);
         setResearchError(null);
 
-        // Build context from selected scrap + ontology
         const scrapContext = selectedScrap ? {
             scrapTitle: selectedScrap.title,
             scrapDescription: selectedScrap.description,
         } : undefined;
 
-        // Find related ontology objects for context
         const qLower = q.toLowerCase();
         const relatedObjects = objects
             .filter(o =>
@@ -157,6 +269,20 @@ export default function News() {
         }
     }, [researchQuery, handleResearch]);
 
+    // Format relative time
+    const formatRelativeTime = (dateStr: string): string => {
+        const diff = Date.now() - new Date(dateStr).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return '방금';
+        if (mins < 60) return `${mins}분 전`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours}시간 전`;
+        const days = Math.floor(hours / 24);
+        return `${days}일 전`;
+    };
+
+    const theme = TAB_THEMES[activeTab];
+
     return (
         <div className="flex h-full bg-slate-950 overflow-hidden font-mono">
             {/* ========== CENTER: Signal Feed ========== */}
@@ -170,22 +296,30 @@ export default function News() {
                             </div>
                             <div>
                                 <h1 className="text-lg font-bold text-slate-100 tracking-wide">인텔리전스 피드</h1>
-                                <p className="text-[10px] text-slate-500">Maritime OSINT · 공식 지침 · AI 시그널 분석</p>
+                                <p className="text-[10px] text-slate-500">{theme.desc}</p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            {/* Background fetch indicator */}
+                            {isBgFetching && (
+                                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                                    <Loader2 size={10} className="animate-spin text-blue-400" />
+                                    <span className="text-[9px] text-blue-300">동기화 중...</span>
+                                </div>
+                            )}
+                            {/* Refresh button */}
+                            <button
+                                onClick={() => fetchForTab(activeTab, true)}
+                                disabled={isLoading || isBgFetching}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/40 text-xs text-slate-300 hover:bg-slate-700/50 hover:text-slate-100 transition-all disabled:opacity-40"
+                            >
+                                <RefreshCw size={12} className={isBgFetching ? 'animate-spin' : ''} />
+                                <span>새로고침</span>
+                            </button>
                             {/* Live badge */}
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20">
-                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                                <span className="text-[10px] text-rose-400 font-bold tracking-widest uppercase">Live</span>
-                            </div>
-                            {/* Countdown */}
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/40">
-                                <Timer size={13} className="text-amber-400" />
-                                <span className="text-[10px] text-slate-400 font-mono">다음 배치:</span>
-                                <span className="text-sm font-mono font-bold text-amber-300 tracking-widest tabular-nums">
-                                    {formatCountdown(countdownSeconds)}
-                                </span>
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="text-[10px] text-emerald-400 font-bold tracking-widest uppercase">RSS</span>
                             </div>
                         </div>
                     </div>
@@ -209,81 +343,184 @@ export default function News() {
 
                     {/* Tab navigation */}
                     <div className="flex gap-2">
-                        <button
-                            onClick={() => setActiveTab('news')}
-                            className={cn(
-                                "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
-                                activeTab === 'news'
-                                    ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-lg shadow-cyan-900/10"
-                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
-                            )}
-                            title="해사 뉴스 피드"
-                        >
-                            <Globe size={14} />
-                            뉴스 피드
-                            <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
-                                activeTab === 'news' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-800 text-slate-500'
-                            )}>
-                                {intelArticles.filter(a => !a.category || a.category === 'OSINT').length}
-                            </span>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('circular')}
-                            className={cn(
-                                "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
-                                activeTab === 'circular'
-                                    ? "bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-lg shadow-amber-900/10"
-                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
-                            )}
-                            title="P&I 및 보험 공문"
-                        >
-                            <Landmark size={14} />
-                            P&I · 보험 공문
-                            <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
-                                activeTab === 'circular' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-500'
-                            )}>
-                                {intelArticles.filter(a => a.category === 'OFFICIAL_CIRCULAR').length}
-                            </span>
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('alert')}
-                            className={cn(
-                                "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
-                                activeTab === 'alert'
-                                    ? "bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-lg shadow-rose-900/10"
-                                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
-                            )}
-                            title="해사 사고 및 보안 경보"
-                        >
-                            <AlertTriangle size={14} />
-                            해사 사고 경보
-                            <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
-                                activeTab === 'alert' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-800 text-slate-500'
-                            )}>
-                                {intelArticles.filter(a => a.category === 'SECURITY_ALERT').length}
-                            </span>
-                        </button>
+                        {(['news', 'circular', 'alert'] as FeedTab[]).map(tab => {
+                            const t = TAB_THEMES[tab];
+                            const count = useFeedStore.getState()[tab].length;
+                            const pendK = `pending${tab.charAt(0).toUpperCase() + tab.slice(1)}` as 'pendingNews' | 'pendingCircular' | 'pendingAlert';
+                            const pendCount = (useFeedStore.getState()[pendK] as FeedItem[]).length;
+                            return (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={cn(
+                                        "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all",
+                                        activeTab === tab
+                                            ? `${t.bg} text-${t.accent}-300 ${t.border} border shadow-lg`
+                                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
+                                    )}
+                                >
+                                    {t.icon}
+                                    {t.label}
+                                    <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-mono",
+                                        activeTab === tab ? `bg-${t.accent}-500/20 text-${t.accent}-300` : 'bg-slate-800 text-slate-500'
+                                    )}>
+                                        {count}
+                                    </span>
+                                    {pendCount > 0 && (
+                                        <span className="px-1 py-0.5 rounded-full text-[8px] bg-rose-500/30 text-rose-300 animate-pulse">
+                                            +{pendCount}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
 
-                    {/* FinOps stats bar */}
+                    {/* Source info bar */}
                     <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-950/15 border border-emerald-800/15">
                         <Shield size={12} className="text-emerald-500 shrink-0" />
                         <span className="text-[9px] text-emerald-400/80 font-mono leading-tight truncate">
-                            FinOps Shield: {finOpsStats.droppedByLocalFilter + finOpsStats.droppedByDedup} filtered → {finOpsStats.sentToAIP} via AIP ({finOpsStats.apiCallCount} calls, ~{finOpsStats.costSavingsPercent}% saved)
+                            Edge Cache · Zustand Persist · {feedItems.length}건 캐시 · Sentiment Scanner 연동
                         </span>
                     </div>
                 </div>
 
-                {/* News feed body */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="max-w-4xl mx-auto px-4 py-3">
-                        <GlobalNewsWidget
-                            onTagClick={handleTagClick}
-                            onStatsUpdate={setFinOpsStats}
-                            activeTab={activeTab}
-                            onCountdownUpdate={handleCountdownUpdate}
-                            onScrap={handleScrap}
-                        />
+                {/* ── Feed Body ── */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar" ref={feedListRef}>
+                    {/* Pending items banner */}
+                    {pendingItems.length > 0 && (
+                        <div className="sticky top-0 z-10 px-4 py-2 bg-slate-900/95 backdrop-blur border-b border-slate-800/50">
+                            <button
+                                onClick={handleMergePending}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-bold hover:bg-cyan-500/25 transition-all animate-pulse"
+                            >
+                                <ChevronUp size={14} />
+                                {pendingItems.length}건의 새로운 피드가 있습니다
+                                <Bell size={12} />
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="max-w-4xl mx-auto px-4 py-3 space-y-2">
+                        {/* Loading skeleton */}
+                        {isLoading && feedItems.length === 0 && (
+                            <SkeletonLoader variant="news" lines={6} />
+                        )}
+
+                        {/* Empty state */}
+                        {!isLoading && feedItems.length === 0 && (
+                            <div className="flex flex-col items-center justify-center h-64 text-center">
+                                <Newspaper size={32} className="text-slate-700 mb-3" />
+                                <p className="text-sm text-slate-500 font-medium">피드가 비어 있습니다</p>
+                                <p className="text-xs text-slate-600 mt-1">새로고침을 눌러 최신 피드를 불러오세요</p>
+                                <button
+                                    onClick={() => fetchForTab(activeTab, true)}
+                                    className="mt-4 px-4 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 text-xs font-bold hover:bg-cyan-500/30 transition-all"
+                                >
+                                    <RefreshCw size={12} className="inline mr-1" /> 피드 불러오기
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Feed cards */}
+                        {filteredItems.map(item => {
+                            const scraped = isScraped(item.url);
+                            const riskBadge = item.riskLevel ? RISK_BADGE[item.riskLevel] : null;
+
+                            return (
+                                <div
+                                    key={item.id}
+                                    className="group flex flex-col gap-1.5 p-4 rounded-xl border border-slate-800/40 bg-slate-900/30 hover:bg-slate-800/40 hover:border-slate-700/60 transition-all"
+                                >
+                                    {/* Top row: source badge + risk badge + time */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-bold text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded-md truncate max-w-[140px]">
+                                            {item.source}
+                                        </span>
+
+                                        {riskBadge && (
+                                            <span className={cn(
+                                                "flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md border",
+                                                riskBadge.color
+                                            )}>
+                                                {riskBadge.icon}
+                                                {riskBadge.label}
+                                            </span>
+                                        )}
+
+                                        {item.sentiment === 'negative' && !riskBadge && (
+                                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                                ⚠ 부정
+                                            </span>
+                                        )}
+
+                                        <span className="text-[9px] text-slate-600 ml-auto shrink-0">
+                                            {formatRelativeTime(item.publishedAt)}
+                                        </span>
+                                    </div>
+
+                                    {/* Title */}
+                                    <h3 className="text-sm font-semibold text-slate-200 leading-snug line-clamp-2 group-hover:text-slate-100 transition-colors">
+                                        {item.title}
+                                    </h3>
+
+                                    {/* Description */}
+                                    {item.description && (
+                                        <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                                            {item.description}
+                                        </p>
+                                    )}
+
+                                    {/* Bottom row: actions */}
+                                    <div className="flex items-center gap-2 mt-1 pt-1.5">
+                                        {/* Open URL */}
+                                        {item.url && (
+                                            <a
+                                                href={item.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-1 text-[10px] text-cyan-400/70 hover:text-cyan-300 transition-colors"
+                                            >
+                                                <ExternalLink size={10} /> 원문
+                                            </a>
+                                        )}
+
+                                        {/* Scrap/bookmark button */}
+                                        <button
+                                            onClick={() => handleScrap(item)}
+                                            disabled={scraped}
+                                            className={cn(
+                                                "flex items-center gap-1 text-[10px] transition-colors",
+                                                scraped
+                                                    ? "text-amber-400/50 cursor-default"
+                                                    : "text-slate-500 hover:text-amber-400"
+                                            )}
+                                        >
+                                            {scraped ? <BookmarkCheck size={10} /> : <Bookmark size={10} />}
+                                            {scraped ? '스크랩됨' : '스크랩'}
+                                        </button>
+
+                                        {/* Quick research */}
+                                        <button
+                                            onClick={() => {
+                                                pendingResearchRef.current = item.title.slice(0, 60);
+                                                setResearchQuery(item.title.slice(0, 60));
+                                            }}
+                                            className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-violet-400 transition-colors"
+                                        >
+                                            <Sparkles size={10} /> 조사
+                                        </button>
+
+                                        {/* Risk score indicator */}
+                                        {(item.riskScore ?? 0) > 0 && (
+                                            <span className="ml-auto text-[9px] text-slate-600 font-mono">
+                                                Risk: {item.riskScore}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>
@@ -310,7 +547,7 @@ export default function News() {
                             <Bookmark size={24} className="text-slate-700 mb-3" />
                             <p className="text-xs text-slate-500 font-medium mb-1">스크랩이 없습니다</p>
                             <p className="text-[10px] text-slate-600 leading-relaxed">
-                                뉴스 카드의 ★ 버튼을 눌러<br />중요 뉴스를 스크랩하세요
+                                뉴스 카드의 스크랩 버튼을 눌러<br />중요 뉴스를 저장하세요
                             </p>
                         </div>
                     ) : (
@@ -347,7 +584,11 @@ export default function News() {
                                     {scrap.tags.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2 ml-5">
                                             {scrap.tags.slice(0, 3).map(tag => (
-                                                <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
+                                                <span
+                                                    key={tag}
+                                                    onClick={(e) => { e.stopPropagation(); handleTagClick(tag); }}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50 hover:bg-cyan-500/10 hover:text-cyan-300 cursor-pointer transition-colors"
+                                                >
                                                     #{tag}
                                                 </span>
                                             ))}
@@ -422,7 +663,7 @@ export default function News() {
                             </button>
                         </div>
 
-                        {/* Research results — Structured AI response */}
+                        {/* Research results */}
                         {isResearching && (
                             <div className="mt-3 p-4 rounded-lg bg-violet-950/20 border border-violet-800/20 flex items-center gap-3">
                                 <Loader2 size={16} className="animate-spin text-violet-400" />
@@ -441,12 +682,10 @@ export default function News() {
 
                         {researchResult && !isResearching && (
                             <div className="mt-3 space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
-                                {/* Summary */}
                                 <div className="p-3 rounded-lg bg-violet-950/20 border border-violet-800/20">
                                     <p className="text-[11px] text-slate-200 leading-relaxed">{researchResult.summary}</p>
                                 </div>
 
-                                {/* Key Facts */}
                                 {researchResult.keyFacts.length > 0 && (
                                     <div className="p-3 rounded-lg bg-slate-800/30 border border-slate-700/30">
                                         <span className="text-[9px] text-violet-400 uppercase tracking-wider font-bold">핵심 팩트</span>
@@ -461,7 +700,6 @@ export default function News() {
                                     </div>
                                 )}
 
-                                {/* Sources */}
                                 {researchResult.sources.length > 0 && (
                                     <div className="p-2 rounded-lg bg-slate-800/20 border border-slate-700/20">
                                         <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold flex items-center gap-1"><Link2 size={9} /> 출처</span>
@@ -477,7 +715,6 @@ export default function News() {
                                     </div>
                                 )}
 
-                                {/* Suggested follow-up queries */}
                                 {researchResult.relatedQueries.length > 0 && (
                                     <div className="flex flex-wrap gap-1">
                                         {researchResult.relatedQueries.map((rq, i) => (

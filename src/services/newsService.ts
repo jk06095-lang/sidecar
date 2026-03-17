@@ -37,6 +37,43 @@ const RSS_SOURCES: RSSSource[] = [
     { name: 'Chatham House', badge: '🔬', feedUrl: 'https://www.chathamhouse.org/publications/rss', category: 'geopolitics' },
 ];
 
+// ============================================================
+// P&I / MARITIME INSURANCE RSS FEED SOURCES
+// Used to populate the 'P&I · 보험 공문' tab (official circulars)
+// ============================================================
+interface PIRSSSource {
+    name: string;
+    badge: string;
+    feedUrl: string;
+}
+
+const PI_RSS_SOURCES: PIRSSSource[] = [
+    // P&I Clubs & Marine Insurance
+    { name: 'GARD P&I', badge: '🛡️', feedUrl: 'https://www.gard.no/web/updates/rss' },
+    { name: 'Standard Club', badge: '🛡️', feedUrl: 'https://www.standard-club.com/knowledge-news/rss/' },
+    { name: 'Skuld P&I', badge: '🛡️', feedUrl: 'https://www.skuld.com/topics/rss/' },
+    { name: 'West P&I', badge: '🛡️', feedUrl: 'https://www.westpandi.com/feed/' },
+    { name: 'Steamship Mutual', badge: '🛡️', feedUrl: 'https://www.steamshipmutual.com/rss/' },
+    // Regulatory / Classification
+    { name: 'IMO News', badge: '🏛️', feedUrl: 'https://www.imo.org/en/MediaCentre/Pages/RSS.aspx' },
+    { name: 'Lloyd\'s List', badge: '⚓', feedUrl: 'https://lloydslist.com/LL/rss' },
+    // Maritime Insurance News
+    { name: 'TradeWinds', badge: '🌊', feedUrl: 'https://www.tradewindsnews.com/rss' },
+    { name: 'Maritime Global News', badge: '📰', feedUrl: 'https://www.maritimenews.com/feed/' },
+    { name: 'Safety4Sea', badge: '🔒', feedUrl: 'https://safety4sea.com/feed/' },
+];
+
+// Keywords for filtering P&I / insurance relevance
+const PI_RELEVANCE_KEYWORDS = [
+    'p&i', 'p & i', 'protection and indemnity', 'war risk', 'hull', 'marine insurance',
+    'circular', 'club', 'premium', 'underwriter', 'claims', 'coverage', 'indemnity',
+    'average', 'salvage', 'surveyor', 'classification', 'class society', 'flag state',
+    'imo', 'marpol', 'solas', 'iacs', 'loss prevention', 'safety', 'crew welfare',
+    'cargo claims', 'collision', 'grounding', 'pollution', 'oil spill', 'wreck removal',
+    'sanctions', 'compliance', 'regulation', 'convention', 'amendment',
+    '보험', '회람', '공문', 'P&I', '선급', '보험료', '해상보험', '전쟁위험',
+];
+
 // Direct JSON APIs (no RSS proxy needed)
 const DIRECT_API_URLS = [
     'https://saurav.tech/NewsAPI/top-headlines/category/business/us.json',
@@ -898,8 +935,188 @@ If no results found, return empty array [].`;
     }
 }
 
+// ============================================================
+// P&I RSS FEED FETCHER — Real RSS feeds from insurance clubs
+// ============================================================
+
+function passesPIRelevanceFilter(title: string, description: string): boolean {
+    const text = `${title} ${description}`.toLowerCase();
+    return PI_RELEVANCE_KEYWORDS.some(kw => text.includes(kw.toLowerCase()));
+}
+
+export async function fetchPIRSSFeeds(): Promise<IntelArticle[]> {
+    const promises = PI_RSS_SOURCES.map(async (source) => {
+        try {
+            const proxyUrl = `${RSS2JSON_PROXY}${encodeURIComponent(source.feedUrl)}`;
+            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+            if (!res.ok) return [];
+            const json = await res.json();
+            if (json.status !== 'ok' || !json.items) return [];
+
+            return json.items
+                .filter((item: any) => item.title && item.title.trim())
+                .slice(0, 8)
+                .filter((item: any) => passesPIRelevanceFilter(
+                    item.title || '',
+                    item.description || item.content || '',
+                ))
+                .map((item: any) => {
+                    const id = generateArticleId(item.title, source.name);
+                    return {
+                        id,
+                        title: cleanHtml(item.title),
+                        description: cleanHtml(item.description || item.content || '').slice(0, 400),
+                        url: item.link || item.guid || source.feedUrl,
+                        source: source.name,
+                        sourceBadge: source.badge,
+                        publishedAt: item.pubDate || new Date().toISOString(),
+                        fetchedAt: new Date().toISOString(),
+                        evaluated: true,
+                        dropped: false,
+                        impactScore: 75,
+                        riskLevel: 'Medium' as const,
+                        category: 'OFFICIAL_CIRCULAR' as const,
+                        refNumber: undefined,
+                        aiInsight: undefined,
+                        ontologyTags: ['P&I', 'Marine Insurance', '해상보험'],
+                    } as IntelArticle;
+                });
+        } catch (err) {
+            console.warn(`[NewsService] P&I RSS fetch failed for ${source.name}:`, err);
+            return [];
+        }
+    });
+
+    const results = await Promise.allSettled(promises);
+    const articles: IntelArticle[] = [];
+    for (const result of results) {
+        if (result.status === 'fulfilled') articles.push(...result.value);
+    }
+
+    // Sort newest first
+    articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+    console.info(`[NewsService] P&I RSS: fetched ${articles.length} articles from ${PI_RSS_SOURCES.length} sources`);
+    return articles;
+}
+
+// ============================================================
+// OFFICIAL CIRCULAR BOOTSTRAP — Seeds P&I data from Feb 26
+// ============================================================
+let _officialBootstrapDone = false;
+let _officialBootstrapInFlight: Promise<IntelArticle[]> | null = null;
+
+export async function bootstrapOfficialCirculars(): Promise<IntelArticle[]> {
+    if (_officialBootstrapDone) {
+        console.info('[NewsService] Official backfill already completed this session');
+        return [];
+    }
+    if (_officialBootstrapInFlight) return _officialBootstrapInFlight;
+
+    _officialBootstrapInFlight = (async (): Promise<IntelArticle[]> => {
+        console.log('[NewsService] Starting P&I official circular backfill...');
+        const allArticles: IntelArticle[] = [];
+
+        // Phase A: Try RSS feeds first (free, reliable)
+        try {
+            const rssResults = await fetchPIRSSFeeds();
+            allArticles.push(...rssResults);
+            console.log(`[NewsService] P&I RSS bootstrap: ${rssResults.length} articles`);
+        } catch (err) {
+            console.warn('[NewsService] P&I RSS bootstrap error:', err);
+        }
+
+        // Phase B: Gemini Search Grounding for KP&I and historical data
+        try {
+            const { bffGenerate } = await import('./geminiService');
+
+            const today = new Date().toISOString().split('T')[0];
+            const prompt = `You are a maritime insurance specialist. Search for REAL P&I Club circulars, marine insurance updates, and class society notices from 2026-02-26 to ${today}.
+
+Search specifically for:
+- Korea P&I Club (한국선주상호보험) circulars and notices
+- International Group of P&I Clubs announcements
+- War Risk Premium changes (AWRP/JWLA updates)
+- IMO regulatory updates affecting marine insurance
+- Classification society (Lloyd's Register, DNV, BV, ABS) technical circulars
+- Marine hull & machinery insurance market updates
+- Loss prevention bulletins from P&I clubs
+
+Find 8-12 REAL documents/updates. For each:
+- title: Document title in Korean (한국어)
+- description: 2-3 sentence summary in Korean (한국어)
+- source: Issuing organization (e.g. "한국선주상호보험", "GARD P&I", "IMO", "Lloyd's Register")
+- publishedAt: Date in ISO format
+- refNumber: Document reference number if available (e.g. "CIR-2026-005")
+- url: Source URL if available
+- impactScore: 60-95 based on significance
+- riskLevel: "Low" | "Medium" | "High" | "Critical"
+- ontologyTags: Array of 2-4 relevant keywords
+
+Return ONLY a JSON array. No other text.
+If you cannot find results, return empty array [].`;
+
+            const text = await bffGenerate(prompt, 'gemini-2.5-flash', undefined, [{ googleSearch: {} }]);
+            let jsonStr = text.trim();
+            if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+            else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+            if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+            jsonStr = jsonStr.trim();
+
+            if (jsonStr && jsonStr !== '[]') {
+                const parsed = JSON.parse(jsonStr);
+                if (Array.isArray(parsed)) {
+                    const geminiArticles: IntelArticle[] = parsed.map((item: any, i: number) => ({
+                        id: generateArticleId(item.title || `pi-official-${i}`, item.source || 'P&I'),
+                        title: item.title || 'P&I 공문',
+                        description: item.description || '',
+                        url: item.url || 'https://www.kpiclub.or.kr',
+                        source: item.source || 'P&I Club',
+                        sourceBadge: item.source?.includes('한국') || item.source?.includes('Korea') ? '🇰🇷' : '🛡️',
+                        publishedAt: item.publishedAt || new Date(2026, 1, 26 + i).toISOString(),
+                        fetchedAt: new Date().toISOString(),
+                        evaluated: true,
+                        dropped: false,
+                        impactScore: item.impactScore ?? 75,
+                        riskLevel: (item.riskLevel || 'Medium') as IntelArticle['riskLevel'],
+                        category: 'OFFICIAL_CIRCULAR' as const,
+                        refNumber: item.refNumber || `CIR-2026-${String(i + 1).padStart(3, '0')}`,
+                        aiInsight: item.description?.slice(0, 100) || undefined,
+                        ontologyTags: item.ontologyTags || ['P&I', 'Marine Insurance', '해상보험'],
+                    }));
+                    allArticles.push(...geminiArticles);
+                    console.log(`[NewsService] Gemini P&I bootstrap: ${geminiArticles.length} articles`);
+                }
+            }
+        } catch (err) {
+            console.warn('[NewsService] Gemini P&I bootstrap error:', err);
+        }
+
+        // Dedup by id
+        const seen = new Set<string>();
+        const deduped = allArticles.filter(a => {
+            if (seen.has(a.id)) return false;
+            seen.add(a.id);
+            return true;
+        });
+
+        // Sort newest first
+        deduped.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+        console.log(`[NewsService] P&I official backfill complete: ${deduped.length} total articles`);
+        _officialBootstrapDone = true;
+        return deduped;
+    })();
+
+    try {
+        return await _officialBootstrapInFlight;
+    } finally {
+        _officialBootstrapInFlight = null;
+    }
+}
+
 /**
- * Fetch all official sources (KP&I + UKMTO). Rate-limited to once per 5 minutes.
+ * Fetch all official sources (KP&I + UKMTO + P&I RSS).
+ * Rate-limited to once per 5 minutes.
  * Returns cached results if called too frequently.
  */
 export async function fetchOfficialSources(): Promise<IntelArticle[]> {
@@ -909,14 +1126,16 @@ export async function fetchOfficialSources(): Promise<IntelArticle[]> {
     }
 
     try {
-        const [kpiArticles, securityArticles] = await Promise.allSettled([
+        const [kpiArticles, securityArticles, piRssArticles] = await Promise.allSettled([
             fetchKPICirculars(),
             fetchSecurityAlerts(),
+            fetchPIRSSFeeds(),
         ]);
 
         const results: IntelArticle[] = [];
         if (kpiArticles.status === 'fulfilled') results.push(...kpiArticles.value);
         if (securityArticles.status === 'fulfilled') results.push(...securityArticles.value);
+        if (piRssArticles.status === 'fulfilled') results.push(...piRssArticles.value);
 
         // Dedup against cache
         const existingIds = new Set(officialArticleCache.map(a => a.id));
@@ -924,7 +1143,7 @@ export async function fetchOfficialSources(): Promise<IntelArticle[]> {
         officialArticleCache.push(...newItems);
 
         // Keep cache bounded
-        while (officialArticleCache.length > 20) officialArticleCache.shift();
+        while (officialArticleCache.length > 50) officialArticleCache.shift();
 
         lastOfficialFetchTime = now;
         return [...officialArticleCache];

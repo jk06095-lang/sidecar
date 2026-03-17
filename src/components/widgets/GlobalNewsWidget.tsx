@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock, RefreshCw, ShieldAlert, FileWarning } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
-import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, type FinOpsStats } from '../../services/newsService';
+import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, bootstrapOfficialCirculars, type FinOpsStats } from '../../services/newsService';
 import { evaluateNewsSignals, triageWithFlash, escalateWithPro } from '../../services/geminiService';
 import { subscribeIntelFeed, appendIntelArticles, persistIntelArticles } from '../../services/firestoreService';
 import { useOntologyStore } from '../../store/ontologyStore';
@@ -387,12 +387,33 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                     return;
                 }
 
-                // FIRST SNAPSHOT EMPTY → fetch from API to populate Firestore
+                // FIRST SNAPSHOT EMPTY → bootstrap P&I data + fetch from API
                 if (!hasReceivedOfficial) {
                     hasReceivedOfficial = true;
-                    console.info('[GlobalNewsWidget] 📡 Official cache empty → fetching from API...');
+                    console.info('[GlobalNewsWidget] 📡 Official cache empty → bootstrapping P&I data...');
                     // Keep officialLoading=true while fetching
-                    refreshOfficialRef.current();
+
+                    (async () => {
+                        try {
+                            // Step A: Bootstrap P&I circulars (RSS + Gemini)
+                            const bootstrapped = await bootstrapOfficialCirculars();
+                            if (bootstrapped.length > 0) {
+                                await appendIntelArticles('official', bootstrapped);
+                                // onSnapshot will fire again with data
+                            }
+                        } catch (err) {
+                            console.warn('[GlobalNewsWidget] P&I bootstrap error:', err);
+                        }
+
+                        // Step B: Also fetch current official sources
+                        try {
+                            await refreshOfficialRef.current();
+                        } catch (err) {
+                            console.warn('[GlobalNewsWidget] Official refresh error:', err);
+                        }
+
+                        setOfficialLoading(false);
+                    })();
                 } else {
                     setOfficialLoading(false);
                 }
@@ -552,7 +573,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                 <div className="px-3 py-1.5 border-b border-amber-800/30 bg-amber-950/10 flex items-center gap-1.5 shrink-0">
                     <FileWarning size={10} className="text-amber-400 shrink-0" />
                     <span className="text-[9px] text-amber-400/80 font-mono leading-tight truncate">
-                        🔒 P&I Club 회람 · 보험사 공문 · 선급 지침 — Gemini Search Grounding
+                        🔒 P&I Club 회람 · 보험사 공문 · 선급 지침 — RSS Feed + Gemini Grounding
                     </span>
                 </div>
             )}

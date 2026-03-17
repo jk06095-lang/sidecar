@@ -130,7 +130,7 @@ export default function MacroIntelligenceBoard({ expanded, onToggle, simulationP
                         <Settings size={12} />
                     </button>
                     {showSettings && (
-                        <div className="absolute bottom-full right-0 mb-1 p-2 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px]"
+                        <div className="absolute bottom-full right-0 mb-1 p-2 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-[9999] min-w-[160px]"
                             onClick={e => e.stopPropagation()}>
                             <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold mb-1.5 block">표시할 인디케이터</span>
                             {INDICATOR_DEFS.map(def => (

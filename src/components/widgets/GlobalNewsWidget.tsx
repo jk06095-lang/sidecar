@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { Radio, AlertCircle, Bookmark, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock, RefreshCw, ShieldAlert, FileWarning } from 'lucide-react';
+import { Radio, AlertCircle, GitBranch, Loader2, Zap, Shield, CheckCircle2, Sparkles, Clock, RefreshCw, ShieldAlert, FileWarning } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
 import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, bootstrapOfficialCirculars, type FinOpsStats } from '../../services/newsService';
@@ -500,29 +500,51 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
         );
     }
 
-    const handleBookmark = (e: React.MouseEvent, article: IntelArticle) => {
+    const handleOntologize = (e: React.MouseEvent, article: IntelArticle) => {
         e.stopPropagation();
-        const currentOntology = JSON.parse(localStorage.getItem('sidecar_ontology') || '[]');
-        const newEntry = {
-            id: `news_${Date.now()}`,
-            title: `[스크랩 뉴스] ${article.title}`,
-            content: `${article.description}\n\nSource: ${article.source}\nURL: ${article.url}${article.aiInsight ? `\nAI Insight: ${article.aiInsight}` : ''}`,
-            category: 'market',
-            isActive: true,
-            dateAdded: new Date().toISOString().split('T')[0],
-        };
-        localStorage.setItem('sidecar_ontology', JSON.stringify([newEntry, ...currentOntology]));
 
-        // Notify parent about the scrap
+        // 1. Create a proper RiskEvent OntologyObject from the article
+        const addObject = useOntologyStore.getState().addObject;
+        const newObj = {
+            id: `intel_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            type: 'RiskEvent' as const,
+            title: article.title,
+            description: `${article.description}\n\nSource: ${article.source}\nURL: ${article.url}${article.aiInsight ? `\nAI Insight: ${article.aiInsight}` : ''}`,
+            properties: {
+                category: (article.category === 'SECURITY_ALERT' ? 'geopolitical' : 'operational') as 'geopolitical' | 'operational',
+                severity: (article.riskLevel?.toLowerCase() || 'medium') as 'low' | 'medium' | 'high' | 'critical',
+                riskScore: article.impactScore ?? 50,
+                sourceUrl: article.url,
+                sourceRef: article.source,
+                publishedAt: article.publishedAt,
+            },
+            metadata: {
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                source: `intel:${article.source}`,
+                status: 'active' as const,
+            },
+        };
+        addObject(newObj);
+
+        // 2. Save scrap URL for TTL protection
+        try {
+            const existing = JSON.parse(localStorage.getItem('sidecar_scraps') || '[]');
+            existing.push({ url: article.url, title: article.title, scrapAt: new Date().toISOString() });
+            localStorage.setItem('sidecar_scraps', JSON.stringify(existing));
+        } catch { /* ignore */ }
+
+        // 3. Notify parent
         onScrap?.(article);
 
-        // Trigger scenario update on user scrap action
-        console.info('[Scrap] 📌 User scraped article → triggering scenario update');
+        // 4. Trigger scenario update
+        console.info('[Ontologize] 🧬 Article ontologized as RiskEvent →', newObj.id);
         window.dispatchEvent(new CustomEvent('scenario_update_trigger'));
 
+        // 5. Visual feedback
         const btn = e.currentTarget;
-        btn.classList.add('text-amber-400', 'scale-125');
-        setTimeout(() => btn.classList.remove('text-amber-400', 'scale-125'), 1000);
+        btn.classList.add('text-cyan-400', 'scale-125');
+        setTimeout(() => btn.classList.remove('text-cyan-400', 'scale-125'), 1000);
     };
 
     return (
@@ -617,12 +639,12 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
                                     article={article}
                                     onApply={handleApplyAction}
                                     onAcknowledge={handleAcknowledge}
-                                    onBookmark={handleBookmark}
+                                    onOntologize={handleOntologize}
                                     onTagClick={onTagClick}
                                 />
                                 : <OSINTCard
                                     article={article}
-                                    onBookmark={handleBookmark}
+                                    onOntologize={handleOntologize}
                                     onTagClick={onTagClick}
                                 />
                             }
@@ -637,9 +659,9 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 // ============================================================
 // OSINT CARD — Standard news article card
 // ============================================================
-function OSINTCard({ article, onBookmark, onTagClick }: {
+function OSINTCard({ article, onOntologize, onTagClick }: {
     article: IntelArticle;
-    onBookmark: (e: React.MouseEvent, article: IntelArticle) => void;
+    onOntologize: (e: React.MouseEvent, article: IntelArticle) => void;
     onTagClick?: (tag: string) => void;
 }) {
     return (
@@ -647,13 +669,14 @@ function OSINTCard({ article, onBookmark, onTagClick }: {
             className="group/card relative flex items-start gap-3 p-4 hover:bg-slate-800/30 transition-all border-b border-slate-800/50 last:border-0 cursor-pointer animate-slide-down"
             onClick={() => window.open(article.url, '_blank')}
         >
-            {/* Bookmark button */}
+            {/* Ontologize button */}
             <button
-                onClick={(e) => onBookmark(e, article)}
-                className="absolute right-3 top-3 opacity-100 p-1.5 text-slate-500 hover:text-amber-400 hover:bg-slate-800 rounded transition-all z-20"
-                title="온톨로지(AI 지식베이스)에 추가하기"
+                onClick={(e) => onOntologize(e, article)}
+                className="absolute right-3 top-3 opacity-100 p-1.5 text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 rounded transition-all z-20 flex items-center gap-1"
+                title="이 기사를 온톨로지(AI 지식베이스)에 등록"
             >
-                <Bookmark size={12} />
+                <GitBranch size={12} />
+                <span className="text-[9px] font-bold hidden group-hover/card:inline">온톨로지화</span>
             </button>
 
             {/* Indicator dot */}
@@ -744,11 +767,11 @@ function OSINTCard({ article, onBookmark, onTagClick }: {
 // ============================================================
 // OFFICIAL CARD — Premium Glassmorphism Signal Triage Card
 // ============================================================
-function OfficialCard({ article, onApply, onAcknowledge, onBookmark, onTagClick }: {
+function OfficialCard({ article, onApply, onAcknowledge, onOntologize, onTagClick }: {
     article: IntelArticle;
     onApply: (article: IntelArticle) => void;
     onAcknowledge: (articleId: string) => void;
-    onBookmark: (e: React.MouseEvent, article: IntelArticle) => void;
+    onOntologize: (e: React.MouseEvent, article: IntelArticle) => void;
     onTagClick?: (tag: string) => void;
 }) {
     const isAlert = article.category === 'SECURITY_ALERT';
@@ -922,11 +945,12 @@ function OfficialCard({ article, onApply, onAcknowledge, onBookmark, onTagClick 
                             확인
                         </button>
                         <button
-                            onClick={(e) => onBookmark(e, article)}
-                            className="p-2 text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all border border-transparent hover:border-amber-500/20"
-                            title="온톨로지(AI 지식베이스)에 추가하기"
+                            onClick={(e) => onOntologize(e, article)}
+                            className="p-2 text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition-all border border-transparent hover:border-cyan-500/20 flex items-center gap-1"
+                            title="이 문서를 온톨로지(AI 지식베이스)에 등록"
                         >
-                            <Bookmark size={12} />
+                            <GitBranch size={12} />
+                            <span className="text-[9px] font-bold">온톨로지화</span>
                         </button>
                     </div>
                 )}

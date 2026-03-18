@@ -43,7 +43,8 @@ import {
     type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink, IntelArticle } from '../types'; \r\nimport { passesLocalFilter, THREE_WEEKS_MS } from './newsService';
+import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink, IntelArticle } from '../types';
+import { passesLocalFilter, THREE_WEEKS_MS } from './newsService';
 
 // ============================================================
 // DEBOUNCE UTILITY — Prevent rapid Firestore writes

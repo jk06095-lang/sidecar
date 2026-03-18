@@ -11,6 +11,7 @@ import { useAuthUser } from './components/AuthGate';
 // Lazy-load Action Center and News (heavy composite components)
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
 const News = lazy(() => import('./components/News'));
+const MaritimeAnomalyUI = lazy(() => import('./components/MaritimeAnomaly'));
 import { useOntologyStore } from './store/ontologyStore';
 import { useActionStore } from './store/actionStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
@@ -412,6 +413,19 @@ export default function App() {
                 </div>
               }>
                 <News />
+              </Suspense>
+            </div>
+          )}
+
+          {/* ════════ PILLAR 3.5: ANOMALY ════════ */}
+          {visitedTabs.has('anomaly') && (
+            <div className="absolute inset-0" style={{ display: activeTab === 'anomaly' ? 'block' : 'none' }}>
+              <Suspense fallback={
+                <div className="flex items-center justify-center h-full">
+                  <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
+                </div>
+              }>
+                <MaritimeAnomalyUI />
               </Suspense>
             </div>
           )}

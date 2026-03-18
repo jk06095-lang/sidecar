@@ -16,7 +16,8 @@ export type OntologyObjectType =
   | 'Port'
   | 'Route'
   | 'MarketIndicator'
-  | 'RiskEvent';
+  | 'RiskEvent'
+  | 'Anomaly';
 
 /**
  * Legacy type aliases — maps old fragmented types to the new 5-entity model.
@@ -239,7 +240,9 @@ export type OntologyLinkRelation =
   | 'AT_RISK'           // Vessel → RiskEvent (proximity-based auto risk)
   | 'NEAR'              // Object → Object (geographic proximity)
   | 'IMPACTS'           // Event → Object (causal impact)
-  | 'COMPETES_WITH';    // Object → Object (competitive relationship)
+  | 'COMPETES_WITH'     // Object → Object (competitive relationship)
+  | 'HAS_ANOMALY'       // Object → Anomaly
+  | 'CAUSED_BY';        // Anomaly → Object/Event
 
 /** An edge in the ontology graph */
 export interface OntologyLink {
@@ -631,5 +634,29 @@ export interface AIStrategicProposal {
   vesselTargets?: string[];     // vessel names involved
   instrument?: string;          // for hedging: specific derivative
   ratio?: string;               // for hedging: hedge ratio
+}
+
+// ============================================================
+// 15. MARITIME ANOMALY (Module 6)
+// ============================================================
+
+export type AnomalyType =
+  | 'Dark Activity'
+  | 'Identity Tampering'
+  | 'Loitering'
+  | 'Port Congestion'
+  | 'Deviated Route';
+
+export type VesselRiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface MaritimeAnomaly {
+  id: string;
+  vesselId?: string;
+  type: AnomalyType;
+  description: string;
+  timestamp: string;
+  location?: { lat: number; lng: number };
+  riskLevel: VesselRiskLevel;
+  aiExplanation?: string;
 }
 

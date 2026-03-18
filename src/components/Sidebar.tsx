@@ -45,8 +45,9 @@ const NAV_PILLARS = [
   { id: 'workspace', label: 'Fleet Control', labelKo: '① Fleet 관제', icon: LayoutDashboard },
   { id: 'ontology', label: 'Ontology Data', labelKo: '② Ontology 데이터', icon: Database },
   { id: 'news', label: 'Intelligence', labelKo: '③ 인텔리전스', icon: Newspaper },
-  { id: 'scenario', label: 'Quant Simulation', labelKo: '④ 퀀트 시뮬레이션', icon: Activity },
-  { id: 'action-center', label: 'Action & Report', labelKo: '⑤ Action 결재', icon: Gavel },
+  { id: 'anomaly', label: 'Anomaly Detection', labelKo: '④ 이상 탐지', icon: Activity },
+  { id: 'scenario', label: 'Quant Simulation', labelKo: '⑤ 퀀트 시뮬레이션', icon: Activity },
+  { id: 'action-center', label: 'Action & Report', labelKo: '⑥ Action 결재', icon: Gavel },
 ] as const;
 
 export default function Sidebar({

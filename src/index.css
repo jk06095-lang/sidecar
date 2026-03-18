@@ -455,6 +455,87 @@ body {
 }
 
 /* =============================================
+   DEEP RESEARCH — Expansion Animation System
+   ============================================= */
+
+/* Scrapbook slides from full-width to narrow card on the left */
+@keyframes scrapbook-collapse {
+  from {
+    width: 100%;
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  to {
+    width: 220px;
+    opacity: 1;
+    transform: translateX(0) scale(0.97);
+  }
+}
+
+@keyframes scrapbook-expand {
+  from {
+    width: 220px;
+    opacity: 1;
+    transform: translateX(0) scale(0.97);
+  }
+
+  to {
+    width: 100%;
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Research panel grows */
+@keyframes research-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+    max-height: 0;
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 2000px;
+  }
+}
+
+/* Smooth transition classes for the sidebar layout */
+.research-sidebar-transition {
+  transition: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scrapbook-transition {
+  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.3s ease,
+    transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.research-expand-transition {
+  transition: flex 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.35s ease 0.08s,
+    transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Expanded research panel glow effect */
+.research-expanded-glow {
+  box-shadow:
+    inset 0 1px 0 0 rgba(139, 92, 246, 0.15),
+    0 0 40px -10px rgba(139, 92, 246, 0.15);
+}
+
+/* Scrapbook card style when collapsed */
+.scrapbook-card-mode {
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.85) 100%);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* =============================================
    LIGHT THEME
    Toggle via: document.documentElement.classList.add('light')
    ============================================= */

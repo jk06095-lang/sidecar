@@ -109,21 +109,16 @@ interface PIRSSSource {
 }
 
 const PI_RSS_SOURCES: PIRSSSource[] = [
-    // Maritime Safety & P&I (verified working with rss2json)
-    { name: 'Safety4Sea', badge: '🔒', feedUrl: 'https://safety4sea.com/feed/', skipKeywordFilter: false },
-    { name: 'gCaptain', badge: '⚓', feedUrl: 'https://gcaptain.com/tag/insurance/feed/', skipKeywordFilter: true },
-    { name: 'Splash247', badge: '🌊', feedUrl: 'https://splash247.com/tag/pi-clubs/feed/', skipKeywordFilter: true },
-    { name: 'Hellenic Shipping', badge: '🚢', feedUrl: 'https://www.hellenicshippingnews.com/category/shipping-finance/marine-insurance/feed/', skipKeywordFilter: true },
-    // P&I Club direct feeds (some may fail — handled gracefully)
+    // P&I Club direct feeds — DEDICATED insurance sources only
     { name: 'GARD P&I', badge: '🛡️', feedUrl: 'https://www.gard.no/web/updates/rss', skipKeywordFilter: true },
     { name: 'Standard Club', badge: '🛡️', feedUrl: 'https://www.standard-club.com/knowledge-news/rss/', skipKeywordFilter: true },
     { name: 'West P&I', badge: '🛡️', feedUrl: 'https://www.westpandi.com/feed/', skipKeywordFilter: true },
     { name: 'Skuld P&I', badge: '🛡️', feedUrl: 'https://www.skuld.com/topics/rss/', skipKeywordFilter: true },
-    // Regulatory feeds
+    // Insurance-tagged feeds from maritime news (narrow scope)
+    { name: 'gCaptain Insurance', badge: '⚓', feedUrl: 'https://gcaptain.com/tag/insurance/feed/', skipKeywordFilter: true },
+    { name: 'Hellenic Insurance', badge: '🚢', feedUrl: 'https://www.hellenicshippingnews.com/category/shipping-finance/marine-insurance/feed/', skipKeywordFilter: true },
+    // Regulatory
     { name: 'IMO News', badge: '🏛️', feedUrl: 'https://www.imo.org/en/MediaCentre/Pages/RSS.aspx', skipKeywordFilter: true },
-    // General maritime (keyword-filtered for insurance/P&I relevance)
-    { name: 'Ship & Bunker', badge: '⛽', feedUrl: 'https://shipandbunker.com/rss', skipKeywordFilter: false },
-    { name: 'Maritime Executive', badge: '📋', feedUrl: 'https://maritime-executive.com/rss', skipKeywordFilter: false },
 ];
 
 // Fallback CORS proxies (tried in order when rss2json fails)
@@ -134,22 +129,17 @@ const CORS_PROXIES = [
 
 // Keywords for filtering P&I / insurance relevance from general sources
 const PI_RELEVANCE_KEYWORDS = [
-    'p&i', 'p & i', 'protection and indemnity', 'war risk', 'hull', 'marine insurance',
-    'insurance', 'circular', 'club', 'premium', 'underwriter', 'claims', 'coverage',
-    'indemnity', 'average', 'salvage', 'surveyor', 'classification', 'class society',
-    'flag state', 'imo', 'marpol', 'solas', 'iacs', 'loss prevention', 'crew welfare',
-    'cargo claims', 'collision', 'grounding', 'pollution', 'oil spill', 'wreck removal',
-    'sanctions', 'compliance', 'regulation', 'convention', 'amendment', 'safety',
-    'piracy', 'war zone', 'high risk area', 'crew', 'pilot', 'survey',
-    '보험', '회람', '공문', 'P&I', '선급', '보험료', '해상보험', '전쟁위험',
-    'bunker', 'fuel', 'emission', 'ets', 'decarbonisation', 'cyber',
+    'p&i', 'p & i', 'protection and indemnity', 'war risk', 'marine insurance',
+    'insurance circular', 'club circular', 'premium', 'underwriter', 'hull insurance',
+    'indemnity', 'loss prevention', 'classification society', 'class society',
+    'imo circular', 'marpol', 'solas', 'iacs', 'cargo claims',
+    'sanctions compliance', 'wreck removal', 'oil spill liability',
+    '보험', '회람', '공문', '선급', '보험료', '해상보험', '전쟁위험',
 ];
 
-// Direct JSON APIs (no RSS proxy needed)
-const DIRECT_API_URLS = [
-    'https://saurav.tech/NewsAPI/top-headlines/category/business/us.json',
-    'https://saurav.tech/NewsAPI/top-headlines/category/general/us.json',
-];
+// Direct JSON APIs — DISABLED (was pulling Yahoo Finance and irrelevant US news)
+// These general business feeds are too broad for a maritime intelligence platform.
+const DIRECT_API_URLS: string[] = [];
 
 const RSS2JSON_PROXY = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
@@ -1154,7 +1144,13 @@ export async function fetchPIRSSFeeds(): Promise<IntelArticle[]> {
                     aiInsight: undefined,
                     ontologyTags: ['P&I', 'Marine Insurance', '해상보험'],
                 } as IntelArticle;
-            });
+            })
+                // Post-filter: drop articles older than 3 weeks
+                .filter((a: IntelArticle) => {
+                    const pubTime = new Date(a.publishedAt).getTime();
+                    const now = Date.now();
+                    return pubTime > (now - THREE_WEEKS_MS) && pubTime <= (now + 24 * 60 * 60 * 1000);
+                });
         } catch (err) {
             console.warn(`[NewsService] P&I RSS fetch failed for ${source.name}:`, err);
             return [];
@@ -1203,8 +1199,10 @@ export async function bootstrapOfficialCirculars(): Promise<IntelArticle[]> {
         try {
             const { bffGenerate } = await import('./geminiService');
 
+            const threeWeeksAgoDate = new Date(Date.now() - THREE_WEEKS_MS).toISOString().split('T')[0];
             const today = new Date().toISOString().split('T')[0];
-            const prompt = `You are a maritime insurance specialist. Search for REAL P&I Club circulars, marine insurance updates, and class society notices from 2026-02-26 to ${today}.
+            const prompt = `You are a maritime insurance specialist. Search for REAL P&I Club circulars, marine insurance updates, and class society notices from the LAST 3 WEEKS ONLY (${threeWeeksAgoDate} to ${today}).
+Do NOT return any document older than 3 weeks. If no results found, return empty array [].
 
 Search specifically for:
 - Korea P&I Club (한국선주상호보험) circulars and notices

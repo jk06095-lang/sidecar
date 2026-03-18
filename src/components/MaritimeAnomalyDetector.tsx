@@ -1,31 +1,29 @@
 /**
  * MaritimeAnomalyDetector — Windward-style Maritime Anomaly Dashboard
  *
- * Left panel:  Analytics (header, AI briefing, filters, charts, stats)
+ * Left panel:  Analytics (filters, charts, stats)
  * Right panel: Interactive Leaflet map with clustered anomaly markers
  *
- * Fully integrated with the 5-step ontology decision pipeline.
+ * Fully integrated with the ontology registration pipeline.
  */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
     Radar, ChevronDown, ChevronUp, Check,
-    AlertTriangle, Loader2, Shield, Zap,
-    Search, ZoomIn, ZoomOut, Ship,
+    AlertTriangle, Loader2, Database,
+    Ship,
 } from 'lucide-react';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import type { AnomalyType, MaritimeAnomaly } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
-import { useActionStore } from '../store/actionStore';
 import {
     generateSyntheticAnomalyData,
     clusterAnomalies,
     computeAnomalyStats,
     runAnomalyPipeline,
-    generateAnomalyBriefing,
     ANOMALY_TYPE_LABELS,
     ANOMALY_TYPE_COLORS,
     RISK_CATEGORY_LABELS,
@@ -45,11 +43,11 @@ const FLAG_EMOJI: Record<string, string> = {
 // PIPELINE STEP LABELS
 // ============================================================
 const PIPELINE_STEPS = [
-    { step: 1, label: '온톨로지 객체 등록' },
-    { step: 2, label: '인텔리전스 데이터 병합' },
-    { step: 3, label: 'AI 리스크 분석 → 온톨로지' },
-    { step: 4, label: '퀀트 시뮬레이션' },
-    { step: 5, label: '액션 생성 및 브리핑' },
+    { step: 1, label: '선박 온톨로지 노드 생성' },
+    { step: 2, label: '인텔리전스 속성 병합' },
+    { step: 3, label: 'AI 리스크 분석 → RiskEvent 노드 생성' },
+    { step: 4, label: '온톨로지 엣지(관계) 연결' },
+    { step: 5, label: '온톨로지 그래프 등록 완료' },
 ];
 
 // ============================================================
@@ -63,14 +61,12 @@ export default function MaritimeAnomalyDetector() {
     const addLink = useOntologyStore(s => s.addLink);
     const simulationParams = useOntologyStore(s => s.simulationParams);
     const dynamicFleetData = useOntologyStore(s => s.dynamicFleetData);
-    const importProposals = useActionStore(s => s.importProposals);
 
     // --- Local State ---
     const [anomalies, setAnomalies] = useState<MaritimeAnomaly[]>([]);
     const [selectedFilters, setSelectedFilters] = useState<AnomalyType[]>([]);
     const [filterOpen, setFilterOpen] = useState(false);
     const [selectedAnomaly, setSelectedAnomaly] = useState<MaritimeAnomaly | null>(null);
-    const [aiBriefing, setAiBriefing] = useState('맞춤형 인사이트와 지표를 활용해 전략적 의사결정을 강화하고 성공을 이끌어 보세요.');
     const [pipelineStep, setPipelineStep] = useState(0);
     const [pipelineMessage, setPipelineMessage] = useState('');
     const [isPipelineRunning, setIsPipelineRunning] = useState(false);
@@ -86,12 +82,6 @@ export default function MaritimeAnomalyDetector() {
         setAnomalies(data);
     }, [objects]);
 
-    // --- Generate AI briefing ---
-    useEffect(() => {
-        if (anomalies.length === 0) return;
-        const stats = computeAnomalyStats(anomalies);
-        generateAnomalyBriefing(stats).then(setAiBriefing).catch(() => { /* fallback already set */ });
-    }, [anomalies]);
 
     // --- Derived data ---
     const clusters = useMemo(
@@ -236,7 +226,7 @@ export default function MaritimeAnomalyDetector() {
                 links,
                 simulationParams,
                 fleetData: dynamicFleetData,
-                importProposals,
+                importProposals: () => { },
             },
             (step, message) => {
                 setPipelineStep(step);
@@ -245,7 +235,7 @@ export default function MaritimeAnomalyDetector() {
         );
 
         setIsPipelineRunning(false);
-    }, [selectedAnomaly, isPipelineRunning, addObject, addLink, objects, links, simulationParams, dynamicFleetData, importProposals]);
+    }, [selectedAnomaly, isPipelineRunning, addObject, addLink, objects, links, simulationParams, dynamicFleetData]);
 
     // ============================================================
     // RENDER
@@ -256,16 +246,7 @@ export default function MaritimeAnomalyDetector() {
                 LEFT PANEL — Analytics & Statistics
                 ═══════════════════════════════════════════════ */}
             <div className="w-[440px] min-w-[380px] border-r border-slate-800/50 flex flex-col overflow-y-auto custom-scrollbar">
-                {/* Header */}
-                <div className="px-6 pt-6 pb-4">
-                    <h1 className="text-2xl font-bold text-white leading-tight">
-                        해양 이상 현<br />
-                        상을 실시간으로 탐색하세요
-                    </h1>
-                    <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                        {aiBriefing}
-                    </p>
-                </div>
+
 
                 {/* Filter Dropdown */}
                 <div className="px-6 py-2 flex items-center gap-2">
@@ -453,24 +434,7 @@ export default function MaritimeAnomalyDetector() {
                     ))}
                 </div>
 
-                {/* Zoom controls overlay */}
-                <div className="absolute bottom-4 right-4 z-[1000] flex items-center gap-1 bg-slate-900/80 backdrop-blur-sm px-2 py-1 rounded-md border border-slate-700/40">
-                    <button
-                        onClick={() => leafletMapRef.current?.zoomIn()}
-                        className="p-1 text-slate-400 hover:text-white transition-colors"
-                        title="확대"
-                    >
-                        <ZoomIn size={14} />
-                    </button>
-                    <span className="text-[10px] text-slate-500 font-mono px-1">100%</span>
-                    <button
-                        onClick={() => leafletMapRef.current?.zoomOut()}
-                        className="p-1 text-slate-400 hover:text-white transition-colors"
-                        title="축소"
-                    >
-                        <ZoomOut size={14} />
-                    </button>
-                </div>
+
 
                 {/* Selected Anomaly Detail + Pipeline Panel */}
                 {selectedAnomaly && (
@@ -527,15 +491,15 @@ export default function MaritimeAnomalyDetector() {
                                 disabled={isPipelineRunning}
                                 className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs transition-all duration-300 ${isPipelineRunning
                                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                    : 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-400 hover:to-red-400 shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40'
+                                    : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40'
                                     }`}
                             >
                                 {isPipelineRunning ? (
                                     <Loader2 size={14} className="animate-spin" />
                                 ) : (
-                                    <Shield size={14} />
+                                    <Database size={14} />
                                 )}
-                                {isPipelineRunning ? '분석 진행 중...' : '전사적 리스크 분석 및 액션 생성'}
+                                {isPipelineRunning ? '온톨로지 등록 중...' : '이상 데이터 온톨로지화'}
                             </button>
 
                             {/* Pipeline Progress Steps */}

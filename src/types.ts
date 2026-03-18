@@ -633,3 +633,60 @@ export interface AIStrategicProposal {
   ratio?: string;               // for hedging: hedge ratio
 }
 
+// ============================================================
+// 15. MARITIME ANOMALY DETECTOR
+// ============================================================
+
+/** Anomaly behaviour categories */
+export type AnomalyType = 'dark_activity' | 'ship_to_ship' | 'slow_sailing' | 'area_visit';
+
+/** Risk categories for anomalous behaviour */
+export type MaritimeRiskCategory = 'sanctions_evasion' | 'smuggling' | 'iuu_fishing';
+
+/** Vessel type classification */
+export type MaritimeVesselType =
+  | 'military_or_law'
+  | 'passenger'
+  | 'fishing'
+  | 'service_vessel'
+  | 'tanker'
+  | 'cargo';
+
+/** A single detected maritime anomaly */
+export interface MaritimeAnomaly {
+  id: string;
+  type: AnomalyType;
+  lat: number;
+  lng: number;
+  vesselName: string;
+  vesselType: MaritimeVesselType;
+  flag: string;                        // ISO 2-letter country code
+  riskCategory?: MaritimeRiskCategory;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  detectedAt: string;                  // ISO timestamp
+  description: string;
+  speedKnots?: number;
+  relatedVesselIds?: string[];
+}
+
+/** Grouped cluster of nearby anomalies for map rendering */
+export interface AnomalyCluster {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+  anomalies: MaritimeAnomaly[];
+  dominantType: AnomalyType;
+}
+
+/** UI state for the Maritime Anomaly Detector panel */
+export interface MaritimeAnomalyState {
+  anomalies: MaritimeAnomaly[];
+  clusters: AnomalyCluster[];
+  selectedFilters: AnomalyType[];
+  selectedAnomaly: MaritimeAnomaly | null;
+  isAnalyzing: boolean;
+  aiBriefing: string;
+  pipelineStep: number;                // 0 = idle, 1-5 = active pipeline step
+}
+

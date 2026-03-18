@@ -64,7 +64,7 @@ async function* bffStream(prompt: string, model = 'gemini-2.5-flash', temperatur
     }
 }
 
-function cleanMarkdownFences(text: string): string {
+export function cleanMarkdownFences(text: string): string {
     let cleaned = text.trim();
     if (cleaned.startsWith('```markdown')) cleaned = cleaned.slice('```markdown'.length);
     else if (cleaned.startsWith('```marp')) cleaned = cleaned.slice('```marp'.length);

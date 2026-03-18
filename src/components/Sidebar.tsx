@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Settings, Anchor,
-  Activity, Menu, Database, Gavel, Newspaper,
+  Activity, Menu, Database, Gavel, Newspaper, Radar,
   Star, Edit2, Check, X, Trash2, LogOut,
   ChevronRight, ChevronDown as ChevronDownIcon, FolderOpen, Folder, Copy,
   FileCheck, Clock,
@@ -45,6 +45,7 @@ const NAV_PILLARS = [
   { id: 'workspace', label: 'Fleet Control', labelKo: '① Fleet 관제', icon: LayoutDashboard },
   { id: 'ontology', label: 'Ontology Data', labelKo: '② Ontology 데이터', icon: Database },
   { id: 'news', label: 'Intelligence', labelKo: '③ 인텔리전스', icon: Newspaper },
+  { id: 'maritime-anomaly', label: 'Anomaly Detector', labelKo: '해양 이상 탐지기', icon: Radar },
   { id: 'scenario', label: 'Quant Simulation', labelKo: '④ 퀀트 시뮬레이션', icon: Activity },
   { id: 'action-center', label: 'Action & Report', labelKo: '⑤ Action 결재', icon: Gavel },
 ] as const;

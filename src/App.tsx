@@ -8,9 +8,10 @@ import TopTabBar, { type Notification } from './components/TopTabBar';
 import ToastContainer from './components/ToastContainer';
 import { useAuthUser } from './components/AuthGate';
 
-// Lazy-load Action Center and News (heavy composite components)
+// Lazy-load heavy composite components
 const ActionCenter = lazy(() => import('./components/ActionCenter'));
 const News = lazy(() => import('./components/News'));
+const MaritimeAnomalyDetector = lazy(() => import('./components/MaritimeAnomalyDetector'));
 import { useOntologyStore } from './store/ontologyStore';
 import { useActionStore } from './store/actionStore';
 import type { Scenario, SimulationParams, AppSettings } from './types';
@@ -412,6 +413,19 @@ export default function App() {
                 </div>
               }>
                 <News />
+              </Suspense>
+            </div>
+          )}
+
+          {/* ════════ MARITIME ANOMALY DETECTOR ════════ */}
+          {visitedTabs.has('maritime-anomaly') && (
+            <div className="absolute inset-0" style={{ display: activeTab === 'maritime-anomaly' ? 'block' : 'none' }}>
+              <Suspense fallback={
+                <div className="flex items-center justify-center h-full">
+                  <div className="animate-spin w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full" />
+                </div>
+              }>
+                <MaritimeAnomalyDetector />
               </Suspense>
             </div>
           )}

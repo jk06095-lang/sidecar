@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 import type { IntelArticle, AppSettings, SuggestedAction } from '../../types';
 import { fetchAndProcess, setBatchEvaluationHandler, getFinOpsStats, fetchOfficialSources, bootstrapHistoricalData, bootstrapOfficialCirculars, type FinOpsStats } from '../../services/newsService';
 import { evaluateNewsSignals, triageWithFlash, escalateWithPro } from '../../services/geminiService';
-import { subscribeIntelFeed, appendIntelArticles, persistIntelArticles } from '../../services/firestoreService';
+import { subscribeIntelFeed, appendIntelArticles, persistIntelArticles, purgeStaleIntelData } from '../../services/firestoreService';
 import { useOntologyStore } from '../../store/ontologyStore';
 
 // ============================================================
@@ -256,6 +256,9 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
 
         const scrappedUrls = getScrappedUrls();
         let hasReceivedData = false;
+
+        // Step -1: Purge stale cached articles from Firestore (>3 weeks old)
+        purgeStaleIntelData().catch(err => console.warn('[GlobalNewsWidget] Purge failed:', err));
 
         // Step 0: Subscribe to OSINT feed via onSnapshot (instant Firestore cache)
         const unsubOsint = subscribeIntelFeed(

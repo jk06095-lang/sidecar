@@ -916,6 +916,48 @@ async function persistIntelArticlesImmediate(category: IntelCategory, articles: 
 }
 
 // ============================================================
+// INTEL PURGE — Remove articles older than 3 weeks from cache
+// Called once on app startup to clean stale bootstrapped data.
+// ============================================================
+
+export async function purgeStaleIntelData(): Promise<void> {
+    const categories: IntelCategory[] = ['osint', 'official'];
+    const cutoff = Date.now() - THREE_WEEKS_MS;
+
+    for (const category of categories) {
+        try {
+            const docRef = doc(db, 'app', INTEL_DOC_KEY[category]);
+            const snap = await getDoc(docRef);
+            if (!snap.exists()) continue;
+
+            const items: IntelArticle[] = snap.data().items || [];
+            const scrappedUrls = new Set<string>();
+            try {
+                const scraps = JSON.parse(localStorage.getItem('sidecar_scraps') || '[]');
+                scraps.forEach((s: { url?: string }) => { if (s.url) scrappedUrls.add(s.url); });
+            } catch { /* ignore */ }
+
+            const fresh = items.filter(article => {
+                const pubTime = new Date(article.publishedAt).getTime();
+                const isScrapped = scrappedUrls.has(article.url);
+                return pubTime > cutoff || isScrapped;
+            });
+
+            if (fresh.length < items.length) {
+                const purged = items.length - fresh.length;
+                await setDoc(docRef, {
+                    items: fresh,
+                    updatedAt: serverTimestamp(),
+                });
+                console.info(`[Firestore] 🧹 Purged ${purged} stale ${category} articles (${fresh.length} remaining)`);
+            }
+        } catch (err) {
+            console.warn(`[Firestore] purgeStaleIntelData(${category}) failed:`, err);
+        }
+    }
+}
+
+// ============================================================
 // INTEL FEED — Real-time onSnapshot listener (Financial Juice style)
 // Follows the same pattern as subscribeOntologyGraph / subscribeFleetTelemetry.
 // The UI subscribes once; background workers write new articles to Firestore,

@@ -754,7 +754,7 @@ async function fetchDirectAPI(_url: string): Promise<IntelArticle[]> {
 
 function buildGoogleNewsUrl(query: string, lang: 'en' | 'ko'): string {
     const params = new URLSearchParams({
-        q: query,
+        q: `${query} when:21d`,  // Restrict to last 3 weeks
         hl: lang,
         gl: lang === 'ko' ? 'KR' : 'US',
         ceid: lang === 'ko' ? 'KR:ko' : 'US:en',
@@ -801,6 +801,13 @@ async function fetchGoogleNewsFeed(feed: GoogleNewsFeed): Promise<IntelArticle[]
                     evaluated: false,
                     dropped: false,
                 } as IntelArticle;
+            })
+            // Post-filter: drop articles older than 3 weeks (even if Google returned them)
+            .filter((a: IntelArticle) => {
+                const pubTime = new Date(a.publishedAt).getTime();
+                const now = Date.now();
+                // Reject if older than 3 weeks OR if date is in the future (bad data)
+                return pubTime > (now - THREE_WEEKS_MS) && pubTime <= (now + 24 * 60 * 60 * 1000);
             });
     } catch (err) {
         console.warn(`[NewsService] Google News RSS failed for "${feed.name}":`, err);
@@ -834,12 +841,13 @@ export async function bootstrapHistoricalData(): Promise<IntelArticle[]> {
     _bootstrapInFlight = (async (): Promise<IntelArticle[]> => {
         console.log('[NewsService] Starting historical backfill via Gemini Search...');
 
-        const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-11'
+        const today = new Date().toISOString().split('T')[0]; // e.g. '2026-03-18'
+        const threeWeeksAgo = new Date(Date.now() - THREE_WEEKS_MS).toISOString().split('T')[0]; // e.g. '2026-02-25'
 
         try {
             const { bffGenerate } = await import('./geminiService');
 
-            const prompt = `You are a maritime intelligence analyst. Search for REAL news events from 2026-03-01 to ${today} related to:
+            const prompt = `You are a maritime intelligence analyst. Search for REAL news events from the LAST 3 WEEKS ONLY (${threeWeeksAgo} to ${today}) related to:
 - Strait of Hormuz tensions, Middle East geopolitical risks
 - Oil price movements (Brent crude)  
 - Maritime security incidents (UKMTO warnings, piracy, drone attacks on vessels)
@@ -849,12 +857,16 @@ export async function bootstrapHistoricalData(): Promise<IntelArticle[]> {
 - Red Sea/Houthi/Gulf of Aden shipping threats
 - Any IMO, MSCHOA, or naval force advisories
 
+IMPORTANT: Only return events with publishedAt dates between ${threeWeeksAgo} and ${today}.
+Do NOT return any event older than 3 weeks. Do NOT fabricate events.
+If you cannot find events from this window, return an empty array [].
+
 Find 10-15 REAL events that actually happened. For each event, return:
 - title: News headline (English)
 - titleKo: Korean translation of the headline
 - description: 2-3 sentence summary of the event
 - source: Original news source (e.g. "Reuters", "Bloomberg", "Lloyd's List", "UKMTO")
-- publishedAt: Actual date of the event in ISO format (YYYY-MM-DDTHH:mm:ssZ)
+- publishedAt: Actual date of the event in ISO format (YYYY-MM-DDTHH:mm:ssZ) — MUST be within ${threeWeeksAgo} to ${today}
 - url: Source URL if available
 - category: "OSINT" | "OFFICIAL_CIRCULAR" | "SECURITY_ALERT"
 - refNumber: Reference number if it's an official document (null otherwise)
@@ -863,8 +875,7 @@ Find 10-15 REAL events that actually happened. For each event, return:
 - insight: One-line actionable insight in Korean (한국어)
 - ontologyTags: Array of 2-4 relevant keywords
 
-ORDER events chronologically (oldest first). Include events from different dates to show a timeline.
-If you cannot find events from 2026, use the most recent real maritime security events you can find.
+ORDER events chronologically (newest first). Include events from different dates to show a timeline.
 
 Return ONLY a JSON array. No other text.`;
 
@@ -949,7 +960,8 @@ async function _fetchKPICircularsInner(): Promise<IntelArticle[]> {
         const { bffGenerate } = await import('./geminiService');
 
         const prompt = `한국 P&I 클럽(Korea P&I Club, kpiclub.or.kr)의 최근 공식 회람(Circular)을 검색해서 찾아줘.
-최근 6개월 이내에 발행된 해상보험 관련 회람을 최대 5건 찾아서 아래 JSON 형식으로 반환해.
+오늘 날짜: ${new Date().toISOString().split('T')[0]}. 최근 3주 이내에 발행된 해상보험 관련 회람만 찾아서 아래 JSON 형식으로 반환해.
+3주보다 오래된 문서는 절대 포함하지 마.
 
 검색 키워드: "한국선주상호보험" OR "kpiclub" 회람 circular war risk premium 보험
 
@@ -1015,7 +1027,7 @@ async function _fetchSecurityAlertsInner(): Promise<IntelArticle[]> {
         const prompt = `Search for the latest UKMTO (United Kingdom Maritime Trade Operations) maritime security alerts, warnings, and advisories.
 Also search for IMB (International Maritime Bureau), MSCHOA, and NATO Shipping Centre alerts.
 
-Find up to 5 recent maritime security incidents or warnings from the last 3 months. Return as JSON array:
+Find up to 5 recent maritime security incidents or warnings from the LAST 3 WEEKS ONLY (since ${new Date(Date.now() - THREE_WEEKS_MS).toISOString().split('T')[0]}). Do NOT include anything older than 3 weeks. Return as JSON array:
 
 - refNumber: Warning reference (e.g. "WARNING 042/MAR/2026" or "UKMTO-2026-xxx")
 - title: Alert title in English

@@ -35,7 +35,7 @@ interface GoogleNewsFeed {
     category: 'macro' | 'maritime' | 'geopolitics';
 }
 
-const GOOGLE_NEWS_FEEDS: GoogleNewsFeed[] = [
+const BASE_GOOGLE_NEWS_FEEDS: GoogleNewsFeed[] = [
     // Maritime / Shipping (English)
     { name: 'Maritime Shipping', badge: '⚓', query: 'maritime shipping vessel tanker freight', lang: 'en', category: 'maritime' },
     { name: 'Oil & Energy', badge: '🛢️', query: 'crude oil price OPEC brent energy market', lang: 'en', category: 'macro' },
@@ -47,6 +47,44 @@ const GOOGLE_NEWS_FEEDS: GoogleNewsFeed[] = [
     { name: '유가·에너지', badge: '⛽', query: '유가 원유 에너지 OPEC 운임', lang: 'ko', category: 'macro' },
     { name: '지정학 리스크', badge: '🏛️', query: '제재 무역전쟁 호르무즈 수에즈 지정학', lang: 'ko', category: 'geopolitics' },
 ];
+
+// ============================================================
+// AGE GATE — 3-week rolling window
+// ============================================================
+export const THREE_WEEKS_MS = 21 * 24 * 60 * 60 * 1000;
+
+/**
+ * Build dynamic Google News feeds from base feeds + user interest keywords.
+ * User keywords from Settings > Intelligence > 관심 키워드 are combined into
+ * up to 3 additional query feeds (EN batch, KO batch, mixed).
+ */
+function buildGoogleNewsFeeds(): GoogleNewsFeed[] {
+    const feeds = [...BASE_GOOGLE_NEWS_FEEDS];
+
+    try {
+        const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
+        const userKeywords: string[] = settings.osintKeywords || [];
+        if (userKeywords.length === 0) return feeds;
+
+        // Split into Korean and English keywords
+        const koKeywords = userKeywords.filter(k => /[가-힣]/.test(k));
+        const enKeywords = userKeywords.filter(k => !/[가-힣]/.test(k));
+
+        // Build English interest query (up to 6 keywords)
+        if (enKeywords.length > 0) {
+            const query = enKeywords.slice(0, 6).join(' ');
+            feeds.push({ name: 'My Interests', badge: '⭐', query, lang: 'en', category: 'macro' });
+        }
+
+        // Build Korean interest query (up to 6 keywords)
+        if (koKeywords.length > 0) {
+            const query = koKeywords.slice(0, 6).join(' ');
+            feeds.push({ name: '내 관심사', badge: '⭐', query, lang: 'ko', category: 'macro' });
+        }
+    } catch { /* ignore */ }
+
+    return feeds;
+}
 
 // Supplementary domain RSS feeds (proven working for maritime)
 const RSS_SOURCES: RSSSource[] = [
@@ -165,7 +203,7 @@ const DOMAIN_BASELINE_TERMS = [
     '물류', '제재', '보험료', '운임', '컨테이너', '벌크',
 ];
 
-function buildRelevanceTerms(): string[] {
+export function buildRelevanceTerms(): string[] {
     const terms = [...DOMAIN_BASELINE_TERMS];
 
     // Add user-configured keywords from Settings
@@ -189,9 +227,10 @@ function buildRelevanceTerms(): string[] {
 }
 
 /**
- * Tier 1: Returns true if article contains at least 1 relevance term
+ * Tier 1: Returns true if article contains at least 1 relevance term.
+ * Exported so Firestore subscription can apply it to official/alert tabs too.
  */
-function passesLocalFilter(article: IntelArticle): boolean {
+export function passesLocalFilter(article: IntelArticle): boolean {
     const terms = buildRelevanceTerms();
     const haystack = `${article.title} ${article.description}`.toLowerCase();
 
@@ -489,7 +528,17 @@ export async function fetchAndProcess(
     // GC old keyword trackers periodically
     gcKeywordTrackers();
 
+    // 3-week age gate: reject articles older than 21 days
+    const ageGateCutoff = Date.now() - THREE_WEEKS_MS;
+
     for (const article of rawArticles) {
+        // AGE GATE: Drop articles older than 3 weeks
+        const pubTime = new Date(article.publishedAt).getTime();
+        if (pubTime < ageGateCutoff) {
+            dropped.push({ ...article, dropped: true, evaluated: true });
+            continue;
+        }
+
         // TIER 1: Local keyword/ontology filter
         if (!passesLocalFilter(article)) {
             _stats.droppedByLocalFilter++;
@@ -528,13 +577,15 @@ async function fetchAllFeedsRaw(
     keywords?: string[],
 ): Promise<IntelArticle[]> {
     // Build Google News queries (primary source — free & unlimited)
+    // Dynamically includes user interest keywords from Settings
     // Stagger requests slightly to avoid rss2json rate-limiting
+    const dynamicFeeds = buildGoogleNewsFeeds();
     const googleResults: IntelArticle[][] = [];
-    for (let i = 0; i < GOOGLE_NEWS_FEEDS.length; i++) {
-        const result = fetchGoogleNewsFeed(GOOGLE_NEWS_FEEDS[i]);
+    for (let i = 0; i < dynamicFeeds.length; i++) {
+        const result = fetchGoogleNewsFeed(dynamicFeeds[i]);
         googleResults.push(await result.catch(() => []));
         // Small delay between requests (100ms) to avoid 429s
-        if (i < GOOGLE_NEWS_FEEDS.length - 1) {
+        if (i < dynamicFeeds.length - 1) {
             await new Promise(r => setTimeout(r, 100));
         }
     }

@@ -43,7 +43,7 @@ import {
     type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink, IntelArticle } from '../types';
+import type { Scenario, SimulationParams, AppSettings, StrategicDecision, StrategicActionLog, OntologyObject, OntologyLink, IntelArticle } from '../types'; \r\nimport { passesLocalFilter, THREE_WEEKS_MS } from './newsService';
 
 // ============================================================
 // DEBOUNCE UTILITY — Prevent rapid Firestore writes
@@ -847,7 +847,7 @@ const INTEL_DOC_KEY: Record<IntelCategory, string> = {
     official: 'intel_official',
 };
 
-const INTEL_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+const INTEL_TTL_MS = 21 * 24 * 60 * 60 * 1000; // 21 days (3 weeks)
 const INTEL_MAX_ITEMS = 100;
 
 /**
@@ -945,13 +945,24 @@ export function subscribeIntelFeed(
             const data = snap.data();
             let items: IntelArticle[] = data.items || [];
 
-            // TTL cleanup: remove articles older than 14 days, but keep scrapped ones
+            // TTL cleanup: remove articles older than 3 weeks, but keep scrapped ones
             const cutoff = Date.now() - INTEL_TTL_MS;
             items = items.filter(article => {
                 const fetchedAt = new Date(article.fetchedAt || article.publishedAt).getTime();
                 const isExpired = fetchedAt < cutoff;
                 const isScrapped = scrappedArticleUrls?.has(article.url) ?? false;
                 return !isExpired || isScrapped;
+            });
+
+            // Interest-based relevance filtering:
+            // Apply user keyword filter to ALL tabs so only relevant articles appear.
+            // P&I sources that are inherently relevant (skipKeywordFilter) still pass
+            // because passesLocalFilter includes broad maritime domain terms.
+            items = items.filter(article => {
+                // Scrapped articles always survive
+                if (scrappedArticleUrls?.has(article.url)) return true;
+                // Apply interest-based filter
+                return passesLocalFilter(article);
             });
 
             // Sort newest first
@@ -993,8 +1004,20 @@ export async function appendIntelArticles(
         const trulyNew = newArticles.filter(a => !existingIds.has(a.id));
         if (trulyNew.length === 0) return;
 
-        // Merge: new items first, then existing, cap at 200
-        const merged = [...trulyNew, ...existing]
+        // 3-week age gate: reject articles older than 21 days at write-time
+        const ageGateCutoff = Date.now() - THREE_WEEKS_MS;
+        const recentNew = trulyNew.filter(a => {
+            const pubTime = new Date(a.publishedAt).getTime();
+            return pubTime >= ageGateCutoff;
+        });
+        if (recentNew.length === 0) return;
+
+        // Merge: new items first, then existing, prune old, cap at 200
+        const merged = [...recentNew, ...existing]
+            .filter(a => {
+                const pubTime = new Date(a.publishedAt).getTime();
+                return pubTime >= ageGateCutoff;
+            })
             .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
             .slice(0, 200);
 
@@ -1003,7 +1026,7 @@ export async function appendIntelArticles(
             updatedAt: serverTimestamp(),
         });
 
-        console.info(`[Firestore] Appended ${trulyNew.length} new ${category} articles (total: ${merged.length})`);
+        console.info(`[Firestore] Appended ${recentNew.length} new ${category} articles (total: ${merged.length})`);
     } catch (err) {
         console.warn(`[Firestore] appendIntelArticles(${category}) failed:`, err);
     }

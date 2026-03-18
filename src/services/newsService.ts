@@ -1408,6 +1408,7 @@ const RSS_FEED_URLS: Record<'news' | 'circular' | 'alert', string[]> = {
         'https://news.google.com/rss/search?q=piracy+attack+Houthi+hijack+maritime+security&hl=en&gl=US&ceid=US:en',
         'https://news.google.com/rss/search?q=해사사고+선박충돌+좌초+해적&hl=ko&gl=KR&ceid=KR:ko',
         'https://safety4sea.com/feed/',
+        'https://www.ukmto.org/recent-incidents'
     ],
 };
 

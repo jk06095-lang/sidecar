@@ -363,8 +363,12 @@ export const ONTOLOGY_OBJECTS: OntologyObject[] = [
             riskScore: 42,
             status: 'open',
             impactValue: 42,
-            originPortId: 'chokepoint-hormuz',
-            destinationPortId: 'port-singapore',
+            originPortId: 'port-sharjah',
+            destinationPortId: 'port-shinas',
+            waypoints: [
+                { lat: 25.36, lng: 55.39 }, // Sharjah
+                { lat: 24.74, lng: 56.46 }  // Shinas
+            ],
             distanceNm: 180,
             estimatedDays: 2,
             riskZones: 'Gulf of Oman coastal',

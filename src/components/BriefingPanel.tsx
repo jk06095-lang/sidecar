@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useOntologyStore } from '../store/ontologyStore';
+import { useActionStore } from '../store/actionStore';
 import { useToastStore } from '../hooks/useToast';
 import {
     saveBriefing,
@@ -19,7 +20,7 @@ import {
     deleteBriefing as deleteBriefingFirestore,
     type BriefingDoc,
 } from '../services/firestoreService';
-import type { AIPExecutiveBriefing, OntologyObject } from '../types';
+import type { AIPExecutiveBriefing, OntologyObject, StrategicActionLog } from '../types';
 
 // === BADGE COLORS (same as BriefingModal) ===
 const BADGE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -46,6 +47,7 @@ export default function BriefingPanel({ onClose, scenarioName }: BriefingPanelPr
     const executiveBriefing = useOntologyStore(s => s.executiveBriefing);
     const isLoading = useOntologyStore(s => s.isExecutiveBriefingLoading);
     const addToast = useToastStore(s => s.addToast);
+    const dispatchActions = useActionStore(s => s.dispatchActions);
 
     // Load saved briefings from Firestore
     useEffect(() => {
@@ -54,7 +56,7 @@ export default function BriefingPanel({ onClose, scenarioName }: BriefingPanelPr
         });
     }, []);
 
-    // When a new briefing is generated, auto-save to Firestore
+    // When a new briefing is generated, auto-save to Firestore + dispatch to Action Center
     useEffect(() => {
         if (executiveBriefing && !isLoading) {
             const docId = `briefing-${Date.now()}`;
@@ -70,6 +72,36 @@ export default function BriefingPanel({ onClose, scenarioName }: BriefingPanelPr
                 setSelectedBriefingId(docId);
                 addToast(`✅ AIP 브리핑 생성 완료 (${scenarioName})`, 'success');
             });
+
+            // ── Auto-dispatch directives to Action Center 결재 대기 ──
+            const actions: StrategicActionLog[] = [
+                ...executiveBriefing.hedgingStrategies.map((h, i) => ({
+                    id: `briefing-hedge-${Date.now()}-${i}`,
+                    actionType: 'HEDGING' as const,
+                    description: h.strategy,
+                    status: 'DRAFT' as const,
+                    approvedBy: '',
+                    timestamp: new Date().toISOString(),
+                    justificationMetrics: { scenarioName, riskAlertCount: 0, highRiskVesselCount: 0 },
+                    targetDepartment: '트레이딩/재무팀',
+                    departmentMessage: `${h.instrument} / ${h.ratio} — ${h.rationale}`,
+                })),
+                ...executiveBriefing.operationalDirectives.map((d, i) => ({
+                    id: `briefing-op-${Date.now()}-${i}`,
+                    actionType: 'OPERATIONAL' as const,
+                    description: d.directive,
+                    status: 'DRAFT' as const,
+                    approvedBy: '',
+                    timestamp: new Date().toISOString(),
+                    justificationMetrics: { scenarioName, riskAlertCount: 0, highRiskVesselCount: 0 },
+                    targetDepartment: d.responsible,
+                    departmentMessage: d.impact,
+                })),
+            ];
+            if (actions.length > 0) {
+                dispatchActions(actions);
+                console.info(`[BriefingPanel] 📤 Auto-dispatched ${actions.length} actions to Action Center`);
+            }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [executiveBriefing, isLoading]);

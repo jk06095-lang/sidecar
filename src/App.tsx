@@ -159,6 +159,7 @@ export default function App() {
       persistenceMinArticles: 3,
       crisisKeywords: [],
       pollingIntervalMinutes: 10,
+      newsFeedTopics: [],
     };
     try {
       const saved = localStorage.getItem('sidecar_settings');

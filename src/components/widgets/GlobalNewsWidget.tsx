@@ -66,7 +66,7 @@ export default function GlobalNewsWidget({ onTagClick, onStatsUpdate, activeTab 
     const getSettings = (): AppSettings => {
         try {
             return JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
-        } catch { return { apiKey: '', theme: 'dark', language: 'ko', osintSources: [], osintKeywords: [], persistenceThresholdMinutes: 30, persistenceMinArticles: 3, crisisKeywords: [], pollingIntervalMinutes: 10 }; }
+        } catch { return { apiKey: '', theme: 'dark', language: 'ko', osintSources: [], osintKeywords: [], persistenceThresholdMinutes: 30, persistenceMinArticles: 3, crisisKeywords: [], pollingIntervalMinutes: 10, newsFeedTopics: [] }; }
     };
 
     // ============================================================

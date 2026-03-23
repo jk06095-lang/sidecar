@@ -5,7 +5,7 @@ import {
     Shield, ChevronRight, Hash, Gauge, Server, GitBranch
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { AppSettings } from '../types';
+import type { AppSettings, NewsFeedTopic } from '../types';
 import { DEFAULT_OSINT_SOURCES, DEFAULT_OSINT_KEYWORDS, DEFAULT_CRISIS_TERMS } from '../services/newsService';
 import ApiManager from './ApiManager';
 import DataLineagePanel from './DataLineagePanel';
@@ -61,12 +61,18 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         persistenceMinArticles: settings.persistenceMinArticles ?? 3,
         crisisKeywords: settings.crisisKeywords ?? [],
         pollingIntervalMinutes: settings.pollingIntervalMinutes ?? 10,
+        newsFeedTopics: settings.newsFeedTopics ?? [],
     });
     const [activeCategory, setActiveCategory] = useState<SettingsCategory>('general');
     const [searchQuery, setSearchQuery] = useState('');
     const [newSource, setNewSource] = useState('');
     const [newKeyword, setNewKeyword] = useState('');
     const [newCrisisKw, setNewCrisisKw] = useState('');
+    // Feed topic form state
+    const [newTopicName, setNewTopicName] = useState('');
+    const [newTopicQuery, setNewTopicQuery] = useState('');
+    const [newTopicQueryKo, setNewTopicQueryKo] = useState('');
+    const [newTopicCategory, setNewTopicCategory] = useState<'macro' | 'maritime' | 'geopolitics'>('geopolitics');
 
     // Sync tempSettings when modal opens
     if (!isOpen) return null;
@@ -105,6 +111,21 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         setNewCrisisKw('');
     };
     const removeCrisisKeyword = (k: string) => setTempSettings(prev => ({ ...prev, crisisKeywords: prev.crisisKeywords.filter(x => x !== k) }));
+
+    // Feed topic helpers
+    const addFeedTopic = () => {
+        const name = newTopicName.trim();
+        const query = newTopicQuery.trim();
+        if (!name || !query) return;
+        const topic: NewsFeedTopic = { name, query, queryKo: newTopicQueryKo.trim(), category: newTopicCategory };
+        setTempSettings(prev => ({ ...prev, newsFeedTopics: [...prev.newsFeedTopics, topic] }));
+        setNewTopicName(''); setNewTopicQuery(''); setNewTopicQueryKo('');
+    };
+    const removeFeedTopic = (idx: number) => setTempSettings(prev => ({ ...prev, newsFeedTopics: prev.newsFeedTopics.filter((_, i) => i !== idx) }));
+    const addSuggestedTopic = (topic: NewsFeedTopic) => {
+        if (tempSettings.newsFeedTopics.some(t => t.name === topic.name)) return;
+        setTempSettings(prev => ({ ...prev, newsFeedTopics: [...prev.newsFeedTopics, topic] }));
+    };
 
     return (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center">
@@ -224,6 +245,62 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                                         <React.Fragment key={k}>
                                             <SuggestChip label={k} onClick={() => addKeyword(k)} color="emerald" />
                                         </React.Fragment>
+                                    ))}
+                                </div>
+
+                                {/* ── Feed Topics (Google News RSS query feeds) ── */}
+                                <SectionHeader icon={<Globe size={16} />} title="뉴스 피드 토픽 (Feed Topics)" color="text-cyan-400" />
+                                <p className="text-[11px] text-slate-500 -mt-3">Google News RSS에 사용할 토픽을 등록하세요. 영문/한글 쿼리로 피드가 생성됩니다.</p>
+
+                                {/* Registered topics */}
+                                <div className="space-y-1.5 min-h-[32px]">
+                                    {tempSettings.newsFeedTopics.length === 0 && (
+                                        <span className="text-[10px] text-slate-600 italic">기본 피드만 사용 중 (이란-미국 갈등, 해운, 유가 등)</span>
+                                    )}
+                                    {tempSettings.newsFeedTopics.map((topic, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                                            <span className="text-[10px] text-cyan-300 font-semibold">{topic.name}</span>
+                                            <span className="text-[9px] text-slate-500 truncate flex-1" title={topic.query}>
+                                                EN: {topic.query}{topic.queryKo ? ` | KO: ${topic.queryKo}` : ''}
+                                            </span>
+                                            <span className="text-[8px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">{topic.category}</span>
+                                            <button onClick={() => removeFeedTopic(idx)} className="text-slate-500 hover:text-rose-400 transition-colors" title="제거">
+                                                <X size={10} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Add topic form */}
+                                <div className="space-y-2 p-3 rounded-lg bg-slate-800/30 border border-slate-700/30">
+                                    <div className="flex gap-2">
+                                        <input type="text" value={newTopicName} onChange={e => setNewTopicName(e.target.value)} placeholder="토픽명 (예: 이란-미국 갈등)" className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30" />
+                                        <select value={newTopicCategory} onChange={e => setNewTopicCategory(e.target.value as any)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-cyan-500">
+                                            <option value="geopolitics">지정학</option>
+                                            <option value="macro">거시경제</option>
+                                            <option value="maritime">해운</option>
+                                        </select>
+                                    </div>
+                                    <input type="text" value={newTopicQuery} onChange={e => setNewTopicQuery(e.target.value)} placeholder="EN 쿼리 (예: Iran US war conflict)" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30" />
+                                    <div className="flex gap-2">
+                                        <input type="text" value={newTopicQueryKo} onChange={e => setNewTopicQueryKo(e.target.value)} placeholder="KO 쿼리 (선택, 예: 이란 미국 전쟁 갈등)" className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30" />
+                                        <button onClick={addFeedTopic} className="px-3 py-1.5 text-xs rounded-lg border bg-cyan-600/20 text-cyan-400 border-cyan-500/30 hover:bg-cyan-600/30 transition-colors" title="추가">
+                                            <Plus size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Suggested topics */}
+                                <div className="text-[10px] text-slate-500 uppercase tracking-wider">🌟 추천 토픽</div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {([
+                                        { name: 'Iran-US Conflict', query: 'Iran US war conflict tension military', queryKo: '이란 미국 전쟁 갈등 중동', category: 'geopolitics' as const },
+                                        { name: 'Oil & Energy', query: 'crude oil price OPEC brent energy', queryKo: '유가 원유 에너지 OPEC', category: 'macro' as const },
+                                        { name: 'Red Sea Security', query: 'Red Sea Houthi shipping attack Hormuz', queryKo: '홍해 후티 해운 호르무즈', category: 'maritime' as const },
+                                        { name: 'Supply Chain', query: 'supply chain logistics disruption port', queryKo: '공급망 물류 항만 혼잡', category: 'macro' as const },
+                                        { name: 'Trade Sanctions', query: 'trade sanctions embargo tariff', queryKo: '제재 무역전쟁 관세 수출규제', category: 'geopolitics' as const },
+                                    ] as NewsFeedTopic[]).filter(t => !tempSettings.newsFeedTopics.some(existing => existing.name === t.name)).map(t => (
+                                        <SuggestChip key={t.name} label={t.name} onClick={() => addSuggestedTopic(t)} color="cyan" />
                                     ))}
                                 </div>
                             </div>

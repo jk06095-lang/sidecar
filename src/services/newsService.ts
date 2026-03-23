@@ -36,6 +36,9 @@ interface GoogleNewsFeed {
 }
 
 const BASE_GOOGLE_NEWS_FEEDS: GoogleNewsFeed[] = [
+    // ── Default Priority: Iran-US Conflict ──
+    { name: 'Iran-US Conflict', badge: '⚔️', query: 'Iran US war conflict tension military Middle East', lang: 'en', category: 'geopolitics' },
+    { name: '이란미국갈등', badge: '⚔️', query: '이란 미국 전쟁 갈등 중동 군사 긴장', lang: 'ko', category: 'geopolitics' },
     // Maritime / Shipping (English)
     { name: 'Maritime Shipping', badge: '⚓', query: 'maritime shipping vessel tanker freight', lang: 'en', category: 'maritime' },
     { name: 'Oil & Energy', badge: '🛢️', query: 'crude oil price OPEC brent energy market', lang: 'en', category: 'macro' },
@@ -49,8 +52,13 @@ const BASE_GOOGLE_NEWS_FEEDS: GoogleNewsFeed[] = [
 ];
 
 // ============================================================
-// AGE GATE — 3-week rolling window
+// AGE GATE — Fixed cutoff: 2026-03-01
+// All articles before this date are rejected.
 // ============================================================
+export const MIN_DATE_ISO = '2026-03-01T00:00:00Z';
+export const MIN_DATE_MS = new Date(MIN_DATE_ISO).getTime();
+
+/** @deprecated Use MIN_DATE_MS instead. Kept for backward compat in edge cases. */
 export const THREE_WEEKS_MS = 21 * 24 * 60 * 60 * 1000;
 
 /**
@@ -63,6 +71,19 @@ function buildGoogleNewsFeeds(): GoogleNewsFeed[] {
 
     try {
         const settings = JSON.parse(localStorage.getItem('sidecar_settings') || '{}');
+
+        // ── User-defined feed topics from Settings > Intelligence > 뉴스 피드 토픽 ──
+        const userTopics: Array<{ name: string; query: string; queryKo: string; category: 'macro' | 'maritime' | 'geopolitics' }> = settings.newsFeedTopics || [];
+        for (const topic of userTopics) {
+            if (topic.query?.trim()) {
+                feeds.push({ name: topic.name, badge: '📌', query: topic.query, lang: 'en', category: topic.category });
+            }
+            if (topic.queryKo?.trim()) {
+                feeds.push({ name: topic.name, badge: '📌', query: topic.queryKo, lang: 'ko', category: topic.category });
+            }
+        }
+
+        // ── User interest keywords (legacy) ──
         const userKeywords: string[] = settings.osintKeywords || [];
         if (userKeywords.length === 0) return feeds;
 
@@ -86,14 +107,10 @@ function buildGoogleNewsFeeds(): GoogleNewsFeed[] {
     return feeds;
 }
 
-// Supplementary domain RSS feeds (proven working for maritime)
-const RSS_SOURCES: RSSSource[] = [
-    { name: 'gCaptain', badge: '⚓', feedUrl: 'https://gcaptain.com/feed/', category: 'maritime' },
-    { name: 'Hellenic Shipping News', badge: '🚢', feedUrl: 'https://www.hellenicshippingnews.com/feed/', category: 'maritime' },
-    { name: 'Ship & Bunker', badge: '⛽', feedUrl: 'https://shipandbunker.com/rss', category: 'maritime' },
-    { name: 'Splash247', badge: '🌊', feedUrl: 'https://splash247.com/feed/', category: 'maritime' },
-    { name: 'The Maritime Executive', badge: '📋', feedUrl: 'https://maritime-executive.com/rss', category: 'maritime' },
-];
+// Supplementary domain RSS feeds — DISABLED (unified to Google News RSS)
+// These were pulling irrelevant or duplicate content. Google News provides
+// better relevance filtering and source diversity.
+const RSS_SOURCES: RSSSource[] = [];
 
 // ============================================================
 // P&I / MARITIME INSURANCE RSS FEED SOURCES
@@ -114,8 +131,10 @@ const PI_RSS_SOURCES: PIRSSSource[] = [
     { name: 'Standard Club', badge: '🛡️', feedUrl: 'https://www.standard-club.com/knowledge-news/rss/', skipKeywordFilter: true },
     { name: 'West P&I', badge: '🛡️', feedUrl: 'https://www.westpandi.com/feed/', skipKeywordFilter: true },
     { name: 'Skuld P&I', badge: '🛡️', feedUrl: 'https://www.skuld.com/topics/rss/', skipKeywordFilter: true },
+    // RSSHub — aggregated maritime insurance/accident feeds
+    { name: 'gCaptain Insurance (RSSHub)', badge: '⚓', feedUrl: 'https://rsshub.app/gcaptain/tag/insurance', skipKeywordFilter: true },
+    { name: 'Safety4Sea Incidents (RSSHub)', badge: '🚨', feedUrl: 'https://rsshub.app/safety4sea/category/incidents', skipKeywordFilter: true },
     // Insurance-tagged feeds from maritime news (narrow scope)
-    { name: 'gCaptain Insurance', badge: '⚓', feedUrl: 'https://gcaptain.com/tag/insurance/feed/', skipKeywordFilter: true },
     { name: 'Hellenic Insurance', badge: '🚢', feedUrl: 'https://www.hellenicshippingnews.com/category/shipping-finance/marine-insurance/feed/', skipKeywordFilter: true },
     // Regulatory
     { name: 'IMO News', badge: '🏛️', feedUrl: 'https://www.imo.org/en/MediaCentre/Pages/RSS.aspx', skipKeywordFilter: true },
@@ -137,9 +156,7 @@ const PI_RELEVANCE_KEYWORDS = [
     '보험', '회람', '공문', '선급', '보험료', '해상보험', '전쟁위험',
 ];
 
-// Direct JSON APIs — DISABLED (was pulling Yahoo Finance and irrelevant US news)
-// These general business feeds are too broad for a maritime intelligence platform.
-const DIRECT_API_URLS: string[] = [];
+// Direct JSON APIs — REMOVED (was pulling Yahoo Finance and irrelevant US news)
 
 const RSS2JSON_PROXY = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
@@ -518,8 +535,8 @@ export async function fetchAndProcess(
     // GC old keyword trackers periodically
     gcKeywordTrackers();
 
-    // 3-week age gate: reject articles older than 21 days
-    const ageGateCutoff = Date.now() - THREE_WEEKS_MS;
+    // Fixed-date age gate: reject articles before 2026-03-01
+    const ageGateCutoff = MIN_DATE_MS;
 
     for (const article of rawArticles) {
         // AGE GATE: Drop articles older than 3 weeks
@@ -732,11 +749,7 @@ async function fetchRSSFeed(source: RSSSource): Promise<IntelArticle[]> {
     }
 }
 
-async function fetchDirectAPI(_url: string): Promise<IntelArticle[]> {
-    // DEPRECATED: Direct API fetching removed in favor of Google News RSS.
-    // Kept as stub for backward compatibility.
-    return [];
-}
+// fetchDirectAPI — REMOVED (was pulling irrelevant US business news)
 
 // ============================================================
 // GOOGLE NEWS RSS FETCHER — Free, unlimited, topic-specific
@@ -744,7 +757,7 @@ async function fetchDirectAPI(_url: string): Promise<IntelArticle[]> {
 
 function buildGoogleNewsUrl(query: string, lang: 'en' | 'ko'): string {
     const params = new URLSearchParams({
-        q: `${query} when:21d`,  // Restrict to last 3 weeks
+        q: `${query} after:2026-03-01`,  // Fixed cutoff: only articles from March 2026+
         hl: lang,
         gl: lang === 'ko' ? 'KR' : 'US',
         ceid: lang === 'ko' ? 'KR:ko' : 'US:en',
@@ -792,12 +805,12 @@ async function fetchGoogleNewsFeed(feed: GoogleNewsFeed): Promise<IntelArticle[]
                     dropped: false,
                 } as IntelArticle;
             })
-            // Post-filter: drop articles older than 3 weeks (even if Google returned them)
+            // Post-filter: drop articles before 2026-03-01
             .filter((a: IntelArticle) => {
                 const pubTime = new Date(a.publishedAt).getTime();
                 const now = Date.now();
-                // Reject if older than 3 weeks OR if date is in the future (bad data)
-                return pubTime > (now - THREE_WEEKS_MS) && pubTime <= (now + 24 * 60 * 60 * 1000);
+                // Reject if before cutoff date OR if date is in the future (bad data)
+                return pubTime >= MIN_DATE_MS && pubTime <= (now + 24 * 60 * 60 * 1000);
             });
     } catch (err) {
         console.warn(`[NewsService] Google News RSS failed for "${feed.name}":`, err);
@@ -1145,11 +1158,11 @@ export async function fetchPIRSSFeeds(): Promise<IntelArticle[]> {
                     ontologyTags: ['P&I', 'Marine Insurance', '해상보험'],
                 } as IntelArticle;
             })
-                // Post-filter: drop articles older than 3 weeks
+                // Post-filter: drop articles before 2026-03-01
                 .filter((a: IntelArticle) => {
                     const pubTime = new Date(a.publishedAt).getTime();
                     const now = Date.now();
-                    return pubTime > (now - THREE_WEEKS_MS) && pubTime <= (now + 24 * 60 * 60 * 1000);
+                    return pubTime >= MIN_DATE_MS && pubTime <= (now + 24 * 60 * 60 * 1000);
                 });
         } catch (err) {
             console.warn(`[NewsService] P&I RSS fetch failed for ${source.name}:`, err);
@@ -1326,70 +1339,14 @@ export async function fetchOfficialSources(): Promise<IntelArticle[]> {
 }
 
 // ============================================================
-// LSEG NEWS HEADLINES — Workspace API Integration
-// Fetches shipping/freight/oil/middle-east news from LSEG
-// Falls back gracefully to empty array (RSS pipeline still provides news)
+// LSEG NEWS HEADLINES — DEPRECATED
+// LSEG Workspace API is not available in standalone mode.
+// Kept as export stub for backward compatibility.
 // ============================================================
 
-
-
-interface LSEGNewsItem {
-    headline?: string;
-    summary?: string;
-    timestamp?: string;
-    source?: string;
-    storyId?: string;
-}
-
-interface LSEGNewsResponse {
-    data?: LSEGNewsItem[];
-}
-
-/**
- * Fetch LSEG news headlines related to maritime/shipping topics.
- * Limited to 10-15 results to conserve API quota.
- * Falls back to empty array if LSEG is unavailable.
- */
+/** @deprecated LSEG Workspace not available. Always returns empty. */
 export async function fetchLSEGNewsHeadlines(): Promise<IntelArticle[]> {
-    try {
-        const response = await lsegGet<LSEGNewsResponse>(
-            '/api/news/headlines',
-            {
-                query: 'Shipping OR Freight OR Oil OR "Middle East" OR Maritime OR Tanker OR "Strait of Hormuz"',
-                count: 15,
-                sort: 'newest',
-            },
-            1800, // 30min cache for news
-        );
-
-        const items = response.data?.data || [];
-        if (items.length === 0) return [];
-
-        return items
-            .filter((item: LSEGNewsItem) => item.headline && item.headline.trim())
-            .slice(0, 15)
-            .map((item: LSEGNewsItem, i: number) => {
-                const id = generateArticleId(item.headline || `lseg-${i}`, 'LSEG Workspace');
-                return {
-                    id,
-                    title: item.headline || '',
-                    description: item.summary || '',
-                    url: item.storyId ? `lseg://story/${item.storyId}` : '#',
-                    source: item.source || 'LSEG Workspace',
-                    sourceBadge: '🔷',
-                    publishedAt: item.timestamp || new Date().toISOString(),
-                    fetchedAt: new Date().toISOString(),
-                    evaluated: true,
-                    dropped: false,
-                    impactScore: 60,
-                    riskLevel: 'Medium' as const,
-                    category: 'OSINT' as const,
-                } satisfies IntelArticle;
-            });
-    } catch (err) {
-        console.warn('[NewsService] LSEG news fetch failed (expected if Workspace not running):', err);
-        return [];
-    }
+    return [];
 }
 
 // ============================================================
@@ -1441,35 +1398,32 @@ import { scanHeadlinesForRisk, RISK_KEYWORDS } from '../lib/sentimentScanner';
 /** Feed URL configurations per category */
 const RSS_FEED_URLS: Record<'news' | 'circular' | 'alert', string[]> = {
     news: [
+        // ── Priority: Iran-US Conflict ──
+        'https://news.google.com/rss/search?q=Iran+US+war+conflict+tension+military+Middle+East+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=%EC%9D%B4%EB%9E%80+%EB%AF%B8%EA%B5%AD+%EC%A0%84%EC%9F%81+%EA%B0%88%EB%93%B1+%EC%A4%91%EB%8F%99+after%3A2026-03-01&hl=ko&gl=KR&ceid=KR:ko',
         // Google News RSS — maritime/shipping/energy
-        'https://news.google.com/rss/search?q=maritime+shipping+vessel+tanker+freight&hl=en&gl=US&ceid=US:en',
-        'https://news.google.com/rss/search?q=crude+oil+price+OPEC+brent+energy+market&hl=en&gl=US&ceid=US:en',
-        'https://news.google.com/rss/search?q=supply+chain+logistics+disruption+port&hl=en&gl=US&ceid=US:en',
-        'https://news.google.com/rss/search?q=Suez+Canal+Hormuz+Red+Sea+shipping&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=maritime+shipping+vessel+tanker+freight+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=crude+oil+price+OPEC+brent+energy+market+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=Suez+Canal+Hormuz+Red+Sea+shipping+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
         // Korean news
-        'https://news.google.com/rss/search?q=해운+해사+선박+항만+물류&hl=ko&gl=KR&ceid=KR:ko',
-        'https://news.google.com/rss/search?q=유가+원유+에너지+OPEC+운임&hl=ko&gl=KR&ceid=KR:ko',
-        // Domain RSS
-        'https://gcaptain.com/feed/',
-        'https://shipandbunker.com/rss',
-        'https://splash247.com/feed/',
+        'https://news.google.com/rss/search?q=%ED%95%B4%EC%9A%B4+%ED%95%B4%EC%82%AC+%EC%84%A0%EB%B0%95+%ED%95%AD%EB%A7%8C+%EB%AC%BC%EB%A5%98+after%3A2026-03-01&hl=ko&gl=KR&ceid=KR:ko',
+        'https://news.google.com/rss/search?q=%EC%9C%A0%EA%B0%80+%EC%9B%90%EC%9C%A0+%EC%97%90%EB%84%88%EC%A7%80+OPEC+%EC%9A%B4%EC%9E%84+after%3A2026-03-01&hl=ko&gl=KR&ceid=KR:ko',
     ],
     circular: [
-        // P&I Club and insurance feeds
-        'https://news.google.com/rss/search?q=P%26I+club+marine+insurance+circular&hl=en&gl=US&ceid=US:en',
-        'https://news.google.com/rss/search?q=해상보험+P%26I+보험료+선급&hl=ko&gl=KR&ceid=KR:ko',
+        // P&I Club and insurance feeds — Google News + RSSHub
+        'https://news.google.com/rss/search?q=P%26I+club+marine+insurance+circular+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=%ED%95%B4%EC%83%81%EB%B3%B4%ED%97%98+P%26I+%EB%B3%B4%ED%97%98%EB%A3%8C+%EC%84%A0%EA%B8%89+after%3A2026-03-01&hl=ko&gl=KR&ceid=KR:ko',
         'https://www.gard.no/web/updates/rss',
-        'https://safety4sea.com/feed/',
+        'https://rsshub.app/gcaptain/tag/insurance',
         'https://www.hellenicshippingnews.com/category/shipping-finance/marine-insurance/feed/',
-        'https://gcaptain.com/tag/insurance/feed/',
     ],
     alert: [
-        // Maritime security and accident alerts
-        'https://news.google.com/rss/search?q=maritime+accident+collision+grounding+fire+ship&hl=en&gl=US&ceid=US:en',
-        'https://news.google.com/rss/search?q=piracy+attack+Houthi+hijack+maritime+security&hl=en&gl=US&ceid=US:en',
-        'https://news.google.com/rss/search?q=해사사고+선박충돌+좌초+해적&hl=ko&gl=KR&ceid=KR:ko',
-        'https://safety4sea.com/feed/',
-        'https://www.ukmto.org/recent-incidents'
+        // Maritime security and accident alerts — Google News + RSSHub
+        'https://news.google.com/rss/search?q=maritime+accident+collision+grounding+fire+ship+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=piracy+attack+Houthi+hijack+maritime+security+after%3A2026-03-01&hl=en&gl=US&ceid=US:en',
+        'https://news.google.com/rss/search?q=%ED%95%B4%EC%82%AC%EC%82%AC%EA%B3%A0+%EC%84%A0%EB%B0%95%EC%B6%A9%EB%8F%8C+%EC%A2%8C%EC%B4%88+%ED%95%B4%EC%A0%81+after%3A2026-03-01&hl=ko&gl=KR&ceid=KR:ko',
+        'https://rsshub.app/safety4sea/category/incidents',
+        'https://rsshub.app/gcaptain/tag/accidents',
     ],
 };
 

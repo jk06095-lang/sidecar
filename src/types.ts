@@ -437,6 +437,13 @@ export interface ObjectTypeDefinition {
 export type Theme = 'dark' | 'light';
 export type Language = 'ko' | 'en';
 
+export interface NewsFeedTopic {
+  name: string;
+  query: string;        // English query for Google News RSS
+  queryKo: string;      // Korean query for Google News RSS
+  category: 'macro' | 'maritime' | 'geopolitics';
+}
+
 export interface AppSettings {
   apiKey: string;
   theme: Theme;
@@ -447,6 +454,7 @@ export interface AppSettings {
   persistenceMinArticles: number;
   crisisKeywords: string[];
   pollingIntervalMinutes: number;
+  newsFeedTopics: NewsFeedTopic[];
 }
 
 // ============================================================

@@ -10,7 +10,7 @@
  *   - Toast notifications
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import {
     Check, Loader2, Shield, TrendingDown, Anchor, ArrowRight, Zap, Clock,
     AlertTriangle, X, DollarSign, Target, Sparkles, ChevronDown, ChevronUp,
@@ -20,7 +20,6 @@ import { cn } from '../../lib/utils';
 import type { AIPExecutiveBriefing, StrategicActionLog } from '../../types';
 import { useOntologyStore } from '../../store/ontologyStore';
 import { useActionStore } from '../../store/actionStore';
-import { generateBrokerPitch } from '../../services/geminiService';
 
 // ============================================================
 // SUB: Confidence Badge
@@ -162,26 +161,6 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
     const lsegQuantMetrics = useOntologyStore(s => s.lsegQuantMetrics);
     const dynamicFleetData = useOntologyStore(s => s.dynamicFleetData);
     const simulationParams = useOntologyStore(s => s.simulationParams);
-
-    const [brokerPitch, setBrokerPitch] = useState<string | null>(null);
-    const [pitchLoading, setPitchLoading] = useState(false);
-
-    useEffect(() => {
-        if (!simulationParams) return;
-        let isMounted = true;
-        setPitchLoading(true);
-        const delays = [{port:'Singapore', waitDays: 3.2}, {port:'Fujairah', waitDays: 2.5}];
-        generateBrokerPitch(
-            simulationParams.vlsfoPrice || 620,
-            delays,
-            simulationParams.newsSentimentScore || 50
-        ).then(pitch => {
-            if (isMounted) setBrokerPitch(pitch);
-        }).finally(() => {
-            if (isMounted) setPitchLoading(false);
-        });
-        return () => { isMounted = false; };
-    }, [simulationParams]);
 
     // actionStore
     const dispatchActions = useActionStore(s => s.dispatchActions);
@@ -406,24 +385,37 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
 
     return (
         <div className="mt-10 pt-8 border-t-2 border-dashed border-violet-500/30 relative">
-            {/* ════════════ LIVE TICKER ════════════ */}
+            {/* ════════════ EXECUTED DIRECTIVES — Vertical Feed ════════════ */}
             {executedActions.length > 0 && (
-                <div className="mb-6 bg-slate-950/80 border border-amber-500/20 rounded-lg overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/5 border-b border-amber-500/10">
-                        <AlertTriangle size={10} className="text-amber-400 shrink-0" />
-                        <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider">경영진 긴급 지시 발령</span>
+                <div className="mb-6 bg-slate-950/60 border border-slate-800/40 rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-slate-900/50 border-b border-slate-800/30">
+                        <AlertTriangle size={10} className="text-amber-400/70 shrink-0" />
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">최근 실행 지시</span>
+                        <span className="ml-auto text-[9px] font-mono text-slate-600">{executedActions.length}건</span>
                     </div>
-                    <div className="overflow-hidden relative h-7 flex items-center">
-                        <div className="ticker-scroll flex items-center gap-8 px-3 whitespace-nowrap">
-                            {executedActions.slice(0, 5).map(a => (
-                                <span key={a.id} className="text-[10px] text-slate-300 font-mono flex items-center gap-1.5 shrink-0">
-                                    <span className="text-amber-400">🚨</span>
-                                    <span className="text-emerald-400 font-bold">[{a.targetDepartment}]</span>
-                                    <span>{a.description}</span>
-                                    <span className="text-slate-500">({new Date(a.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })})</span>
-                                </span>
-                            ))}
-                        </div>
+                    <div className="max-h-[160px] overflow-y-auto custom-scrollbar">
+                        {executedActions.slice(0, 5).map((a, i) => (
+                            <div
+                                key={a.id}
+                                className="group px-3 py-2 border-b border-slate-800/20 last:border-b-0 transition-all duration-300 hover:bg-slate-800/30 hover:scale-[1.01] cursor-default"
+                                style={{ animationDelay: `${i * 100}ms` }}
+                            >
+                                <div className="flex items-start gap-2">
+                                    <div className="w-0.5 h-full min-h-[24px] bg-amber-500/40 rounded-full shrink-0 mt-0.5" />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">{a.targetDepartment}</span>
+                                            <span className="text-[8px] text-slate-600 font-mono">
+                                                {new Date(a.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 leading-relaxed truncate group-hover:whitespace-normal group-hover:text-slate-300 transition-colors">
+                                            {a.description}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
@@ -446,25 +438,6 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
                         {allPending.length} PENDING
                     </span>
                 )}
-            </div>
-
-            {/* AI Broker Insight */}
-            <div className="mb-6 p-4 rounded-xl border border-cyan-500/30 bg-gradient-to-r from-slate-900/80 to-cyan-950/20 relative overflow-hidden shadow-[0_0_20px_rgba(6,182,212,0.1)]">
-                <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
-                <div className="flex items-center gap-2 mb-2 text-cyan-400">
-                    <Sparkles size={14} className="animate-pulse" />
-                    <h4 className="text-xs font-bold uppercase tracking-widest text-cyan-300">Live Broker Strategy (AI)</h4>
-                </div>
-                <div className="text-sm font-medium text-slate-200 leading-relaxed min-h-[40px]">
-                    {pitchLoading ? (
-                        <div className="flex items-center gap-2 text-slate-500 text-xs mt-2 font-mono">
-                            <Loader2 size={12} className="animate-spin text-cyan-500" />
-                            최적 T/C 마진 및 회피 경로를 리스크 엔진에서 도출 중입니다...
-                        </div>
-                    ) : (
-                        brokerPitch || "AI 인사이트를 불러올 수 없습니다."
-                    )}
-                </div>
             </div>
 
             {/* Hedging Strategies */}

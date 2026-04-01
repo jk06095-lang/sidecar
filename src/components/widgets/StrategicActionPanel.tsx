@@ -10,7 +10,7 @@
  *   - Toast notifications
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
     Check, Loader2, Shield, TrendingDown, Anchor, ArrowRight, Zap, Clock,
     AlertTriangle, X, DollarSign, Target, Sparkles, ChevronDown, ChevronUp,
@@ -20,6 +20,7 @@ import { cn } from '../../lib/utils';
 import type { AIPExecutiveBriefing, StrategicActionLog } from '../../types';
 import { useOntologyStore } from '../../store/ontologyStore';
 import { useActionStore } from '../../store/actionStore';
+import { generateBrokerPitch } from '../../services/geminiService';
 
 // ============================================================
 // SUB: Confidence Badge
@@ -160,6 +161,27 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
 
     const lsegQuantMetrics = useOntologyStore(s => s.lsegQuantMetrics);
     const dynamicFleetData = useOntologyStore(s => s.dynamicFleetData);
+    const simulationParams = useOntologyStore(s => s.simulationParams);
+
+    const [brokerPitch, setBrokerPitch] = useState<string | null>(null);
+    const [pitchLoading, setPitchLoading] = useState(false);
+
+    useEffect(() => {
+        if (!simulationParams) return;
+        let isMounted = true;
+        setPitchLoading(true);
+        const delays = [{port:'Singapore', waitDays: 3.2}, {port:'Fujairah', waitDays: 2.5}];
+        generateBrokerPitch(
+            simulationParams.vlsfoPrice || 620,
+            delays,
+            simulationParams.newsSentimentScore || 50
+        ).then(pitch => {
+            if (isMounted) setBrokerPitch(pitch);
+        }).finally(() => {
+            if (isMounted) setPitchLoading(false);
+        });
+        return () => { isMounted = false; };
+    }, [simulationParams]);
 
     // actionStore
     const dispatchActions = useActionStore(s => s.dispatchActions);
@@ -424,6 +446,25 @@ export default function StrategicActionPanel({ briefing, scenarioName = 'Current
                         {allPending.length} PENDING
                     </span>
                 )}
+            </div>
+
+            {/* AI Broker Insight */}
+            <div className="mb-6 p-4 rounded-xl border border-cyan-500/30 bg-gradient-to-r from-slate-900/80 to-cyan-950/20 relative overflow-hidden shadow-[0_0_20px_rgba(6,182,212,0.1)]">
+                <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
+                <div className="flex items-center gap-2 mb-2 text-cyan-400">
+                    <Sparkles size={14} className="animate-pulse" />
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-cyan-300">Live Broker Strategy (AI)</h4>
+                </div>
+                <div className="text-sm font-medium text-slate-200 leading-relaxed min-h-[40px]">
+                    {pitchLoading ? (
+                        <div className="flex items-center gap-2 text-slate-500 text-xs mt-2 font-mono">
+                            <Loader2 size={12} className="animate-spin text-cyan-500" />
+                            최적 T/C 마진 및 회피 경로를 리스크 엔진에서 도출 중입니다...
+                        </div>
+                    ) : (
+                        brokerPitch || "AI 인사이트를 불러올 수 없습니다."
+                    )}
+                </div>
             </div>
 
             {/* Hedging Strategies */}

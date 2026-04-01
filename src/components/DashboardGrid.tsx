@@ -22,6 +22,10 @@ import { useOntologyStore } from '../store/ontologyStore';
 import FleetMapWidget from './widgets/FleetMapWidget';
 import Object360Panel from './widgets/Object360Panel';
 import MacroIntelligenceBoard from './widgets/MacroIntelligenceBoard';
+import LiveTCEMarginCalculator from './widgets/LiveTCEMarginCalculator';
+import DemurrageRiskRadar from './widgets/DemurrageRiskRadar';
+import CargoTonnageMatcher from './widgets/CargoTonnageMatcher';
+import StrategicActionPanel from './widgets/StrategicActionPanel';
 
 
 
@@ -168,119 +172,23 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
     return (
         <div className="flex flex-col h-full">
             {/* ---- Main 3-Column Area ---- */}
-            <div className="flex flex-1 min-h-0">
+            <div className="flex flex-1 min-h-0 bg-[#05080c]">
                 {/* ════════════════════════════════════════════
-                    LEFT PANEL — Object Explorer
+                    LEFT PANEL — Deal Execution & Margin Setup
                    ════════════════════════════════════════════ */}
-                <div className="w-[280px] shrink-0 flex flex-col border-r border-slate-800/50 bg-slate-950/50">
-                    {/* Search */}
-                    <div className="p-2 border-b border-slate-800/40">
-                        <div className="relative">
-                            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                            <input
-                                type="text"
-                                placeholder="Search objects..."
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                className="w-full bg-slate-900/60 border border-slate-800/50 rounded-lg pl-8 pr-8 py-1.5 text-[11px] text-slate-300 placeholder-slate-600 focus:border-cyan-500/40 focus:outline-none transition-colors"
-                            />
-                            {searchQuery && (
-                                <button
-                                    onClick={() => setSearchQuery('')}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                                >
-                                    <X size={12} />
-                                </button>
-                            )}
-                        </div>
+                <div className="w-[400px] shrink-0 flex flex-col border-r border-slate-800/80 bg-[#070b10] overflow-y-auto custom-scrollbar p-3 space-y-4">
+                    <div className="min-h-[340px]">
+                        <LiveTCEMarginCalculator simulationParams={simulationParams} />
                     </div>
-
-                    {/* Type Filter Chips */}
-                    <div className="px-2 py-1.5 border-b border-slate-800/40 flex flex-wrap gap-1">
-                        <button
-                            onClick={() => setTypeFilter('all')}
-                            className={cn(
-                                "px-2 py-0.5 rounded text-[9px] font-bold transition-all uppercase tracking-wider",
-                                typeFilter === 'all'
-                                    ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                            )}
-                        >
-                            All ({objects.filter(o => o.metadata.status === 'active').length})
-                        </button>
-                        {TYPE_FILTERS.map(t => {
-                            const count = objects.filter(o => o.type === t && o.metadata.status === 'active').length;
-                            if (count === 0) return null;
-                            return (
-                                <button
-                                    key={t}
-                                    onClick={() => setTypeFilter(typeFilter === t ? 'all' : t)}
-                                    className={cn(
-                                        "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium transition-all",
-                                        typeFilter === t
-                                            ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                                            : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                                    )}
-                                >
-                                    {TYPE_ICONS[t]}
-                                    {count}
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    {/* Object List */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar">
-                        {filteredObjects.map(obj => {
-                            const riskScore = Number(obj.properties.riskScore || 0);
-                            const isSelected = obj.id === selectedObjectId;
-                            const riskColor = riskScore >= 80 ? 'bg-rose-500' : riskScore >= 50 ? 'bg-amber-500' : riskScore >= 30 ? 'bg-cyan-500' : 'bg-emerald-500';
-
-                            return (
-                                <button
-                                    key={obj.id}
-                                    onClick={() => handleObjectSelect(obj.id)}
-                                    className={cn(
-                                        "w-full flex items-center gap-2 px-3 py-2 text-left transition-all border-b border-slate-800/20",
-                                        isSelected
-                                            ? "bg-cyan-500/10 border-l-2 border-l-cyan-400"
-                                            : "hover:bg-slate-800/30 border-l-2 border-l-transparent"
-                                    )}
-                                >
-                                    <div className="shrink-0">{TYPE_ICONS[obj.type] || <FileText size={13} className="text-slate-400" />}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className={cn("text-[11px] font-medium truncate", isSelected ? 'text-cyan-300' : 'text-slate-300')}>
-                                            {obj.title}
-                                        </div>
-                                        <div className="text-[9px] text-slate-600 truncate">
-                                            {obj.type} · {`${obj.properties.location || obj.properties.region || obj.description || ''}`?.slice(0, 30)}
-                                        </div>
-                                    </div>
-                                    {/* Risk score badge */}
-                                    <div className="shrink-0 flex items-center gap-1">
-                                        <div className={cn("w-1.5 h-1.5 rounded-full", riskColor)} />
-                                        <span className="text-[10px] font-mono text-slate-500">{riskScore}</span>
-                                    </div>
-                                    <ChevronRight size={12} className={cn("shrink-0 transition-transform", isSelected ? 'text-cyan-400 rotate-90' : 'text-slate-700')} />
-                                </button>
-                            );
-                        })}
-                        {filteredObjects.length === 0 && (
-                            <div className="text-center py-8 text-xs text-slate-600">No objects found</div>
-                        )}
-                    </div>
-
-                    {/* Object count footer */}
-                    <div className="px-3 py-1.5 border-t border-slate-800/40 text-[9px] text-slate-600 font-mono">
-                        {filteredObjects.length} objects · sorted by risk
+                    <div className="min-h-[380px]">
+                        <DemurrageRiskRadar simulationParams={simulationParams} />
                     </div>
                 </div>
 
                 {/* ════════════════════════════════════════════
                     CENTER PANEL — Map / Graph
                    ════════════════════════════════════════════ */}
-                <div className="flex-1 flex flex-col min-w-0">
-                    {/* Content — Full height map (header is inside FleetMapWidget overlay) */}
+                <div className="flex-1 flex flex-col min-w-0 border-r border-slate-800/80">
                     <div className="flex-1 relative min-h-0">
                         <FleetMapWidget
                             vessels={dynamicFleetData}
@@ -296,14 +204,29 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
                 </div>
 
                 {/* ════════════════════════════════════════════
-                    RIGHT PANEL — Object 360 (conditional)
+                    RIGHT PANEL — Object 360 & Tonnage Matcher
                    ════════════════════════════════════════════ */}
-                {selectedObjectId && (
-                    <Object360Panel
-                        objectId={selectedObjectId}
-                        onClose={handleObject360Close}
-                        onNavigate={handleObject360Navigate}
-                    />
+                {selectedObjectId ? (
+                    <div className="w-[450px] shrink-0 flex flex-col bg-[#070b10]">
+                        <Object360Panel
+                            objectId={selectedObjectId}
+                            onClose={handleObject360Close}
+                            onNavigate={handleObject360Navigate}
+                        />
+                    </div>
+                ) : (
+                    <div className="w-[450px] shrink-0 flex flex-col bg-[#070b10] overflow-y-auto custom-scrollbar p-3 space-y-4">
+                        <div className="flex-1 min-h-[400px]">
+                            <CargoTonnageMatcher simulationParams={simulationParams} />
+                        </div>
+                        <div className="flex-1">
+                            {/* Empty briefing because we only want the Live AI Broker Alert and existing actions */}
+                            <StrategicActionPanel 
+                                briefing={{ hedgingStrategies: [], operationalDirectives: [], generatedAt: new Date().toISOString(), marketOutlook: {summary:'', keyMetrics:[]}, financialImpactVaR: {totalVaR:'', breakdown:[], assessment:''} }} 
+                                scenarioName="Live Market Evaluation" 
+                            />
+                        </div>
+                    </div>
                 )}
             </div>
 

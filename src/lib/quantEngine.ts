@@ -250,6 +250,9 @@ export function computeSeaDays(params: SimulationParams): number {
  * fuel consumption scales with the cube of speed.
  */
 export function computeDailyFuel(params: SimulationParams): number {
+    if (params.bunkerConsumptionMt !== undefined) {
+        return params.bunkerConsumptionMt;
+    }
     const speedDelta = params.speedDelta ?? 0;
     const actualSpeed = Math.max(8, DESIGN_SPEED_KNOTS + speedDelta);
     const speedRatio = actualSpeed / DESIGN_SPEED_KNOTS;

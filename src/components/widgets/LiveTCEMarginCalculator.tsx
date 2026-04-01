@@ -58,7 +58,7 @@ export default function LiveTCEMarginCalculator({ simulationParams }: LiveTCEMar
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-[#111823]">
                 <Activity size={14} className="text-cyan-400" />
-                <h4 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Live TCE Margin Calculator</h4>
+                <h4 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Live Earnings Sensitivity</h4>
                 <div className="ml-auto flex items-center gap-2">
                     <span className="text-[9px] px-1.5 py-0.5 rounded text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-mono">
                         PRICING ENGINE
@@ -87,7 +87,8 @@ export default function LiveTCEMarginCalculator({ simulationParams }: LiveTCEMar
                                 step="1"
                                 value={freightRateWS}
                                 onChange={e => setFreightRateWS(Number(e.target.value))}
-                                className="w-full accent-cyan-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                                    title="Freight Rate (WS)"
+                                    className="w-full accent-cyan-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
 
@@ -107,7 +108,8 @@ export default function LiveTCEMarginCalculator({ simulationParams }: LiveTCEMar
                                 step="1"
                                 value={bunkerConsumptionMt}
                                 onChange={e => setBunkerConsumptionMt(Number(e.target.value))}
-                                className="w-full accent-amber-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                                    title="Bunker Consumption (mt/day)"
+                                    className="w-full accent-amber-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
                     </div>

@@ -12,19 +12,20 @@ import { cn } from '../lib/utils';
 
 // Tab label registry — 4-Pillar Architecture
 const TAB_LABELS: Record<string, string> = {
-    workspace: 'Workspace 통합관제',
-    ontology: 'Ontology 데이터베이스',
-    scenario: 'AIP Scenario',
-    'action-center': 'Action Center 결재/보고',
+    workspace: 'Earnings Desk',
+    ontology: 'Route Screening',
+    scenario: 'Scenario Analysis',
+    'action-center': 'Deal Execution',
+    'maritime-anomaly': 'AIS Anomaly',
+    news: 'Market Intel',
     settings: 'SETTINGS',
     // Legacy mapping (backward compat)
-    home: 'Workspace 통합관제',
-    reports: 'Action Center',
-    news: 'Workspace',
-    'scenario-builder': 'AIP Scenario',
-    'data-analysis': 'Workspace',
-    editor: 'Action Center',
-    'api-manager': 'Action Center',
+    home: 'Earnings Desk',
+    reports: 'Deal Execution',
+    'scenario-builder': 'Scenario Analysis',
+    'data-analysis': 'Earnings Desk',
+    editor: 'Deal Execution',
+    'api-manager': 'Deal Execution',
 };
 
 export interface Notification {

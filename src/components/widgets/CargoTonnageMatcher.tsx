@@ -50,7 +50,7 @@ export default function CargoTonnageMatcher({ simulationParams }: CargoTonnageMa
         <div className="flex flex-col h-full bg-[#0B0F15] rounded-lg border border-slate-800 overflow-hidden shadow-2xl">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/30 bg-[#0c1311]">
                 <Target size={14} className="text-emerald-400" />
-                <h4 className="text-xs font-bold text-emerald-100 uppercase tracking-widest">Cargo Tonnage Matcher</h4>
+                <h4 className="text-xs font-bold text-emerald-100 uppercase tracking-widest">Cargo-Tonnage Matching</h4>
                 <div className="ml-auto flex items-center gap-2">
                     <span className="text-[9px] px-1.5 py-0.5 rounded text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 font-mono font-bold animate-pulse">
                         SORT: MAX MARGIN

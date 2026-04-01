@@ -47,7 +47,7 @@ export default function CargoTonnageMatcher({ simulationParams }: CargoTonnageMa
     const formatUSD = (val: number) => `$${val.toLocaleString()}`;
 
     return (
-        <div className="flex flex-col h-full bg-[#0B0F15] rounded-lg border border-slate-800 overflow-hidden shadow-2xl">
+        <div className="flex flex-col h-full bg-[#0B0F15] rounded-lg border border-slate-800 overflow-hidden shadow-2xl min-w-0">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/30 bg-[#0c1311]">
                 <Target size={14} className="text-emerald-400" />
                 <h4 className="text-xs font-bold text-emerald-100 uppercase tracking-widest">Cargo-Tonnage Matching</h4>
@@ -68,24 +68,24 @@ export default function CargoTonnageMatcher({ simulationParams }: CargoTonnageMa
                                 ? "bg-emerald-950/20 border-emerald-500/40 shadow-[0_0_15px_rgba(52,211,153,0.1)] hover:bg-emerald-950/40" 
                                 : "bg-[#0D131A] border-slate-800 hover:border-slate-700 hover:bg-[#111823]"
                         )}>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
                                 <div className={cn(
                                     "w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ring-1",
                                     isTop ? "bg-emerald-500/20 text-emerald-400 ring-emerald-500/50" : "bg-slate-800 text-slate-400 ring-slate-700"
                                 )}>
                                     #{i + 1}
                                 </div>
-                                <div className="flex flex-col gap-1">
-                                    <div className={cn("text-xs font-bold flex items-center gap-1.5", isTop ? "text-emerald-300" : "text-slate-200")}>
-                                        <Ship size={12} className={isTop ? "text-emerald-400" : "text-slate-500"} />
-                                        {v.vesselName}
-                                        <span className="px-1 py-0.5 text-[8px] bg-slate-800 text-slate-400 rounded-sm font-mono border border-slate-700">
+                                <div className="flex flex-col gap-1 min-w-0">
+                                    <div className={cn("text-xs font-bold flex items-center gap-1.5 min-w-0", isTop ? "text-emerald-300" : "text-slate-200")}>
+                                        <Ship size={12} className={cn(isTop ? "text-emerald-400" : "text-slate-500", "shrink-0")} />
+                                        <span className="truncate">{v.vesselName}</span>
+                                        <span className="px-1 py-0.5 text-[8px] bg-slate-800 text-slate-400 rounded-sm font-mono border border-slate-700 shrink-0 whitespace-nowrap">
                                             {v.type}
                                         </span>
                                     </div>
-                                    <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2">
-                                        <span className="flex items-center gap-1"><MapPin size={9}/>{v.location}</span>
-                                        <span>• OPEX: {formatUSD(v.opex)}/d • FUEL: {v.dailyFuelMT} mt/d</span>
+                                    <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2 min-w-0">
+                                        <span className="flex items-center gap-1 truncate"><MapPin size={9} className="shrink-0" /><span className="truncate">{v.location}</span></span>
+                                        <span className="whitespace-nowrap shrink-0">• OPEX: {formatUSD(v.opex)}/d</span>
                                     </div>
                                 </div>
                             </div>

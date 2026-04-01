@@ -49,7 +49,7 @@ export default function DemurrageRiskRadar({ simulationParams }: DemurrageRiskRa
     const formatUSD = (val: number) => `$${val.toLocaleString()}`;
 
     return (
-        <div className="flex flex-col h-full bg-[#0a0e14] rounded-lg border border-slate-800/80 overflow-hidden shadow-2xl">
+        <div className="flex flex-col h-full bg-[#0a0e14] rounded-lg border border-slate-800/80 overflow-hidden shadow-2xl min-w-0">
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-rose-900/30 bg-[#140b0f]">
                 <AlertIcon size={14} className="text-rose-500" />
@@ -62,14 +62,14 @@ export default function DemurrageRiskRadar({ simulationParams }: DemurrageRiskRa
             </div>
 
             {/* Total Exposure Alert Box */}
-            <div className="p-4 border-b border-slate-800 bg-[#0d0909]">
-                <div className="flex justify-between items-end">
-                    <div>
-                        <h5 className="text-[10px] text-rose-500/80 font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                            <TrendingDown size={12} />
+            <div className="p-3 border-b border-slate-800 bg-[#0d0909]">
+                <div className="flex justify-between items-end min-w-0">
+                    <div className="min-w-0">
+                        <h5 className="text-[9px] text-rose-500/80 font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                            <TrendingDown size={11} />
                             Total Demurrage Risk
                         </h5>
-                        <div className="text-3xl font-black font-mono text-rose-500 tracking-tighter drop-shadow-[0_0_15px_rgba(244,63,94,0.4)]">
+                        <div className="text-xl font-black font-mono text-rose-500 tracking-tighter drop-shadow-[0_0_15px_rgba(244,63,94,0.4)]">
                             -{formatUSD(totalExposure)}
                         </div>
                     </div>
@@ -93,10 +93,10 @@ export default function DemurrageRiskRadar({ simulationParams }: DemurrageRiskRa
                         )}
                     >
                         <div className="flex justify-between items-start">
-                            <div className="flex items-center gap-2">
-                                <Navigation size={12} className={port.isCritical ? "text-rose-400" : "text-slate-500"} />
+                            <div className="flex items-center gap-2 min-w-0">
+                                <Navigation size={11} className={cn(port.isCritical ? "text-rose-400" : "text-slate-500", "shrink-0")} />
                                 <span className={cn(
-                                    "text-sm font-bold", 
+                                    "text-xs font-bold truncate", 
                                     port.isCritical ? "text-rose-200" : "text-slate-300"
                                 )}>
                                     {port.port}

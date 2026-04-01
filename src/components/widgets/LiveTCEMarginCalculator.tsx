@@ -54,7 +54,7 @@ export default function LiveTCEMarginCalculator({ simulationParams }: LiveTCEMar
     };
 
     return (
-        <div className="flex flex-col h-full bg-[#0B0F15] rounded-lg border border-slate-800 overflow-hidden">
+        <div className="flex flex-col h-full bg-[#0B0F15] rounded-lg border border-slate-800 overflow-hidden min-w-0">
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-[#111823]">
                 <Activity size={14} className="text-cyan-400" />
@@ -66,9 +66,9 @@ export default function LiveTCEMarginCalculator({ simulationParams }: LiveTCEMar
                 </div>
             </div>
 
-            <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 overflow-hidden min-w-0">
                 {/* Left: Inputs & Primary Output */}
-                <div className="w-1/2 p-4 border-r border-slate-800 flex flex-col gap-5 bg-[#0D131A]">
+                <div className="w-1/2 p-3 border-r border-slate-800 flex flex-col gap-4 bg-[#0D131A] min-w-0">
                     
                     <div className="space-y-4">
                         {/* Freight Rate Input */}
@@ -117,18 +117,18 @@ export default function LiveTCEMarginCalculator({ simulationParams }: LiveTCEMar
                     <div className="flex-1" />
 
                     {/* Output Live TCE */}
-                    <div className={cn("rounded-xl border p-4 transition-all duration-300 flex flex-col items-center justify-center", getProfitColor(liveTCE))}>
-                        <div className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">Estimated TCE</div>
-                        <div className="text-3xl font-black font-mono tracking-tight">
+                    <div className={cn("rounded-xl border p-3 transition-all duration-300 flex flex-col items-center justify-center", getProfitColor(liveTCE))}>
+                        <div className="text-[9px] font-bold uppercase tracking-widest opacity-80 mb-1">Estimated TCE</div>
+                        <div className="text-2xl font-black font-mono tracking-tight">
                             {formatUSD(liveTCE)}
-                            <span className="text-sm font-medium opacity-60 ml-1">/ day</span>
+                            <span className="text-xs font-medium opacity-60 ml-1">/ day</span>
                         </div>
                     </div>
 
                 </div>
 
                 {/* Right: Sensitivity Matrix */}
-                <div className="w-1/2 p-4 bg-[#0a0e14] flex flex-col">
+                <div className="w-1/2 p-3 bg-[#0a0e14] flex flex-col min-w-0">
                     <div className="flex items-center gap-2 mb-3">
                         <Navigation size={12} className="text-slate-500" />
                         <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">

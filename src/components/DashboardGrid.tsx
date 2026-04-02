@@ -6,14 +6,10 @@
  *   Row 2: Demurrage Risk (col-span-3) + Cargo Matcher (col-span-5) + AI Strategy (col-span-4)
  *   Bottom: Macro Intelligence Board (full-width, collapsible)
  */
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import {
-    Ship, Navigation, Fuel, DollarSign,
-    AlertTriangle, ChevronRight, TrendingUp,
-    X, Route as RouteIcon, RefreshCw, Loader2, Sparkles,
-} from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Ship, RefreshCw, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { SimulationParams, ChartDataPoint, FleetVessel, OntologyObject, OntologyObjectType } from '../types';
+import type { SimulationParams, ChartDataPoint, FleetVessel } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
 import { generateBrokerPitch } from '../services/geminiService';
 

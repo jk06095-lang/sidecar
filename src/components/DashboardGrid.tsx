@@ -1,50 +1,34 @@
 /**
- * DashboardGrid — COP (Common Operational Picture) Layout
+ * DashboardGrid — Commercial Deal Execution Terminal
  *
- * Replaces the 12-widget react-grid-layout with a fixed 3-panel + bottom-bar
- * Palantir Workshop-style layout:
- *   Left   (280px)  : Object list (search / type filter / risk-sorted)
- *   Center (flex-1)  : FleetMapWidget ↔ OntologyGraph toggle
- *   Right  (400px)  : Object360Panel (slides in on object select)
- *   Bottom (260px)  : MacroIntelligenceBoard (collapsible)
+ * 12-Column CSS Grid Layout for S&P Shipbroker workflow:
+ *   Row 1: Live TCE Calculator (col-span-5) + Fleet Map (col-span-7)
+ *   Row 2: Demurrage Risk (col-span-3) + Cargo Matcher (col-span-5) + AI Strategy (col-span-4)
+ *   Bottom: Macro Intelligence Board (full-width, collapsible)
  */
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import {
-    Search, Ship, Anchor, Navigation, Fuel, Zap, Shield, DollarSign,
-    AlertTriangle, FileText, ChevronRight, TrendingUp,
-    Filter, X, Loader2, Route as RouteIcon,
-} from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Ship, RefreshCw, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { SimulationParams, ChartDataPoint, FleetVessel, OntologyObject, OntologyObjectType } from '../types';
+import type { SimulationParams, ChartDataPoint, FleetVessel } from '../types';
 import { useOntologyStore } from '../store/ontologyStore';
+import { generateBrokerPitch } from '../services/geminiService';
 
 // Widgets
 import FleetMapWidget from './widgets/FleetMapWidget';
 import Object360Panel from './widgets/Object360Panel';
 import MacroIntelligenceBoard from './widgets/MacroIntelligenceBoard';
-
-
+import LiveTCEMarginCalculator from './widgets/LiveTCEMarginCalculator';
+import DemurrageRiskRadar from './widgets/DemurrageRiskRadar';
+import CargoTonnageMatcher from './widgets/CargoTonnageMatcher';
 
 // ============================================================
 // CONSTANTS
 // ============================================================
-
 const LSEG_POLL_INTERVAL_MS = 60_000;
-
-const TYPE_ICONS: Record<string, React.ReactNode> = {
-    Vessel: <Ship size={13} className="text-cyan-400" />,
-    Port: <Navigation size={13} className="text-purple-400" />,
-    Route: <RouteIcon size={13} className="text-sky-400" />,
-    MarketIndicator: <TrendingUp size={13} className="text-emerald-400" />,
-    RiskEvent: <AlertTriangle size={13} className="text-rose-400" />,
-};
-
-const TYPE_FILTERS: OntologyObjectType[] = ['Vessel', 'Port', 'Route', 'MarketIndicator', 'RiskEvent'];
 
 // ============================================================
 // PROPS
 // ============================================================
-
 interface DashboardGridProps {
     simulationParams: SimulationParams;
     dynamicChartData: ChartDataPoint[];
@@ -55,12 +39,14 @@ interface DashboardGridProps {
 // ============================================================
 // COMPONENT
 // ============================================================
-
 export default function DashboardGrid({ simulationParams, dynamicChartData, dynamicFleetData, onNavigateTab }: DashboardGridProps) {
     const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
     const [macroExpanded, setMacroExpanded] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [typeFilter, setTypeFilter] = useState<OntologyObjectType | 'all'>('all');
+
+    // AI Broker Pitch state — manual refresh only
+    const [brokerPitch, setBrokerPitch] = useState<string | null>(null);
+    const [pitchLoading, setPitchLoading] = useState(false);
+    const pitchFetchedRef = useRef(false);
 
     // Store
     const objects = useOntologyStore(s => s.objects);
@@ -95,19 +81,44 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
         }
     }, [dynamicFleetData]);
 
-    // ---- Auto-fetch AIS on mount + LSEG Data Fetch + Polling ----
+    // ---- Broker Pitch: fetch once on mount ----
+    const fetchBrokerPitch = useCallback(async () => {
+        setPitchLoading(true);
+        try {
+            const delays = [
+                { port: 'Singapore', waitDays: 3.2 },
+                { port: 'Fujairah', waitDays: 2.5 },
+            ];
+            const pitch = await generateBrokerPitch(
+                simulationParams.vlsfoPrice || 620,
+                delays,
+                simulationParams.newsSentimentScore || 50,
+            );
+            setBrokerPitch(pitch);
+        } catch {
+            setBrokerPitch('AI 인사이트를 불러올 수 없습니다.');
+        } finally {
+            setPitchLoading(false);
+        }
+    }, [simulationParams]);
+
+    // ---- Auto-fetch on mount only (once) ----
     useEffect(() => {
         fetchAndBindMarketData();
         refreshAISPositions();
         const interval = setInterval(() => fetchAndBindMarketData(), LSEG_POLL_INTERVAL_MS);
 
-        // Visibility-gating: pause polling when tab is hidden
+        // Broker pitch: one-time fetch
+        if (!pitchFetchedRef.current) {
+            pitchFetchedRef.current = true;
+            fetchBrokerPitch();
+        }
+
         let pausedInterval: ReturnType<typeof setInterval> | null = null;
         const handleVisibility = () => {
             if (document.hidden) {
                 clearInterval(interval);
             } else {
-                // Avoid duplicate intervals
                 if (pausedInterval) clearInterval(pausedInterval);
                 pausedInterval = setInterval(() => fetchAndBindMarketData(), LSEG_POLL_INTERVAL_MS);
             }
@@ -119,30 +130,7 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
             if (pausedInterval) clearInterval(pausedInterval);
             document.removeEventListener('visibilitychange', handleVisibility);
         };
-    }, [fetchAndBindMarketData, refreshAISPositions]);
-
-    // ---- Filtered & sorted object list ----
-    const filteredObjects = useMemo(() => {
-        let list = objects.filter(o => o.metadata.status === 'active');
-
-        if (typeFilter !== 'all') {
-            list = list.filter(o => o.type === typeFilter);
-        }
-
-        if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
-            list = list.filter(o =>
-                o.title.toLowerCase().includes(q) ||
-                o.description?.toLowerCase().includes(q) ||
-                o.type.toLowerCase().includes(q)
-            );
-        }
-
-        // Sort by risk score descending
-        list.sort((a, b) => (Number(b.properties.riskScore) || 0) - (Number(a.properties.riskScore) || 0));
-
-        return list;
-    }, [objects, typeFilter, searchQuery]);
+    }, [fetchAndBindMarketData, refreshAISPositions, fetchBrokerPitch]);
 
     // ---- Handlers ----
     const handleObjectSelect = useCallback((id: string) => {
@@ -150,7 +138,6 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
     }, []);
 
     const handleMapVesselClick = useCallback((vessel: FleetVessel) => {
-        // Find the ontology object matching this vessel
         const match = objects.find(o =>
             o.type === 'Vessel' && o.title === vessel.vessel_name
         );
@@ -166,121 +153,19 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
     }, []);
 
     return (
-        <div className="flex flex-col h-full">
-            {/* ---- Main 3-Column Area ---- */}
-            <div className="flex flex-1 min-h-0">
-                {/* ════════════════════════════════════════════
-                    LEFT PANEL — Object Explorer
-                   ════════════════════════════════════════════ */}
-                <div className="w-[280px] shrink-0 flex flex-col border-r border-slate-800/50 bg-slate-950/50">
-                    {/* Search */}
-                    <div className="p-2 border-b border-slate-800/40">
-                        <div className="relative">
-                            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                            <input
-                                type="text"
-                                placeholder="Search objects..."
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                className="w-full bg-slate-900/60 border border-slate-800/50 rounded-lg pl-8 pr-8 py-1.5 text-[11px] text-slate-300 placeholder-slate-600 focus:border-cyan-500/40 focus:outline-none transition-colors"
-                            />
-                            {searchQuery && (
-                                <button
-                                    onClick={() => setSearchQuery('')}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                                >
-                                    <X size={12} />
-                                </button>
-                            )}
-                        </div>
-                    </div>
+        <div className="flex flex-col h-full bg-[#05080c]">
+            {/* ════════ MAIN GRID ════════ */}
+            <div className="dashboard-grid flex-1 min-h-0">
 
-                    {/* Type Filter Chips */}
-                    <div className="px-2 py-1.5 border-b border-slate-800/40 flex flex-wrap gap-1">
-                        <button
-                            onClick={() => setTypeFilter('all')}
-                            className={cn(
-                                "px-2 py-0.5 rounded text-[9px] font-bold transition-all uppercase tracking-wider",
-                                typeFilter === 'all'
-                                    ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                            )}
-                        >
-                            All ({objects.filter(o => o.metadata.status === 'active').length})
-                        </button>
-                        {TYPE_FILTERS.map(t => {
-                            const count = objects.filter(o => o.type === t && o.metadata.status === 'active').length;
-                            if (count === 0) return null;
-                            return (
-                                <button
-                                    key={t}
-                                    onClick={() => setTypeFilter(typeFilter === t ? 'all' : t)}
-                                    className={cn(
-                                        "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium transition-all",
-                                        typeFilter === t
-                                            ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                                            : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                                    )}
-                                >
-                                    {TYPE_ICONS[t]}
-                                    {count}
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    {/* Object List */}
+                {/* ─── ROW 1, LEFT: Live TCE Margin Calculator ─── */}
+                <div className="widget-card grid-col-5">
                     <div className="flex-1 overflow-y-auto custom-scrollbar">
-                        {filteredObjects.map(obj => {
-                            const riskScore = Number(obj.properties.riskScore || 0);
-                            const isSelected = obj.id === selectedObjectId;
-                            const riskColor = riskScore >= 80 ? 'bg-rose-500' : riskScore >= 50 ? 'bg-amber-500' : riskScore >= 30 ? 'bg-cyan-500' : 'bg-emerald-500';
-
-                            return (
-                                <button
-                                    key={obj.id}
-                                    onClick={() => handleObjectSelect(obj.id)}
-                                    className={cn(
-                                        "w-full flex items-center gap-2 px-3 py-2 text-left transition-all border-b border-slate-800/20",
-                                        isSelected
-                                            ? "bg-cyan-500/10 border-l-2 border-l-cyan-400"
-                                            : "hover:bg-slate-800/30 border-l-2 border-l-transparent"
-                                    )}
-                                >
-                                    <div className="shrink-0">{TYPE_ICONS[obj.type] || <FileText size={13} className="text-slate-400" />}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className={cn("text-[11px] font-medium truncate", isSelected ? 'text-cyan-300' : 'text-slate-300')}>
-                                            {obj.title}
-                                        </div>
-                                        <div className="text-[9px] text-slate-600 truncate">
-                                            {obj.type} · {`${obj.properties.location || obj.properties.region || obj.description || ''}`?.slice(0, 30)}
-                                        </div>
-                                    </div>
-                                    {/* Risk score badge */}
-                                    <div className="shrink-0 flex items-center gap-1">
-                                        <div className={cn("w-1.5 h-1.5 rounded-full", riskColor)} />
-                                        <span className="text-[10px] font-mono text-slate-500">{riskScore}</span>
-                                    </div>
-                                    <ChevronRight size={12} className={cn("shrink-0 transition-transform", isSelected ? 'text-cyan-400 rotate-90' : 'text-slate-700')} />
-                                </button>
-                            );
-                        })}
-                        {filteredObjects.length === 0 && (
-                            <div className="text-center py-8 text-xs text-slate-600">No objects found</div>
-                        )}
-                    </div>
-
-                    {/* Object count footer */}
-                    <div className="px-3 py-1.5 border-t border-slate-800/40 text-[9px] text-slate-600 font-mono">
-                        {filteredObjects.length} objects · sorted by risk
+                        <LiveTCEMarginCalculator simulationParams={simulationParams} />
                     </div>
                 </div>
 
-                {/* ════════════════════════════════════════════
-                    CENTER PANEL — Map / Graph
-                   ════════════════════════════════════════════ */}
-                <div className="flex-1 flex flex-col min-w-0">
-                    {/* Content — Full height map (header is inside FleetMapWidget overlay) */}
+                {/* ─── ROW 1, RIGHT: Fleet Map ─── */}
+                <div className="widget-card grid-col-7">
                     <div className="flex-1 relative min-h-0">
                         <FleetMapWidget
                             vessels={dynamicFleetData}
@@ -295,21 +180,105 @@ export default function DashboardGrid({ simulationParams, dynamicChartData, dyna
                     </div>
                 </div>
 
-                {/* ════════════════════════════════════════════
-                    RIGHT PANEL — Object 360 (conditional)
-                   ════════════════════════════════════════════ */}
-                {selectedObjectId && (
-                    <Object360Panel
-                        objectId={selectedObjectId}
-                        onClose={handleObject360Close}
-                        onNavigate={handleObject360Navigate}
-                    />
+                {/* ─── ROW 2, LEFT: Demurrage Risk Radar ─── */}
+                <div className="widget-card grid-col-3">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        <DemurrageRiskRadar simulationParams={simulationParams} />
+                    </div>
+                </div>
+
+                {/* ─── ROW 2, CENTER: Cargo-Tonnage Matcher ─── */}
+                <div className="widget-card grid-col-5">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        <CargoTonnageMatcher simulationParams={simulationParams} />
+                    </div>
+                </div>
+
+                {/* ─── ROW 2, RIGHT: AI Broker Strategy / Object360 ─── */}
+                {selectedObjectId ? (
+                    <div className="widget-card grid-col-4">
+                        <Object360Panel
+                            objectId={selectedObjectId}
+                            onClose={handleObject360Close}
+                            onNavigate={handleObject360Navigate}
+                        />
+                    </div>
+                ) : (
+                    <div className="widget-card grid-col-4">
+                        {/* Compact AI Broker Pitch Card */}
+                        <div className="shrink-0 border-b border-slate-800/60 p-3">
+                            <div className="rounded-lg border border-cyan-500/20 bg-gradient-to-r from-[#0a1018] to-[#0c1620] p-3 relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-0.5 h-full bg-cyan-500/60" />
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-1.5 text-cyan-400 min-w-0">
+                                        <Sparkles size={12} className="shrink-0" />
+                                        <span className="text-[9px] font-bold uppercase tracking-widest truncate">AI Broker Strategy</span>
+                                    </div>
+                                    <button
+                                        onClick={fetchBrokerPitch}
+                                        disabled={pitchLoading}
+                                        className="flex items-center gap-1 text-[9px] text-slate-500 hover:text-cyan-400 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-800/50 shrink-0"
+                                        title="AI 전략 새로고침"
+                                    >
+                                        {pitchLoading
+                                            ? <Loader2 size={10} className="animate-spin text-cyan-500" />
+                                            : <RefreshCw size={10} />
+                                        }
+                                        {!pitchLoading && <span>Refresh</span>}
+                                    </button>
+                                </div>
+                                <div className="text-[11px] text-slate-300 leading-relaxed line-clamp-4 min-h-[44px] break-words">
+                                    {pitchLoading
+                                        ? <span className="text-slate-500 font-mono text-[10px]">리스크 엔진에서 최적 전략 도출 중...</span>
+                                        : (brokerPitch || 'AI 인사이트를 불러올 수 없습니다.')
+                                    }
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Cargo Summary / placeholder for future expansion */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-2 flex items-center gap-1.5">
+                                <Ship size={11} className="text-slate-600" />
+                                Quick Fleet Summary
+                            </div>
+                            <div className="space-y-1.5">
+                                {dynamicFleetData.slice(0, 6).map((v, i) => (
+                                    <div
+                                        key={i}
+                                        className={cn(
+                                            "flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-all hover:bg-slate-800/50",
+                                            v.riskLevel === 'Critical' ? 'border-rose-500/30 bg-rose-950/10' :
+                                            v.riskLevel === 'High' ? 'border-amber-500/20 bg-amber-950/5' :
+                                            'border-slate-800/50 bg-slate-900/30'
+                                        )}
+                                        onClick={() => handleMapVesselClick(v)}
+                                    >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <Ship size={10} className={cn(
+                                                v.riskLevel === 'Critical' ? 'text-rose-400' : 'text-slate-500',
+                                                'shrink-0'
+                                            )} />
+                                            <span className="text-slate-300 font-medium truncate">{v.vessel_name}</span>
+                                        </div>
+                                        <span className={cn(
+                                            'text-[9px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ml-2',
+                                            v.riskLevel === 'Critical' ? 'text-rose-400 bg-rose-500/10' :
+                                            v.riskLevel === 'High' ? 'text-amber-400 bg-amber-500/10' :
+                                            v.riskLevel === 'Medium' ? 'text-cyan-400 bg-cyan-500/10' :
+                                            'text-emerald-400 bg-emerald-500/10'
+                                        )}>
+                                            {v.riskLevel}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
 
-            {/* ════════════════════════════════════════════
-                BOTTOM PANEL — Macro Intelligence Board
-               ════════════════════════════════════════════ */}
+            {/* ════════ BOTTOM: Macro Intelligence Board ════════ */}
             <MacroIntelligenceBoard
                 expanded={macroExpanded}
                 onToggle={() => setMacroExpanded(!macroExpanded)}

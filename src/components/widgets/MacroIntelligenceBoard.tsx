@@ -86,7 +86,7 @@ export default function MacroIntelligenceBoard({ expanded, onToggle, simulationP
 
                 {/* Pinned Indicator Chips (visible in BOTH collapsed and expanded) */}
                 {simulationParams && (
-                    <div className="flex items-center gap-1 mr-2">
+                    <div className="flex items-center gap-1 mr-2 min-w-0 overflow-hidden">
                         {INDICATOR_DEFS.filter(d => pinnedIndicators.has(d.id)).map(def => {
                             const v = indicatorValues[def.id];
                             return (
@@ -101,7 +101,7 @@ export default function MacroIntelligenceBoard({ expanded, onToggle, simulationP
                                     )}
                                 >
                                     <span className={v.alert ? 'text-rose-400' : 'text-slate-500'}>{def.icon}</span>
-                                    <span className="uppercase tracking-wider font-medium">{def.label}</span>
+                                    <span className="uppercase tracking-wider font-medium truncate">{def.label}</span>
                                     <span className={cn("font-mono font-bold text-[10px]", v.alert ? 'text-rose-300' : 'text-slate-200')}>
                                         {v.value}
                                     </span>

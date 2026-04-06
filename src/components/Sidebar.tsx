@@ -42,12 +42,12 @@ function loadFavoritesLocal(): FavoriteEntry[] {
 // 5-PILLAR NAVIGATION
 // ============================================================
 const NAV_PILLARS = [
-  { id: 'workspace', label: 'Fleet Control', labelKo: '① Fleet 관제', icon: LayoutDashboard },
-  { id: 'ontology', label: 'Ontology Data', labelKo: '② Ontology 데이터', icon: Database },
-  { id: 'news', label: 'Intelligence', labelKo: '③ 인텔리전스', icon: Newspaper },
-  { id: 'maritime-anomaly', label: 'Anomaly Detector', labelKo: '해양 이상 탐지기', icon: Radar },
-  { id: 'scenario', label: 'Quant Simulation', labelKo: '④ 퀀트 시뮬레이션', icon: Activity },
-  { id: 'action-center', label: 'Action & Report', labelKo: '⑤ Action 결재', icon: Gavel },
+  { id: 'workspace', label: 'Earnings Desk', labelKo: '① 수익 분석 데스크', icon: LayoutDashboard },
+  { id: 'ontology', label: 'Route Screening', labelKo: '② 항로 스크리닝', icon: Database },
+  { id: 'news', label: 'Market Intel', labelKo: '③ 시장 인텔리전스', icon: Newspaper },
+  { id: 'maritime-anomaly', label: 'AIS Anomaly', labelKo: '④ AIS 이상 탐지', icon: Radar },
+  { id: 'scenario', label: 'Scenario Analysis', labelKo: '⑤ 시나리오 분석', icon: Activity },
+  { id: 'action-center', label: 'Deal Execution', labelKo: '⑥ 딜 실행/결재', icon: Gavel },
 ] as const;
 
 export default function Sidebar({
@@ -201,7 +201,7 @@ export default function Sidebar({
           {!isMinimized && (
             <div className="shrink-0">
               <div className="text-cyan-400 font-bold text-sm tracking-wider">SIDECAR</div>
-              <div className="text-[10px] text-slate-500 tracking-widest">AIP PLATFORM</div>
+              <div className="text-[10px] text-slate-500 tracking-widest">VLCC INTELLIGENCE</div>
             </div>
           )}
         </div>
@@ -255,10 +255,11 @@ export default function Sidebar({
       <div className={cn("flex-1 overflow-y-auto px-3 py-3 space-y-3", isMinimized && "hidden")}>
         {activeTab === 'workspace' && (
           <div className="bg-cyan-950/30 border border-cyan-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><LayoutDashboard size={12} /> 통합 관제</h5>
+            <h5 className="text-[11px] font-bold text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><LayoutDashboard size={12} /> Earnings Desk</h5>
             <ul className="text-xs text-slate-400 space-y-2">
-              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>실시간 대시보드 · 데이터 분석 · Intelligence DB</span></li>
-              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>우측 상단에서 AI 브리핑을 생성하세요.</span></li>
+              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>TCE 마진 산출 · VLSFO/FX 실시간 감도 분석</span></li>
+              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>Demurrage 리스크 · Cargo-Tonnage 매칭</span></li>
+              <li className="flex gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1 shrink-0" /><span>AI 브로커 전략으로 시니어 의사결정 지원</span></li>
             </ul>
           </div>
         )}
@@ -356,8 +357,8 @@ export default function Sidebar({
 
         {activeTab === 'ontology' && (
           <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
-            <h5 className="text-[11px] font-bold text-emerald-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Database size={12} /> 온톨로지 규칙</h5>
-            <p className="text-[10px] text-slate-400 leading-relaxed mb-2">추가된 지식은 AI 에이전트의 상황 판단(환각 억제)과 보고서 초안 생성 시 최우선 컨텍스트로 적용됩니다.</p>
+            <h5 className="text-[11px] font-bold text-emerald-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><Database size={12} /> Route & Vessel DB</h5>
+            <p className="text-[10px] text-slate-400 leading-relaxed mb-2">항로, 선박, 리스크 객체를 관리합니다. 추가된 데이터는 항로 스크리닝 및 선박 배치 의사결정에 반영됩니다.</p>
           </div>
         )}
       </div>

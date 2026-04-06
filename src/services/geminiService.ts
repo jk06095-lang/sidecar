@@ -1297,3 +1297,30 @@ Rules:
         return { newObjects: [], newLinks: [], updatedObjects: [] };
     }
 }
+
+// ============================================================
+// DEAL EXECUTION — AI Broker Pitch Generation
+// ============================================================
+export async function generateBrokerPitch(
+    vlsfoPrice: number,
+    portDelays: any[],
+    newsSentiment: number
+): Promise<string> {
+    const prompt = `You are a Lead Quantitative Developer and a Senior Commercial Shipbroker at a top-tier firm.
+Based on the following macro data:
+- VLSFO Price: $${vlsfoPrice}/mt
+- Port Delays: ${JSON.stringify(portDelays)}
+- Market Sentiment Score: ${newsSentiment}/100
+
+Write a 1-2 sentence aggressive sales pitch or routing strategy for a broker, focused purely on maximizing PnL and TCE margins.
+Example: "🚨 Arbitrage Alert: Heavy congestion in Singapore ($135k demurrage risk). Recommend rerouting Vessel X to Fujairah for bunkering to improve TCE margin by 5%."
+Return ONLY the pitch string in Korean. Make it sound like a highly professional, aggressive Goldman Sachs or Braemar broker desk alert. Limit to 2 sentences.`;
+
+    try {
+        const text = await bffGenerate(prompt, 'gemini-2.5-flash');
+        return cleanMarkdownFences(text);
+    } catch (err) {
+        console.warn('[GeminiService] Broker pitch generation failed:', err);
+        return "🚨 시스템 경고: 매크로 데이터 분석을 위한 AI 엔진 연결이 지연되고 있습니다. 수동으로 TCE 마진을 확인하십시오.";
+    }
+}
